@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    /* falmec ReceiptPro Enterprise Palette */
+    --background: 193 32% 36%; /* #3F6C79 */
+    --foreground: 0 0% 16%; /* #282828 */
+
+    --card: 180 18% 88%; /* #D8E6E7 */
+    --card-foreground: 0 0% 16%;
+
+    --popover: 180 18% 88%;
+    --popover-foreground: 0 0% 16%;
+
+    --primary: 184 100% 30%; /* #008C99 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 43 23% 80%;
+    --secondary-foreground: 0 0% 16%;
+
+    --muted: 43 15% 75%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 184 100% 30%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 16%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 180 10% 78%;
+    --input: 180 10% 78%;
+    --ring: 184 100% 30%;
+
+    --radius: 0.5rem;
+
+    /* Custom tokens */
+    --surface-elevated: 0 0% 100%;
+    --surface-sunken: 43 20% 82%;
+    --status-pending: 43 80% 55%;
+    --status-running: 184 100% 30%;
+    --status-ok: 142 71% 45%;
+    --status-soft-fail: 38 92% 50%;
+    --status-failed: 0 72% 51%;
+
+    --sidebar-background: 180 18% 88%;
+    --sidebar-foreground: 0 0% 16%;
+    --sidebar-primary: 184 100% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 180 15% 82%;
+    --sidebar-accent-foreground: 0 0% 16%;
+    --sidebar-border: 180 10% 75%;
+    --sidebar-ring: 184 100% 30%;
+  }
+
+  .dark {
+    --background: 0 0% 12%;
+    --foreground: 43 23% 90%;
+
+    --card: 0 0% 16%;
+    --card-foreground: 43 23% 90%;
+
+    --popover: 0 0% 16%;
+    --popover-foreground: 43 23% 90%;
+
+    --primary: 184 100% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 43 23% 90%;
+
+    --muted: 0 0% 25%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 184 100% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 184 100% 40%;
+
+    --surface-elevated: 0 0% 20%;
+    --surface-sunken: 0 0% 10%;
+
+    --sidebar-background: 0 0% 14%;
+    --sidebar-foreground: 43 23% 90%;
+    --sidebar-primary: 184 100% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 20%;
+    --sidebar-accent-foreground: 43 23% 90%;
+    --sidebar-border: 0 0% 25%;
+    --sidebar-ring: 184 100% 40%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .enterprise-card {
+    @apply bg-card rounded-lg border border-border shadow-sm;
+  }
+
+  .enterprise-card-elevated {
+    @apply bg-[hsl(var(--surface-elevated))] rounded-lg border border-border shadow-md;
+  }
+
+  .status-chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .status-chip-pending {
+    @apply bg-[hsl(var(--status-pending)/0.15)] text-[hsl(var(--status-pending))];
+  }
+
+  .status-chip-running {
+    @apply bg-[hsl(var(--status-running)/0.15)] text-[hsl(var(--status-running))];
+  }
+
+  .status-chip-ok {
+    @apply bg-[hsl(var(--status-ok)/0.15)] text-[hsl(var(--status-ok))];
+  }
+
+  .status-chip-soft-fail {
+    @apply bg-[hsl(var(--status-soft-fail)/0.15)] text-[hsl(var(--status-soft-fail))];
+  }
+
+  .status-chip-failed {
+    @apply bg-[hsl(var(--status-failed)/0.15)] text-[hsl(var(--status-failed))];
+  }
+
+  .kpi-tile {
+    @apply enterprise-card p-4 flex flex-col gap-1;
+  }
+
+  .kpi-tile-value {
+    @apply text-2xl font-bold text-foreground;
+  }
+
+  .kpi-tile-label {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .stepper-step {
+    @apply flex items-center gap-3;
+  }
+
+  .stepper-circle {
+    @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors;
+  }
+
+  .stepper-circle-pending {
+    @apply border-muted-foreground/30 text-muted-foreground bg-transparent;
+  }
+
+  .stepper-circle-running {
+    @apply border-primary bg-primary text-primary-foreground animate-pulse;
+  }
+
+  .stepper-circle-ok {
+    @apply border-[hsl(var(--status-ok))] bg-[hsl(var(--status-ok))] text-white;
+  }
+
+  .stepper-circle-soft-fail {
+    @apply border-[hsl(var(--status-soft-fail))] bg-[hsl(var(--status-soft-fail))] text-white;
+  }
+
+  .stepper-circle-failed {
+    @apply border-[hsl(var(--status-failed))] bg-[hsl(var(--status-failed))] text-white;
+  }
+
+  .stepper-line {
+    @apply flex-1 h-0.5 bg-border;
+  }
+
+  .stepper-line-complete {
+    @apply bg-[hsl(var(--status-ok))];
+  }
+
+  .file-drop-zone {
+    @apply border-2 border-dashed border-border rounded-lg p-8 text-center transition-colors cursor-pointer hover:border-primary hover:bg-primary/5;
+  }
+
+  .file-drop-zone-active {
+    @apply border-primary bg-primary/10;
+  }
+
+  .data-table-header {
+    @apply bg-[hsl(var(--surface-sunken))] text-muted-foreground font-medium text-xs uppercase tracking-wider;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
