@@ -149,7 +149,11 @@ export interface UploadedFile {
   type: 'invoice' | 'openWE' | 'serialList' | 'articleList';
   rowCount?: number;
   file: File;
+  uploadedAt: string; // ISO timestamp [DD.MM.YY-HH:mm:ss]
 }
+
+// Upload status for traffic light indicator
+export type UploadStatus = 'ready' | 'missing' | 'warning' | 'critical';
 
 export const STORAGE_LOCATIONS = [
   'WE Lager;0;0;0',

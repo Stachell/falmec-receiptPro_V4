@@ -12,11 +12,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useRunStore } from '@/store/runStore';
+import { UploadStatus } from '@/types';
 
 // Hover style constants
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 const HOVER_BORDER = '#D8E6E7';
+
+// Traffic light colors
+const STATUS_COLORS: Record<UploadStatus, string> = {
+  ready: '#22C55E',      // Green - file uploaded and current
+  missing: '#EF4444',    // Red - no file uploaded
+  warning: '#FFA500',    // Light Orange - day doesn't match (outdated)
+  critical: '#FF6600',   // Dark Orange - month doesn't match (very outdated)
+};
 
 const UPLOAD_MODULES = [
   { type: 'invoice', label: 'Rechnung / Fattura', accept: '.pdf' },
@@ -24,6 +33,52 @@ const UPLOAD_MODULES = [
   { type: 'serialList', label: 'Seriennummerliste', accept: '.xls,.xlsx' },
   { type: 'articleList', label: 'Artikelstammdaten', accept: '.xlsx,.xml' },
 ] as const;
+
+// Format date for display [DD.MM.]
+function formatDateShort(isoString: string): string {
+  const date = new Date(isoString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  return `${day}.${month}.`;
+}
+
+// Format full timestamp [DD.MM.YY-HH:mm:ss]
+function formatDateFull(isoString: string): string {
+  const date = new Date(isoString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear().toString().slice(-2);
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  return `${day}.${month}.${year}-${hours}:${minutes}:${seconds}`;
+}
+
+// Determine upload status based on timestamp comparison
+function getUploadStatus(uploadedAt: string | undefined): UploadStatus {
+  if (!uploadedAt) return 'missing';
+
+  const now = new Date();
+  const uploadDate = new Date(uploadedAt);
+
+  const nowDay = now.getDate();
+  const nowMonth = now.getMonth();
+  const uploadDay = uploadDate.getDate();
+  const uploadMonth = uploadDate.getMonth();
+
+  // Month doesn't match = critical (very outdated)
+  if (nowMonth !== uploadMonth) {
+    return 'critical';
+  }
+
+  // Day doesn't match = warning (outdated)
+  if (nowDay !== uploadDay) {
+    return 'warning';
+  }
+
+  // Same day = ready
+  return 'ready';
+}
 
 export function AppSidebar() {
   const [showHomeDialog, setShowHomeDialog] = useState(false);
@@ -189,24 +244,55 @@ export function AppSidebar() {
             const isUploaded = !!uploadedFile;
             const isFirst = index === 0;
             const isLast = index === UPLOAD_MODULES.length - 1;
+            const uploadStatus = getUploadStatus(uploadedFile?.uploadedAt);
+            const statusColor = STATUS_COLORS[uploadStatus];
+
+            // Format dates for display
+            const dateDisplay = isUploaded ? formatDateShort(uploadedFile.uploadedAt) : '***';
+            const fullTimestamp = isUploaded ? formatDateFull(uploadedFile.uploadedAt) : '';
 
             return (
               <button
                 key={module.type}
                 onClick={() => fileInputRefs[module.type]?.current?.click()}
-                className={`flex items-center gap-1.5 px-2 py-0.5 border-x border-t border-[#666666] bg-transparent hover:bg-sidebar-accent/30 transition-colors text-left ${isFirst ? 'rounded-t' : ''} ${isLast ? 'rounded-b border-b' : ''}`}
-                title={isUploaded ? uploadedFile.name : 'Klicken zum Hochladen'}
+                className={`flex items-center gap-1.5 px-2 py-0.5 border-x border-t border-[#666666] transition-colors text-left ${isFirst ? 'rounded-t' : ''} ${isLast ? 'rounded-b border-b' : ''}`}
+                style={{ backgroundColor: '#D8E6E7' }}
+                title={isUploaded ? `${uploadedFile.name} | Upload: ${fullTimestamp}` : 'Klicken zum Hochladen'}
               >
+                {/* Label column - shifts left */}
                 <span className="text-[10px] text-muted-foreground w-[95px] min-w-[95px] max-w-[95px] text-right">
                   {module.label}
                 </span>
-                <div className="h-3 w-px bg-border flex-shrink-0" />
-                <span className="text-[9px] text-muted-foreground flex-1 truncate">
-                  {isUploaded ? uploadedFile.name : 'nicht ausgewählt - bitte wählen'}
+                <div className="h-3 w-px bg-[#666666] flex-shrink-0" />
+
+                {/* Date column - new */}
+                <span
+                  className="text-[9px] text-muted-foreground w-[38px] min-w-[38px] max-w-[38px] text-center"
+                  title={fullTimestamp || 'Keine Datei'}
+                >
+                  {dateDisplay}
                 </span>
-                <div className="h-3 w-px bg-border flex-shrink-0" />
+                <div className="h-3 w-px bg-[#666666] flex-shrink-0" />
+
+                {/* Filename column - 20% wider (was ~95px, now ~114px), RTL for right-to-left display */}
+                <span
+                  className="text-[9px] text-muted-foreground w-[114px] min-w-[114px] max-w-[114px] overflow-hidden whitespace-nowrap"
+                  style={{ direction: 'rtl', textAlign: 'left' }}
+                >
+                  {isUploaded ? uploadedFile.name : 'nicht ausgewählt'}
+                </span>
+                <div className="h-3 w-px bg-[#666666] flex-shrink-0" />
+
+                {/* Status indicator (traffic light) */}
                 <div
-                  className={`w-2 h-2 rounded-full flex-shrink-0 ${isUploaded ? 'bg-green-500' : 'bg-red-500'}`}
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: statusColor }}
+                  title={
+                    uploadStatus === 'ready' ? 'Aktuell' :
+                    uploadStatus === 'missing' ? 'Keine Datei' :
+                    uploadStatus === 'warning' ? 'Veraltete Datei (Tag)' :
+                    'Sehr veraltete Datei (Monat)'
+                  }
                 />
                 <input
                   ref={fileInputRefs[module.type]}

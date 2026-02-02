@@ -17,6 +17,38 @@ import {
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
 
+// LocalStorage key for persisting uploaded files metadata
+const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
+
+// Interface for persisted file metadata (without actual File object)
+interface PersistedFileInfo {
+  name: string;
+  size: number;
+  type: 'invoice' | 'openWE' | 'serialList' | 'articleList';
+  uploadedAt: string;
+}
+
+// Load persisted files from localStorage
+function loadPersistedFiles(): PersistedFileInfo[] {
+  try {
+    const data = localStorage.getItem(UPLOADED_FILES_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Save files metadata to localStorage
+function savePersistedFiles(files: UploadedFile[]): void {
+  const persistedFiles: PersistedFileInfo[] = files.map(f => ({
+    name: f.name,
+    size: f.size,
+    type: f.type,
+    uploadedAt: f.uploadedAt,
+  }));
+  localStorage.setItem(UPLOADED_FILES_KEY, JSON.stringify(persistedFiles));
+}
+
 interface RunState {
   // Data
   runs: Run[];
@@ -78,18 +110,31 @@ export const useRunStore = create<RunState>((set, get) => ({
     globalConfig: { ...state.globalConfig, ...config }
   })),
   
-  addUploadedFile: (file) => set((state) => ({
-    uploadedFiles: [
+  addUploadedFile: (file) => set((state) => {
+    // Add uploadedAt timestamp if not present
+    const fileWithTimestamp: UploadedFile = {
+      ...file,
+      uploadedAt: file.uploadedAt || new Date().toISOString(),
+    };
+    const newFiles = [
       ...state.uploadedFiles.filter(f => f.type !== file.type),
-      file
-    ]
-  })),
-  
-  removeUploadedFile: (type) => set((state) => ({
-    uploadedFiles: state.uploadedFiles.filter(f => f.type !== type)
-  })),
-  
-  clearUploadedFiles: () => set({ uploadedFiles: [] }),
+      fileWithTimestamp
+    ];
+    // Persist to localStorage
+    savePersistedFiles(newFiles);
+    return { uploadedFiles: newFiles };
+  }),
+
+  removeUploadedFile: (type) => set((state) => {
+    const newFiles = state.uploadedFiles.filter(f => f.type !== type);
+    savePersistedFiles(newFiles);
+    return { uploadedFiles: newFiles };
+  }),
+
+  clearUploadedFiles: () => {
+    localStorage.removeItem(UPLOADED_FILES_KEY);
+    return set({ uploadedFiles: [] });
+  },
   
   createNewRun: () => {
     const { globalConfig, uploadedFiles } = get();
