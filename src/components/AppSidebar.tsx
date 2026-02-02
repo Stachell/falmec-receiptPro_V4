@@ -184,13 +184,8 @@ export function AppSidebar() {
           </Link>
 
           {/* Export Button */}
-          <button
-            onClick={() => {
-              const link = document.createElement('a');
-              link.href = 'data:text/xml;charset=utf-8,<?xml version="1.0" encoding="UTF-8"?><export></export>';
-              link.download = 'export.xml';
-              link.click();
-            }}
+          <Link
+            to="/export"
             onMouseEnter={() => setIsExportHovered(true)}
             onMouseLeave={() => setIsExportHovered(false)}
             className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
@@ -210,7 +205,7 @@ export function AppSidebar() {
             >
               Export
             </span>
-          </button>
+          </Link>
 
           {/* NEU Button */}
           <Link
