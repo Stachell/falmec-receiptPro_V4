@@ -1,25 +1,70 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle, FolderOpen } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { Button } from '@/components/ui/button';
 import { useRunStore } from '@/store/runStore';
 import { Link } from 'react-router-dom';
+import { fileSystemService } from '@/services/fileSystemService';
+import { logService } from '@/services/logService';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function NewRun() {
   const navigate = useNavigate();
   const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRun } = useRunStore();
+  const [showFolderDialog, setShowFolderDialog] = useState(false);
+  const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
 
   const invoiceFile = uploadedFiles.find(f => f.type === 'invoice');
   const openWEFile = uploadedFiles.find(f => f.type === 'openWE');
   const serialListFile = uploadedFiles.find(f => f.type === 'serialList');
   const articleListFile = uploadedFiles.find(f => f.type === 'articleList');
 
-  const canStartProcessing = invoiceFile && openWEFile && serialListFile && articleListFile;
+  const allFilesUploaded = invoiceFile && openWEFile && serialListFile && articleListFile;
+  const canStartProcessing = allFilesUploaded && isDirectoryConfigured;
 
-  const handleStartProcessing = () => {
+  // Check if directory is configured on mount
+  useEffect(() => {
+    const path = fileSystemService.getDataPath();
+    setIsDirectoryConfigured(!!path);
+  }, []);
+
+  const handleStartProcessing = async () => {
+    // Check if folder structure is configured
+    if (!isDirectoryConfigured) {
+      setShowFolderDialog(true);
+      return;
+    }
+
+    // Ensure folder structure exists
+    const structureReady = await fileSystemService.ensureFolderStructure();
+    if (!structureReady) {
+      logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
+    }
+
     const newRun = createNewRun();
     navigate(`/run/${newRun.id}`);
+  };
+
+  const handleSelectDirectory = async () => {
+    const result = await fileSystemService.selectDirectory();
+    if (result.success) {
+      setIsDirectoryConfigured(true);
+      setShowFolderDialog(false);
+      // Now start processing
+      const newRun = createNewRun();
+      navigate(`/run/${newRun.id}`);
+    }
   };
 
   return (
@@ -102,17 +147,23 @@ export default function NewRun() {
 
           {/* Box Footer with Hint and Action Button */}
           <div className="flex items-center justify-between pt-4 border-t border-border">
-            {!canStartProcessing ? (
-              <p className="text-sm text-muted-foreground">
-                Bitte laden Sie alle erforderlichen Dateien hoch
-              </p>
-            ) : (
-              <div></div>
-            )}
+            <div className="flex flex-col gap-1">
+              {!allFilesUploaded && (
+                <p className="text-sm text-muted-foreground">
+                  Bitte laden Sie alle erforderlichen Dateien hoch
+                </p>
+              )}
+              {allFilesUploaded && !isDirectoryConfigured && (
+                <p className="text-sm text-yellow-600 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4" />
+                  Bitte wählen Sie ein Datenverzeichnis im Footer
+                </p>
+              )}
+            </div>
             <Button
               size="lg"
               className="gap-2"
-              disabled={!canStartProcessing}
+              disabled={!allFilesUploaded}
               onClick={handleStartProcessing}
             >
               <Play className="w-4 h-4" />
@@ -121,6 +172,28 @@ export default function NewRun() {
           </div>
         </div>
       </div>
+
+      {/* Folder Selection Dialog */}
+      <AlertDialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <FolderOpen className="w-5 h-5" />
+              Datenverzeichnis erforderlich
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Bevor die Verarbeitung gestartet werden kann, muss ein Datenverzeichnis ausgewählt werden.
+              Dort werden die Archiv-Dateien und Logs gespeichert.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbruch</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSelectDirectory}>
+              Ordner auswählen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

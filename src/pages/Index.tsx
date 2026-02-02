@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { AlertTriangle, ChevronRight } from 'lucide-react';
+import { AlertTriangle, ChevronRight, PackageOpen } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { StatusChip } from '@/components/StatusChip';
@@ -16,7 +16,8 @@ const Index = () => {
           <p className="mb-6 text-xs" style={{ color: '#D9D4C7' }}>
             Konsolidierung | Eingangskontrolle | Bestellnummer Routing | Serienummern Parsing | Lagerplatzzuordnung | Rechnungsprüfung | Exporterstellung für Sage100 Belegimport | Archiv | Logs | Datenanpassung
           </p>
-          <h1 className="text-2xl font-bold" style={{ color: '#D8E6E7' }}>
+          <h1 className="text-2xl font-bold flex items-center justify-center gap-3" style={{ color: '#D8E6E7' }}>
+            <PackageOpen className="w-7 h-7" />
             Dashboard Wareneingang
           </h1>
         </div>

@@ -1,19 +1,21 @@
 import { create } from 'zustand';
-import { 
-  Run, 
-  InvoiceLine, 
-  Issue, 
-  UploadedFile, 
+import {
+  Run,
+  InvoiceLine,
+  Issue,
+  UploadedFile,
   RunConfig,
   AuditLogEntry,
-  StepStatus 
+  StepStatus
 } from '@/types';
-import { 
-  mockRuns, 
-  mockInvoiceLines, 
-  mockIssues, 
-  mockAuditLog 
+import {
+  mockRuns,
+  mockInvoiceLines,
+  mockIssues,
+  mockAuditLog
 } from '@/data/mockData';
+import { logService } from '@/services/logService';
+import { archiveService } from '@/services/archiveService';
 
 interface RunState {
   // Data
@@ -90,7 +92,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   clearUploadedFiles: () => set({ uploadedFiles: [] }),
   
   createNewRun: () => {
-    const { globalConfig } = get();
+    const { globalConfig, uploadedFiles } = get();
     const newRun: Run = {
       id: `run-${Date.now()}`,
       createdAt: new Date().toISOString(),
@@ -114,7 +116,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         exportReady: false,
       },
       steps: [
-        { stepNo: 1, name: 'Invoice Parsing', status: 'running', issuesCount: 0 },
+        { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
         { stepNo: 2, name: 'Order Assignment', status: 'not-started', issuesCount: 0 },
         { stepNo: 3, name: 'Serial Matching', status: 'not-started', issuesCount: 0 },
         { stepNo: 4, name: 'Article Master', status: 'not-started', issuesCount: 0 },
@@ -122,12 +124,33 @@ export const useRunStore = create<RunState>((set, get) => ({
         { stepNo: 6, name: 'XML Export', status: 'not-started', issuesCount: 0 },
       ],
     };
-    
+
+    // Log workflow start
+    logService.info('Neuer Verarbeitungslauf gestartet', {
+      runId: newRun.id,
+      step: 'System',
+      details: `Fattura: ${newRun.invoice.fattura}, Config: ${JSON.stringify(globalConfig)}`,
+    });
+
+    // Create archive entry with uploaded files
+    archiveService.createArchiveEntry(
+      newRun.id,
+      newRun.invoice.fattura,
+      globalConfig,
+      uploadedFiles
+    );
+
+    // Log step start
+    logService.info('Schritt gestartet: Rechnung auslesen', {
+      runId: newRun.id,
+      step: 'Rechnung auslesen',
+    });
+
     set((state) => ({
       runs: [newRun, ...state.runs],
       currentRun: newRun,
     }));
-    
+
     return newRun;
   },
   

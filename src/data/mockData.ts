@@ -37,7 +37,7 @@ export const mockRuns: Run[] = [
       exportReady: true,
     },
     steps: [
-      { stepNo: 1, name: 'Invoice Parsing', status: 'ok', issuesCount: 0 },
+      { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
       { stepNo: 2, name: 'Order Assignment', status: 'ok', issuesCount: 0 },
       { stepNo: 3, name: 'Serial Matching', status: 'ok', issuesCount: 0 },
       { stepNo: 4, name: 'Article Master', status: 'ok', issuesCount: 1 },
@@ -73,7 +73,7 @@ export const mockRuns: Run[] = [
       exportReady: false,
     },
     steps: [
-      { stepNo: 1, name: 'Invoice Parsing', status: 'ok', issuesCount: 0 },
+      { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
       { stepNo: 2, name: 'Order Assignment', status: 'soft-fail', issuesCount: 3 },
       { stepNo: 3, name: 'Serial Matching', status: 'soft-fail', issuesCount: 2 },
       { stepNo: 4, name: 'Article Master', status: 'soft-fail', issuesCount: 5 },
@@ -109,7 +109,7 @@ export const mockRuns: Run[] = [
       exportReady: false,
     },
     steps: [
-      { stepNo: 1, name: 'Invoice Parsing', status: 'ok', issuesCount: 0 },
+      { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
       { stepNo: 2, name: 'Order Assignment', status: 'running', issuesCount: 0 },
       { stepNo: 3, name: 'Serial Matching', status: 'not-started', issuesCount: 0 },
       { stepNo: 4, name: 'Article Master', status: 'not-started', issuesCount: 0 },

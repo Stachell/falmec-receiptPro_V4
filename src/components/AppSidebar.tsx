@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FileBox, FilePenLine, Archive, Download } from 'lucide-react';
+import { FileBox, FilePenLine, Archive, Download, RefreshCw } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,6 +13,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useRunStore } from '@/store/runStore';
 
+// Hover style constants
+const HOVER_BG = '#008C99';
+const HOVER_TEXT = '#FFFFFF';
+const HOVER_BORDER = '#D8E6E7';
+
 const UPLOAD_MODULES = [
   { type: 'invoice', label: 'Rechnung / Fattura', accept: '.pdf' },
   { type: 'openWE', label: 'offene Bestellungen', accept: '.csv' },
@@ -22,6 +27,10 @@ const UPLOAD_MODULES = [
 
 export function AppSidebar() {
   const [showHomeDialog, setShowHomeDialog] = useState(false);
+  const [isLogoHovered, setIsLogoHovered] = useState(false);
+  const [isArchivHovered, setIsArchivHovered] = useState(false);
+  const [isExportHovered, setIsExportHovered] = useState(false);
+  const [isNeuHovered, setIsNeuHovered] = useState(false);
   const navigate = useNavigate();
   const { uploadedFiles, addUploadedFile } = useRunStore();
 
@@ -61,10 +70,24 @@ export function AppSidebar() {
           <div className="flex items-center gap-3">
             <button
               onClick={handleHomeClick}
-              className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center hover:opacity-80 transition-opacity duration-200"
-              title="Zur Startseite"
+              onMouseEnter={() => setIsLogoHovered(true)}
+              onMouseLeave={() => setIsLogoHovered(false)}
+              className="rounded-lg flex items-center justify-center transition-all duration-200"
+              style={{
+                width: isLogoHovered ? '52px' : '40px',
+                height: isLogoHovered ? '52px' : '40px',
+                backgroundColor: isLogoHovered ? '#DC2626' : 'var(--primary)',
+                borderWidth: '2px',
+                borderStyle: 'solid',
+                borderColor: isLogoHovered ? '#991B1B' : 'transparent',
+              }}
+              title={isLogoHovered ? 'Seite neu laden' : 'Zur Startseite'}
             >
-              <FileBox className="w-5 h-5 text-primary-foreground" />
+              {isLogoHovered ? (
+                <RefreshCw className="w-6 h-6" style={{ color: '#FFFFFF' }} />
+              ) : (
+                <FileBox className="w-5 h-5 text-primary-foreground" />
+              )}
             </button>
             <div className="flex flex-col">
               <span className="font-semibold text-sidebar-foreground">
@@ -84,14 +107,23 @@ export function AppSidebar() {
           {/* Archiv Button */}
           <Link
             to="/archiv"
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border border-[#666666] bg-[#c9c3b6] hover:opacity-80 transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            onMouseEnter={() => setIsArchivHovered(true)}
+            onMouseLeave={() => setIsArchivHovered(false)}
+            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            style={{
+              backgroundColor: isArchivHovered ? HOVER_BG : '#c9c3b6',
+              borderColor: isArchivHovered ? HOVER_BORDER : '#666666',
+            }}
             title="Archiv"
           >
             <Archive
               className="flex-1 w-full max-h-[141%]"
-              style={{ color: '#666666' }}
+              style={{ color: isArchivHovered ? HOVER_TEXT : '#666666' }}
             />
-            <span className="text-xs text-muted-foreground">
+            <span
+              className="text-xs"
+              style={{ color: isArchivHovered ? HOVER_TEXT : '#666666' }}
+            >
               Archiv
             </span>
           </Link>
@@ -104,14 +136,23 @@ export function AppSidebar() {
               link.download = 'export.xml';
               link.click();
             }}
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border border-[#666666] bg-[#c9c3b6] hover:opacity-80 transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            onMouseEnter={() => setIsExportHovered(true)}
+            onMouseLeave={() => setIsExportHovered(false)}
+            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            style={{
+              backgroundColor: isExportHovered ? HOVER_BG : '#c9c3b6',
+              borderColor: isExportHovered ? HOVER_BORDER : '#666666',
+            }}
             title="Export"
           >
             <Download
               className="flex-1 w-full max-h-[141%]"
-              style={{ color: '#666666' }}
+              style={{ color: isExportHovered ? HOVER_TEXT : '#666666' }}
             />
-            <span className="text-xs text-muted-foreground">
+            <span
+              className="text-xs"
+              style={{ color: isExportHovered ? HOVER_TEXT : '#666666' }}
+            >
               Export
             </span>
           </button>
@@ -119,14 +160,23 @@ export function AppSidebar() {
           {/* NEU Button */}
           <Link
             to="/new-run"
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border border-[#666666] bg-[#c9c3b6] hover:opacity-80 transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            onMouseEnter={() => setIsNeuHovered(true)}
+            onMouseLeave={() => setIsNeuHovered(false)}
+            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            style={{
+              backgroundColor: isNeuHovered ? HOVER_BG : '#c9c3b6',
+              borderColor: isNeuHovered ? HOVER_BORDER : '#666666',
+            }}
             title="Neuer Lauf"
           >
             <FilePenLine
               className="flex-1 w-full max-h-[141%]"
-              style={{ color: '#666666' }}
+              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
             />
-            <span className="text-xs text-muted-foreground">
+            <span
+              className="text-xs"
+              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
+            >
               NEU
             </span>
           </Link>

@@ -43,7 +43,13 @@ export default function RunDetail() {
               Der angeforderte Verarbeitungslauf existiert nicht.
             </p>
             <Link to="/">
-              <Button variant="outline">Zurück zur Übersicht</Button>
+              <Button
+                variant="outline"
+                className="border"
+                style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+              >
+                Zurück zur Übersicht
+              </Button>
             </Link>
           </div>
         </div>
@@ -80,7 +86,12 @@ export default function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border"
+              style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+            >
               <RefreshCw className="w-4 h-4" />
               Neu verarbeiten
             </Button>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen } from 'lucide-react';
+import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, FileText, CheckCircle } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -11,35 +11,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { logService } from '@/services/logService';
+import { fileSystemService } from '@/services/fileSystemService';
 
-const DEFAULT_DATA_PATH = 'nicht gewählt - C:/falmec receiptPro';
+const DEFAULT_DATA_PATH = 'nicht gewählt';
+
+// Hover style constants
+const HOVER_BG = '#008C99';
+const HOVER_TEXT = '#FFFFFF';
+const HOVER_BORDER = '#D8E6E7';
 
 export function AppFooter() {
   const [isOpen, setIsOpen] = useState(false);
   const [dataPath, setDataPath] = useState(DEFAULT_DATA_PATH);
   const [hasWarning, setHasWarning] = useState(false);
+  const [isConfigured, setIsConfigured] = useState(false);
+  const [isSelectingFolder, setIsSelectingFolder] = useState(false);
+  const [isToggleHovered, setIsToggleHovered] = useState(false);
+  const [isLogfileHovered, setIsLogfileHovered] = useState(false);
+  const [isDirHovered, setIsDirHovered] = useState(false);
   const { globalConfig, setGlobalConfig } = useRunStore();
 
-  // Initialize data path from localStorage
+  // Initialize data path from fileSystemService
   useEffect(() => {
-    const savedPath = localStorage.getItem('falmec-data-path');
+    const savedPath = fileSystemService.getDataPath();
     if (savedPath) {
       setDataPath(savedPath);
-    } else {
-      localStorage.setItem('falmec-data-path', DEFAULT_DATA_PATH);
-      // Simulate folder creation (in a real app, this would be handled by backend)
-      console.log('Created folder structure: falmec receiptPro/.archiv and falmec receiptPro/.logs');
+      setIsConfigured(true);
     }
   }, []);
 
-  const handleDataPathChange = () => {
-    // In a browser environment, we simulate folder selection
-    const newPath = prompt('Neuen Speicherort eingeben:', dataPath);
-    if (newPath && newPath !== dataPath) {
-      setDataPath(newPath);
-      localStorage.setItem('falmec-data-path', newPath);
-      console.log(`Created folder structure: ${newPath}/.archiv and ${newPath}/.logs`);
+  const handleDataPathChange = async () => {
+    // Mark as selecting
+    setIsSelectingFolder(true);
+
+    // Open folder picker dialog
+    const result = await fileSystemService.selectDirectory();
+
+    // Done selecting
+    setIsSelectingFolder(false);
+
+    if (result.success) {
+      setDataPath(result.path);
+      setIsConfigured(true);
     }
+  };
+
+  const handleShowLogfile = () => {
+    // Create a snapshot and open log in new browser tab
+    logService.info('Logfile angezeigt', { step: 'System' });
+    logService.viewLogWithSnapshot();
   };
 
   const closeFooter = useCallback(() => {
@@ -68,13 +89,25 @@ export function AppFooter() {
       {/* Toggle Button - Always visible at bottom left */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-2 left-2 z-50 p-3 rounded-lg bg-sidebar border border-sidebar-border shadow-md hover:bg-sidebar-accent/50 transition-all duration-200"
+        onMouseEnter={() => setIsToggleHovered(true)}
+        onMouseLeave={() => setIsToggleHovered(false)}
+        className="fixed bottom-2 left-2 z-50 p-3 rounded-lg shadow-md transition-all duration-200 border"
+        style={{
+          backgroundColor: isToggleHovered ? HOVER_BG : (isOpen ? '#c9c3b6' : 'var(--sidebar)'),
+          borderColor: isToggleHovered ? HOVER_BORDER : (isOpen ? '#666666' : 'var(--sidebar-border)'),
+        }}
         title="Konfiguration"
       >
         {isOpen ? (
-          <ChevronsDown className="w-7 h-7 text-sidebar-foreground" />
+          <ChevronsDown
+            className="w-7 h-7"
+            style={{ color: isToggleHovered ? HOVER_TEXT : '#666666' }}
+          />
         ) : (
-          <SlidersHorizontal className="w-7 h-7 text-sidebar-foreground" />
+          <SlidersHorizontal
+            className="w-7 h-7"
+            style={{ color: isToggleHovered ? HOVER_TEXT : 'var(--sidebar-foreground)' }}
+          />
         )}
       </button>
 
@@ -167,13 +200,42 @@ export function AppFooter() {
             </Label>
             <button
               onClick={handleDataPathChange}
-              className="h-7 px-2 text-xs bg-surface-elevated border border-input rounded-md flex items-center gap-1 hover:bg-accent transition-colors"
-              title={dataPath}
+              onMouseEnter={() => setIsDirHovered(true)}
+              onMouseLeave={() => setIsDirHovered(false)}
+              className="h-7 px-2 text-xs border rounded-md flex items-center gap-1.5 transition-colors"
+              style={{
+                backgroundColor: isSelectingFolder ? '#c9c3b6' : (isDirHovered ? '#c9c3b6' : 'var(--surface-elevated)'),
+                borderColor: isSelectingFolder ? '#666666' : 'var(--input)',
+                color: (isSelectingFolder || isDirHovered) ? '#666666' : undefined,
+              }}
+              title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwählen'}
             >
-              <FolderOpen className="w-3 h-3" />
-              <span className="truncate max-w-[120px]">{dataPath}</span>
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span className="truncate max-w-[180px]">
+                {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner wählen...'}
+              </span>
+              {isConfigured && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
             </button>
           </div>
+
+          {/* Logfile Button */}
+          <button
+            onClick={handleShowLogfile}
+            onMouseEnter={() => setIsLogfileHovered(true)}
+            onMouseLeave={() => setIsLogfileHovered(false)}
+            className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
+            style={{
+              backgroundColor: isLogfileHovered ? HOVER_BG : '#c9c3b6',
+              color: isLogfileHovered ? HOVER_TEXT : '#666666',
+              borderColor: isLogfileHovered ? HOVER_BORDER : '#666666',
+            }}
+            title="Logfile anzeigen"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Logfile anzeigen</span>
+          </button>
         </div>
       </footer>
     </>
