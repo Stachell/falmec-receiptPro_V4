@@ -183,12 +183,26 @@ export function convertToInvoiceHeader(
 /**
  * Generate Run ID based on Fattura number
  *
- * Schema: RUN-[FatturaNumber]-[Timestamp]
+ * Schema: Fattura-[FatturaNumber]-[YYYYMMDD]-[HHMMSS]
+ * Example: Fattura-20.007-20260204-130456
  */
 export function generateRunId(fatturaNumber: string): string {
-  const timestamp = Date.now();
-  const sanitizedFattura = fatturaNumber.replace(/[^A-Z0-9]/gi, '-');
-  return `RUN-${sanitizedFattura}-${timestamp}`;
+  const now = new Date();
+
+  // Format: YYYYMMDD
+  const datePart = now.getFullYear().toString() +
+    (now.getMonth() + 1).toString().padStart(2, '0') +
+    now.getDate().toString().padStart(2, '0');
+
+  // Format: HHMMSS
+  const timePart = now.getHours().toString().padStart(2, '0') +
+    now.getMinutes().toString().padStart(2, '0') +
+    now.getSeconds().toString().padStart(2, '0');
+
+  // Keep fattura number as-is (preserve dots, etc.)
+  const sanitizedFattura = fatturaNumber.trim();
+
+  return `Fattura-${sanitizedFattura}-${datePart}-${timePart}`;
 }
 
 // Export types for convenience

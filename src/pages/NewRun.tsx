@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, AlertTriangle, FolderOpen } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle, FolderOpen, Loader2 } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { Button } from '@/components/ui/button';
@@ -21,9 +21,10 @@ import {
 
 export default function NewRun() {
   const navigate = useNavigate();
-  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing } = useRunStore();
+  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing, loadStoredFiles } = useRunStore();
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(true);
 
   const invoiceFile = uploadedFiles.find(f => f.type === 'invoice');
   const openWEFile = uploadedFiles.find(f => f.type === 'openWE');
@@ -33,11 +34,20 @@ export default function NewRun() {
   const allFilesUploaded = invoiceFile && openWEFile && serialListFile && articleListFile;
   const canStartProcessing = allFilesUploaded && isDirectoryConfigured;
 
-  // Check if directory is configured on mount
+  // Load stored files and check directory configuration on mount
   useEffect(() => {
-    const path = fileSystemService.getDataPath();
-    setIsDirectoryConfigured(!!path);
-  }, []);
+    const initialize = async () => {
+      // Check directory configuration
+      const path = fileSystemService.getDataPath();
+      setIsDirectoryConfigured(!!path);
+
+      // Load previously stored files from IndexedDB
+      await loadStoredFiles();
+      setIsLoadingFiles(false);
+    };
+
+    initialize();
+  }, [loadStoredFiles]);
 
   const handleStartProcessing = async () => {
     // Check if folder structure is configured
@@ -94,6 +104,14 @@ export default function NewRun() {
               Datei-Upload
             </h2>
           </div>
+
+          {/* Loading State */}
+          {isLoadingFiles && (
+            <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground mb-4">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Lade gespeicherte Dateien...</span>
+            </div>
+          )}
 
           {/* Upload Fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

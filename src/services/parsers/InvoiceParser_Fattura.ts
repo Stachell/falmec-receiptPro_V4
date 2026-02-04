@@ -5,7 +5,7 @@
  * Implements rule-based text extraction without OCR/AI
  *
  * @module parsers/InvoiceParser_Fattura
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
@@ -16,36 +16,39 @@ import type {
   ParsedInvoiceLine,
   ParserWarning,
   ParserConfig,
-  ParserState,
   OrderStatus,
 } from './types';
 
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configure PDF.js worker - use CDN with matching version
+// This is required for PDF.js to work properly
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 /**
  * Default configuration for Falmec Fattura invoice parsing
- * Patterns can be adjusted if layout changes
  */
 const DEFAULT_CONFIG: ParserConfig = {
   patterns: {
-    // Match "NUMERO DOC./ N°" followed by invoice number
-    fatturaNumber: /NUMERO\s+DOC\.?\s*\/?\s*N[°o]?\s*[:\s]*([A-Z0-9\-]+)/i,
-    // Match "DATA DOC./DATE" followed by date (DD.MM.YYYY or DD/MM/YYYY)
-    fatturaDate: /DATA\s+DOC\.?\s*\/?\s*DATE\s*[:\s]*(\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4})/i,
-    // Match "Number of packages" followed by number
-    packagesCount: /Number\s+of\s+packages\s*[:\s]*(\d+)/i,
-    // Position line: contains numeric qty, "PZ", and price values
-    // Format: [description] [qty] PZ [price] [amount]
-    positionLine: /(\d+)\s+PZ\s+([\d.,]+)\s+([\d.,]+)\s*$/,
-    // Manufacturer article number: alphanumeric with dots and optional hash
-    // Examples: KACL.457#NF, CAEI20.E0P2#ZZZB461F, 112.0698.431
-    articleCode: /^([A-Z0-9][A-Z0-9.#\-_]+[A-Z0-9])$/i,
-    // 13-digit EAN (pure numeric string)
-    ean: /^(\d{13})$/,
-    // Order reference line starting with "Vs. ORDINE"
+    // Match invoice number "20.007" - appears after NUMERO DOC or in header
+    fatturaNumber: /\b(\d{2}\.\d{3})\b/,
+    fatturaNumberAlt: /NUMERO\s*DOC[^0-9]*(\d{2}\.\d{3})/i,
+    fatturaNumberFallback: /N[°o]?\s*(\d{2}\.\d{3})/i,
+    // Match date DD/MM/YYYY or DD.MM.YYYY
+    fatturaDate: /(\d{2}\/\d{2}\/\d{4})/,
+    // Match "Number of packages" followed by number (on last page)
+    packagesCount: /Number\s+of\s+packages\s*[\n\s]*(\d+)/i,
+    // Position line with PZ quantity and prices
+    // Format: PZ [qty] [price] [amount] at end of descriptive text
+    positionLineA: /PZ\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)\s*$/,
+    positionLineB: /(\d+)\s+PZ\s+([\d.,]+)\s+([\d.,]+)\s*$/,
+    // Manufacturer article number patterns
+    // Examples: KACL.457#NF, CAEI20.E0P2#ZZZB461F, KCVJN.00#3
+    articleCode: /^([A-Z]{2,}[A-Z0-9.]+#[A-Z0-9]+)$/i,
+    articleCodeAlt: /^([A-Z][A-Z0-9.#\-]+[A-Z0-9])$/i,
+    // 13-digit EAN starting with 803
+    ean: /^(803\d{10})$/,
+    // Order reference line
     orderReference: /Vs\.\s*ORDINE/i,
-    // 5-digit order number in format 10xxx
+    // 5-digit order number
     orderNumber: /\b(10\d{3})\b/g,
   },
   locale: {
@@ -55,35 +58,31 @@ const DEFAULT_CONFIG: ParserConfig = {
 };
 
 /**
- * Normalize text: trim, reduce multiple spaces, clean up
+ * Normalize text: trim, reduce multiple spaces
  */
 function normalizeText(text: string): string {
   return text
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/\u00A0/g, ' '); // Replace non-breaking spaces
+    .replace(/\u00A0/g, ' ');
 }
 
 /**
- * Parse price value from string (handles European number format)
- * Converts "1.234,56" to 1234.56
+ * Parse European price format (1.234,56 -> 1234.56)
  */
-function parsePrice(value: string, config: ParserConfig): number {
+function parsePrice(value: string): number {
   if (!value) return 0;
-
   let normalized = value.trim();
-
   // Remove thousands separator (.)
   normalized = normalized.replace(/\./g, '');
-  // Replace decimal separator (,) with standard (.)
+  // Replace decimal separator (,) with (.)
   normalized = normalized.replace(/,/g, '.');
-
   const parsed = parseFloat(normalized);
   return isNaN(parsed) ? 0 : parsed;
 }
 
 /**
- * Parse integer value from string
+ * Parse integer
  */
 function parseInteger(value: string): number {
   if (!value) return 0;
@@ -92,38 +91,27 @@ function parseInteger(value: string): number {
 }
 
 /**
- * Extract order candidates from "Vs. ORDINE" line
- * Handles formats like:
- * - "Vs. ORDINE WEB (NET-PORTAL) Nr. 10153"
- * - "Vs. ORDINE ESTERO Nr. 0_10170_173_172" -> [10170, 10173, 10172]
+ * Extract order candidates from order reference lines
  */
 function extractOrderCandidates(text: string): string[] {
   const candidates: string[] = [];
 
-  // Check for underscore-separated format (e.g., 0_10170_173_172)
+  // Look for underscore-separated format: 0_10170_173_172
   const underscoreMatch = text.match(/(\d+(?:_\d+)+)/);
   if (underscoreMatch) {
     const parts = underscoreMatch[1].split('_');
-    // First number might be a prefix (like 0), rest are order parts
-    // Look for 10xxx pattern or partial numbers to complete
     let basePrefix = '';
-
     for (const part of parts) {
       if (part.length === 5 && part.startsWith('10')) {
-        // Full 5-digit order number
         candidates.push(part);
-        basePrefix = part.substring(0, 2); // "10"
+        basePrefix = part.substring(0, 2);
       } else if (part.length === 3 && basePrefix) {
-        // Partial number like "173" -> "10173"
         candidates.push(basePrefix + part);
-      } else if (part.length === 4 && part.startsWith('0')) {
-        // Could be leading zero prefix, skip
-        continue;
       }
     }
   }
 
-  // Also extract any standalone 10xxx numbers
+  // Also extract standalone 10xxx numbers
   const directMatches = text.matchAll(/\b(10\d{3})\b/g);
   for (const match of directMatches) {
     if (!candidates.includes(match[1])) {
@@ -135,7 +123,7 @@ function extractOrderCandidates(text: string): string[] {
 }
 
 /**
- * Determine order status based on candidates count
+ * Get order status based on candidates
  */
 function getOrderStatus(candidates: string[]): OrderStatus {
   if (candidates.length === 0) return 'NO';
@@ -144,68 +132,26 @@ function getOrderStatus(candidates: string[]): OrderStatus {
 }
 
 /**
- * Check if a line looks like a manufacturer article code
+ * Extract text content from PDF with better text reconstruction
  */
-function isArticleCodeLine(line: string, config: ParserConfig): boolean {
-  const trimmed = normalizeText(line);
-  // Must not be purely numeric (that would be EAN)
-  if (/^\d+$/.test(trimmed)) return false;
-  // Must contain at least one letter
-  if (!/[A-Za-z]/.test(trimmed)) return false;
-  // Must match article code pattern
-  return config.patterns.articleCode.test(trimmed);
-}
-
-/**
- * Check if a line is a 13-digit EAN
- */
-function isEANLine(line: string, config: ParserConfig): boolean {
-  const trimmed = normalizeText(line);
-  return config.patterns.ean.test(trimmed);
-}
-
-/**
- * Check if a line is an order reference (Vs. ORDINE)
- */
-function isOrderReferenceLine(line: string, config: ParserConfig): boolean {
-  return config.patterns.orderReference.test(line);
-}
-
-/**
- * Parse a position line and extract qty, price, amount
- * Returns null if line doesn't match position format
- */
-function parsePositionLine(
-  line: string,
-  config: ParserConfig
-): { qty: number; unitPrice: number; totalPrice: number; description: string } | null {
-  const match = line.match(config.patterns.positionLine);
-  if (!match) return null;
-
-  const qty = parseInteger(match[1]);
-  const unitPrice = parsePrice(match[2], config);
-  const totalPrice = parsePrice(match[3], config);
-
-  // Extract description (everything before the qty PZ pattern)
-  const descMatch = line.match(/^(.+?)\s+\d+\s+PZ/);
-  const description = descMatch ? normalizeText(descMatch[1]) : '';
-
-  return { qty, unitPrice, totalPrice, description };
-}
-
-/**
- * Extract text from all pages of a PDF
- */
-async function extractTextFromPDF(pdfFile: File): Promise<string[]> {
+async function extractTextFromPDF(pdfFile: File): Promise<{ pages: string[], rawItems: Array<{ page: number, text: string, x: number, y: number }> }> {
   const arrayBuffer = await pdfFile.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const pageTexts: string[] = [];
+
+  // Load PDF without worker (runs in main thread)
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
+
+  const pages: string[] = [];
+  const rawItems: Array<{ page: number, text: string, x: number, y: number }> = [];
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
 
-    // Reconstruct text with line breaks based on y-position
     const items = textContent.items as Array<{
       str: string;
       transform: number[];
@@ -213,13 +159,32 @@ async function extractTextFromPDF(pdfFile: File): Promise<string[]> {
       height: number;
     }>;
 
+    // Collect raw items for debugging
+    for (const item of items) {
+      if (item.str.trim()) {
+        rawItems.push({
+          page: pageNum,
+          text: item.str,
+          x: Math.round(item.transform[4]),
+          y: Math.round(item.transform[5]),
+        });
+      }
+    }
+
+    // Sort items by Y position (descending) then X position (ascending)
+    const sortedItems = [...items].sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5];
+      if (Math.abs(yDiff) > 3) return yDiff;
+      return a.transform[4] - b.transform[4];
+    });
+
+    // Reconstruct text with line breaks
     let lastY: number | null = null;
     let pageText = '';
 
-    for (const item of items) {
+    for (const item of sortedItems) {
       const y = item.transform[5];
 
-      // If y position changed significantly, add newline
       if (lastY !== null && Math.abs(y - lastY) > 5) {
         pageText += '\n';
       } else if (pageText.length > 0 && !pageText.endsWith(' ') && !pageText.endsWith('\n')) {
@@ -230,19 +195,19 @@ async function extractTextFromPDF(pdfFile: File): Promise<string[]> {
       lastY = y;
     }
 
-    pageTexts.push(pageText);
+    pages.push(pageText);
   }
 
-  return pageTexts;
+  return { pages, rawItems };
 }
 
 /**
- * InvoiceParser_Fattura - Main parser class for Falmec invoices
+ * InvoiceParser_Fattura - Main parser class
  */
 class InvoiceParserFattura implements InvoiceParser {
   readonly moduleId = 'InvoiceParser_Fattura';
   readonly moduleName = 'Falmec Fattura Parser';
-  readonly version = '1.0.0';
+  readonly version = '2.0.0';
 
   private config: ParserConfig;
 
@@ -261,45 +226,35 @@ class InvoiceParserFattura implements InvoiceParser {
     };
   }
 
-  /**
-   * Check if this parser can handle the given PDF
-   * Looks for Falmec-specific markers in the document
-   */
   async canHandle(pdfFile: File): Promise<boolean> {
     try {
-      const pageTexts = await extractTextFromPDF(pdfFile);
-      const fullText = pageTexts.join('\n');
-
-      // Check for Falmec-specific markers
-      const hasFalmecMarker = /Falmec\s+S\.?p\.?A/i.test(fullText);
-      const hasFatturaMarker = this.config.patterns.fatturaNumber.test(fullText);
-
-      return hasFalmecMarker || hasFatturaMarker;
+      const { pages } = await extractTextFromPDF(pdfFile);
+      const fullText = pages.join('\n');
+      return /Falmec\s+S\.?p\.?A/i.test(fullText) || /NUMERO\s*DOC/i.test(fullText);
     } catch {
       return false;
     }
   }
 
-  /**
-   * Main parsing function
-   */
   async parseInvoice(pdfFile: File): Promise<ParsedInvoiceResult> {
     const warnings: ParserWarning[] = [];
     const lines: ParsedInvoiceLine[] = [];
 
-    // Initialize header with defaults
     const header: ParsedInvoiceHeader = {
       fatturaNumber: '',
       fatturaDate: '',
       packagesCount: null,
       totalQty: 0,
+      parsedPositionsCount: 0,
+      qtyValidationStatus: 'unknown',
     };
 
     try {
-      // Extract text from PDF
-      const pageTexts = await extractTextFromPDF(pdfFile);
+      console.debug('[InvoiceParser] Starting PDF parsing...');
 
-      if (pageTexts.length === 0) {
+      const { pages, rawItems } = await extractTextFromPDF(pdfFile);
+
+      if (pages.length === 0) {
         warnings.push({
           code: 'PDF_EMPTY',
           message: 'PDF enthält keinen extrahierbaren Text',
@@ -308,24 +263,57 @@ class InvoiceParserFattura implements InvoiceParser {
         return this.createResult(false, header, lines, warnings, pdfFile.name);
       }
 
+      console.debug('[InvoiceParser] Extracted', pages.length, 'pages');
+      console.debug('[InvoiceParser] Page 1 text (first 2000 chars):', pages[0].substring(0, 2000));
+
       // Parse header from first page
-      this.parseHeader(pageTexts[0], header, warnings);
+      this.parseHeader(pages[0], header, warnings);
 
       // Parse packages count from last page
-      this.parsePackagesCount(pageTexts[pageTexts.length - 1], header, warnings);
+      this.parsePackagesCount(pages[pages.length - 1], header, warnings);
 
-      // Parse positions from all pages
-      this.parsePositions(pageTexts, lines, warnings);
+      // Parse positions from all pages using raw items
+      this.parsePositionsFromItems(rawItems, lines, warnings);
 
-      // Calculate total quantity
-      header.totalQty = lines.reduce((sum, line) => sum + line.quantityDelivered, 0);
+      // Calculate total quantity and completeness validation
+      const sumQty = lines.reduce((sum, line) => sum + line.quantityDelivered, 0);
+      header.totalQty = sumQty;
+      header.parsedPositionsCount = lines.length;
 
-      // Validate results
+      // Validation: parsedPositionsCount should be <= totalQty
+      // (one position can have quantity > 1)
+      if (lines.length > 0 && sumQty > 0) {
+        // If number of positions > sum of Q.TY = error
+        if (lines.length > sumQty) {
+          header.qtyValidationStatus = 'mismatch';
+          warnings.push({
+            code: 'POSITIONS_EXCEED_QTY',
+            message: `Positionen (${lines.length}) > Summe Q.TY (${sumQty})`,
+            severity: 'warning',
+          });
+        } else {
+          header.qtyValidationStatus = 'ok';
+        }
+      } else {
+        header.qtyValidationStatus = 'unknown';
+      }
+
+      // Validate
       const success = this.validateResults(header, lines, warnings);
+
+      console.debug('[InvoiceParser] Parsing complete:', {
+        success,
+        fattura: header.fatturaNumber,
+        date: header.fatturaDate,
+        positions: lines.length,
+        totalQty: header.totalQty,
+        packages: header.packagesCount,
+      });
 
       return this.createResult(success, header, lines, warnings, pdfFile.name);
 
     } catch (error) {
+      console.error('[InvoiceParser] Parse error:', error);
       warnings.push({
         code: 'PARSE_ERROR',
         message: `Fehler beim Parsen: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
@@ -335,33 +323,33 @@ class InvoiceParserFattura implements InvoiceParser {
     }
   }
 
-  /**
-   * Parse header fields from first page
-   */
-  private parseHeader(
-    pageText: string,
-    header: ParsedInvoiceHeader,
-    warnings: ParserWarning[]
-  ): void {
-    // Extract Fattura number
-    const fatturaMatch = pageText.match(this.config.patterns.fatturaNumber);
+  private parseHeader(pageText: string, header: ParsedInvoiceHeader, warnings: ParserWarning[]): void {
+    // Extract Fattura number (20.007)
+    let fatturaMatch = pageText.match(this.config.patterns.fatturaNumberAlt);
+    if (!fatturaMatch) {
+      fatturaMatch = pageText.match(this.config.patterns.fatturaNumber);
+    }
+    if (!fatturaMatch) {
+      fatturaMatch = pageText.match(this.config.patterns.fatturaNumberFallback);
+    }
+
     if (fatturaMatch) {
-      header.fatturaNumber = normalizeText(fatturaMatch[1]);
+      header.fatturaNumber = fatturaMatch[1];
+      console.debug('[InvoiceParser] Found Fattura number:', header.fatturaNumber);
     } else {
       warnings.push({
         code: 'MISSING_FATTURA_NUMBER',
-        message: 'Rechnungsnummer (Fattura) konnte nicht extrahiert werden',
+        message: 'Rechnungsnummer konnte nicht extrahiert werden',
         severity: 'error',
       });
     }
 
-    // Extract Fattura date
+    // Extract date (31/01/2026)
     const dateMatch = pageText.match(this.config.patterns.fatturaDate);
     if (dateMatch) {
-      // Normalize date format to DD.MM.YYYY
-      let dateStr = dateMatch[1];
-      dateStr = dateStr.replace(/\//g, '.');
-      header.fatturaDate = dateStr;
+      // Convert DD/MM/YYYY to DD.MM.YYYY
+      header.fatturaDate = dateMatch[1].replace(/\//g, '.');
+      console.debug('[InvoiceParser] Found date:', header.fatturaDate);
     } else {
       warnings.push({
         code: 'MISSING_FATTURA_DATE',
@@ -371,241 +359,220 @@ class InvoiceParserFattura implements InvoiceParser {
     }
   }
 
-  /**
-   * Parse packages count from last page
-   */
-  private parsePackagesCount(
-    pageText: string,
-    header: ParsedInvoiceHeader,
-    warnings: ParserWarning[]
-  ): void {
+  private parsePackagesCount(pageText: string, header: ParsedInvoiceHeader, warnings: ParserWarning[]): void {
     const packagesMatch = pageText.match(this.config.patterns.packagesCount);
     if (packagesMatch) {
       header.packagesCount = parseInteger(packagesMatch[1]);
+      console.debug('[InvoiceParser] Found packages count:', header.packagesCount);
     } else {
-      warnings.push({
-        code: 'MISSING_PACKAGES_COUNT',
-        message: 'Paketanzahl (Number of packages) konnte nicht extrahiert werden',
-        severity: 'info',
-      });
+      // Try alternative: look for standalone number after "Number of packages"
+      const altMatch = pageText.match(/Number\s+of\s+packages[\s\S]{0,50}?(\d{2,3})/i);
+      if (altMatch) {
+        header.packagesCount = parseInteger(altMatch[1]);
+        console.debug('[InvoiceParser] Found packages count (alt):', header.packagesCount);
+      } else {
+        warnings.push({
+          code: 'MISSING_PACKAGES_COUNT',
+          message: 'Paketanzahl konnte nicht extrahiert werden',
+          severity: 'info',
+        });
+      }
     }
   }
 
   /**
-   * Parse all positions using state machine approach
+   * Parse positions by analyzing the raw text items from PDF
+   * This approach is more reliable as it preserves the original layout
    */
-  private parsePositions(
-    pageTexts: string[],
+  private parsePositionsFromItems(
+    rawItems: Array<{ page: number, text: string, x: number, y: number }>,
     lines: ParsedInvoiceLine[],
     warnings: ParserWarning[]
   ): void {
-    let state: ParserState = 'EXPECT_POSITION';
-    let currentPosition: Partial<ParsedInvoiceLine> = {};
-    let orderCandidates: string[] = [];
-    let positionIndex = 0;
+    console.debug('[InvoiceParser] Parsing positions from', rawItems.length, 'text items');
 
-    // Combine all pages for sequential processing
-    const allLines: string[] = [];
-    for (const pageText of pageTexts) {
-      const pageLines = pageText.split('\n').map(line => normalizeText(line));
-      allLines.push(...pageLines);
+    // Group items by approximate Y position (same line)
+    const lineGroups = new Map<number, Array<{ text: string, x: number, page: number }>>();
+
+    for (const item of rawItems) {
+      // Round Y to group items on same line (within 3px tolerance)
+      const roundedY = Math.round(item.y / 3) * 3;
+      const key = item.page * 10000 + roundedY;
+
+      if (!lineGroups.has(key)) {
+        lineGroups.set(key, []);
+      }
+      lineGroups.get(key)!.push({ text: item.text, x: item.x, page: item.page });
     }
 
-    for (const line of allLines) {
-      if (!line) continue;
+    // Sort line groups by page and Y position
+    const sortedKeys = [...lineGroups.keys()].sort((a, b) => {
+      const pageA = Math.floor(a / 10000);
+      const pageB = Math.floor(b / 10000);
+      if (pageA !== pageB) return pageA - pageB;
+      // Y is inverted in PDF (higher Y = higher on page)
+      return (b % 10000) - (a % 10000);
+    });
 
-      switch (state) {
-        case 'EXPECT_POSITION': {
-          // Check for order reference before position
-          if (isOrderReferenceLine(line, this.config)) {
-            const candidates = extractOrderCandidates(line);
-            orderCandidates.push(...candidates);
-            continue;
+    // Find article codes and EANs
+    const articlePattern = /^[A-Z]{2,}[A-Z0-9.#\-]+$/i;
+    const eanPattern = /^803\d{10}$/;
+    const priceLinePattern = /PZ\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)/;
+
+    let positionIndex = 0;
+    let currentArticle = '';
+    let currentEan = '';
+    let currentDescription = '';
+    let orderCandidates: string[] = [];
+
+    for (const key of sortedKeys) {
+      const items = lineGroups.get(key)!;
+      // Sort by X position
+      items.sort((a, b) => a.x - b.x);
+
+      const lineText = items.map(i => i.text).join(' ');
+      const trimmedLine = normalizeText(lineText);
+
+      // Skip header/footer content
+      if (/^(INVOICE|Falmec|NUMERO|DATA|DESCRIPTION|Continues|EUR|TOTAL|Number of packages|EXPIRY|Informativa)/i.test(trimmedLine)) {
+        continue;
+      }
+
+      // Check for order reference
+      if (/Vs\.\s*ORDINE/i.test(trimmedLine)) {
+        const candidates = extractOrderCandidates(trimmedLine);
+        orderCandidates.push(...candidates);
+        continue;
+      }
+
+      // Also check if line contains article code and EAN together
+      // Format: "KACL.457#NF 8034122713656"
+      const combinedMatch = trimmedLine.match(/([A-Z]{2,}[A-Z0-9.#\-]+)\s+(803\d{10})/i);
+      if (combinedMatch) {
+        // New combined article+EAN found - reset both
+        currentArticle = combinedMatch[1];
+        currentEan = combinedMatch[2];
+      }
+
+      // Check for article code (left column items at x < 100)
+      const leftItems = items.filter(i => i.x < 100);
+      for (const item of leftItems) {
+        const text = item.text.trim();
+        if (articlePattern.test(text) && text.includes('#')) {
+          // NEW: Reset EAN when a new article number is found
+          if (currentArticle && currentArticle !== text) {
+            // New position begins - reset EAN
+            currentEan = '';
           }
-
-          // Try to parse as position line
-          const positionData = parsePositionLine(line, this.config);
-          if (positionData) {
-            positionIndex++;
-            currentPosition = {
-              positionIndex,
-              quantityDelivered: positionData.qty,
-              unitPrice: positionData.unitPrice,
-              totalPrice: positionData.totalPrice,
-              descriptionIT: positionData.description,
-              orderCandidates: [...orderCandidates],
-              orderCandidatesText: orderCandidates.join('|'),
-              orderStatus: getOrderStatus(orderCandidates),
-              rawPositionText: line,
-            };
-            // Reset order candidates after binding to position
-            orderCandidates = [];
-            state = 'EXPECT_ARTICLE_CODE';
-          }
-          break;
-        }
-
-        case 'EXPECT_ARTICLE_CODE': {
-          // Check if line is a manufacturer article code
-          if (isArticleCodeLine(line, this.config)) {
-            currentPosition.manufacturerArticleNo = normalizeText(line);
-            state = 'EXPECT_EAN';
-          } else if (isEANLine(line, this.config)) {
-            // Skipped article code, got EAN directly
-            warnings.push({
-              code: 'MISSING_ARTICLE_CODE',
-              message: `Position ${positionIndex}: Herstellerartikelnummer fehlt`,
-              severity: 'warning',
-              positionIndex,
-            });
-            currentPosition.manufacturerArticleNo = '';
-            currentPosition.ean = normalizeText(line);
-            state = 'COMMIT';
-          } else if (parsePositionLine(line, this.config)) {
-            // New position started without completing previous
-            warnings.push({
-              code: 'INCOMPLETE_POSITION',
-              message: `Position ${positionIndex}: Position unvollständig (Artikel/EAN fehlt)`,
-              severity: 'warning',
-              positionIndex,
-            });
-            // Save incomplete position
-            currentPosition.manufacturerArticleNo = currentPosition.manufacturerArticleNo || '';
-            currentPosition.ean = currentPosition.ean || '';
-            lines.push(currentPosition as ParsedInvoiceLine);
-
-            // Start new position
-            state = 'EXPECT_POSITION';
-            // Re-process this line
-            const positionData = parsePositionLine(line, this.config);
-            if (positionData) {
-              positionIndex++;
-              currentPosition = {
-                positionIndex,
-                quantityDelivered: positionData.qty,
-                unitPrice: positionData.unitPrice,
-                totalPrice: positionData.totalPrice,
-                descriptionIT: positionData.description,
-                orderCandidates: [...orderCandidates],
-                orderCandidatesText: orderCandidates.join('|'),
-                orderStatus: getOrderStatus(orderCandidates),
-                rawPositionText: line,
-              };
-              orderCandidates = [];
-              state = 'EXPECT_ARTICLE_CODE';
-            }
-          }
-          break;
-        }
-
-        case 'EXPECT_EAN': {
-          if (isEANLine(line, this.config)) {
-            currentPosition.ean = normalizeText(line);
-            state = 'COMMIT';
-          } else if (isArticleCodeLine(line, this.config)) {
-            // Another article code? Might be additional info, skip
-            continue;
-          } else if (parsePositionLine(line, this.config)) {
-            // New position started without EAN
-            warnings.push({
-              code: 'MISSING_EAN',
-              message: `Position ${positionIndex}: EAN fehlt`,
-              severity: 'warning',
-              positionIndex,
-            });
-            currentPosition.ean = '';
-            state = 'COMMIT';
-            // Don't break - we need to reprocess this line
-          }
-
-          // Fall through to commit if state changed
-          if (state === 'COMMIT') {
-            lines.push(currentPosition as ParsedInvoiceLine);
-            currentPosition = {};
-            state = 'EXPECT_POSITION';
-
-            // Re-check if current line is a new position
-            const positionData = parsePositionLine(line, this.config);
-            if (positionData) {
-              positionIndex++;
-              currentPosition = {
-                positionIndex,
-                quantityDelivered: positionData.qty,
-                unitPrice: positionData.unitPrice,
-                totalPrice: positionData.totalPrice,
-                descriptionIT: positionData.description,
-                orderCandidates: [...orderCandidates],
-                orderCandidatesText: orderCandidates.join('|'),
-                orderStatus: getOrderStatus(orderCandidates),
-                rawPositionText: line,
-              };
-              orderCandidates = [];
-              state = 'EXPECT_ARTICLE_CODE';
-            }
-          }
-          break;
-        }
-
-        case 'COMMIT': {
-          // Commit the current position
-          lines.push(currentPosition as ParsedInvoiceLine);
-          currentPosition = {};
-          state = 'EXPECT_POSITION';
-
-          // Re-check current line
-          if (isOrderReferenceLine(line, this.config)) {
-            const candidates = extractOrderCandidates(line);
-            orderCandidates.push(...candidates);
-          } else {
-            const positionData = parsePositionLine(line, this.config);
-            if (positionData) {
-              positionIndex++;
-              currentPosition = {
-                positionIndex,
-                quantityDelivered: positionData.qty,
-                unitPrice: positionData.unitPrice,
-                totalPrice: positionData.totalPrice,
-                descriptionIT: positionData.description,
-                orderCandidates: [...orderCandidates],
-                orderCandidatesText: orderCandidates.join('|'),
-                orderStatus: getOrderStatus(orderCandidates),
-                rawPositionText: line,
-              };
-              orderCandidates = [];
-              state = 'EXPECT_ARTICLE_CODE';
-            }
-          }
-          break;
+          currentArticle = text;
+        } else if (eanPattern.test(text)) {
+          currentEan = text;
         }
       }
+
+      // Check for price line with PZ
+      const priceMatch = trimmedLine.match(priceLinePattern);
+      if (priceMatch) {
+        const qty = parseInteger(priceMatch[1]);
+        const unitPrice = parsePrice(priceMatch[2]);
+        const totalPrice = parsePrice(priceMatch[3]);
+
+        // Extract description (text before PZ)
+        const descMatch = trimmedLine.match(/^(.+?)\s+PZ\s+\d+/);
+        if (descMatch) {
+          currentDescription = descMatch[1];
+        }
+
+        // If we have an article code, create position
+        if (currentArticle || currentEan) {
+          positionIndex++;
+
+          lines.push({
+            positionIndex,
+            manufacturerArticleNo: currentArticle,
+            ean: currentEan,
+            descriptionIT: currentDescription,
+            quantityDelivered: qty,
+            unitPrice,
+            totalPrice,
+            orderCandidates: [...orderCandidates],
+            orderCandidatesText: orderCandidates.join('|'),
+            orderStatus: getOrderStatus(orderCandidates),
+            rawPositionText: trimmedLine,
+          });
+
+          console.debug('[InvoiceParser] Position', positionIndex, ':', {
+            article: currentArticle,
+            ean: currentEan,
+            qty,
+            unitPrice,
+            totalPrice,
+          });
+
+          // Reset for next position
+          currentArticle = '';
+          currentEan = '';
+          currentDescription = '';
+          orderCandidates = [];
+        }
+      }
+
     }
 
-    // Handle any remaining position in progress
-    if (state !== 'EXPECT_POSITION' && currentPosition.positionIndex) {
-      warnings.push({
-        code: 'INCOMPLETE_LAST_POSITION',
-        message: `Letzte Position (${positionIndex}) wurde nicht vollständig abgeschlossen`,
-        severity: 'warning',
-        positionIndex,
-      });
-      currentPosition.manufacturerArticleNo = currentPosition.manufacturerArticleNo || '';
-      currentPosition.ean = currentPosition.ean || '';
-      lines.push(currentPosition as ParsedInvoiceLine);
+    // Alternative parsing: scan full text for patterns
+    if (lines.length === 0) {
+      console.debug('[InvoiceParser] No positions found with item analysis, trying full text scan...');
+      this.parsePositionsFullTextScan(rawItems, lines, warnings);
     }
 
-    // Log warning if no positions found
     if (lines.length === 0) {
       warnings.push({
         code: 'NO_POSITIONS_FOUND',
         message: 'Keine Rechnungspositionen gefunden',
         severity: 'error',
       });
+    } else {
+      console.debug('[InvoiceParser] Found', lines.length, 'positions');
     }
   }
 
   /**
-   * Validate parsing results
+   * Fallback: Parse positions by scanning full text
    */
+  private parsePositionsFullTextScan(
+    rawItems: Array<{ page: number, text: string, x: number, y: number }>,
+    lines: ParsedInvoiceLine[],
+    warnings: ParserWarning[]
+  ): void {
+    // Combine all text
+    const fullText = rawItems.map(i => i.text).join(' ');
+
+    // Pattern to find article blocks
+    // Article code followed by EAN followed by price info
+    const blockPattern = /([A-Z]{2,}[A-Z0-9.]+#[A-Z0-9]+)\s+(803\d{10})[^P]*PZ\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)/gi;
+
+    let match;
+    let positionIndex = 0;
+
+    while ((match = blockPattern.exec(fullText)) !== null) {
+      positionIndex++;
+
+      lines.push({
+        positionIndex,
+        manufacturerArticleNo: match[1],
+        ean: match[2],
+        descriptionIT: '',
+        quantityDelivered: parseInteger(match[3]),
+        unitPrice: parsePrice(match[4]),
+        totalPrice: parsePrice(match[5]),
+        orderCandidates: [],
+        orderCandidatesText: '',
+        orderStatus: 'NO',
+        rawPositionText: match[0],
+      });
+    }
+  }
+
   private validateResults(
     header: ParsedInvoiceHeader,
     lines: ParsedInvoiceLine[],
@@ -613,7 +580,6 @@ class InvoiceParserFattura implements InvoiceParser {
   ): boolean {
     let hasBlockingErrors = false;
 
-    // Check for blocking errors
     if (!header.fatturaNumber) {
       hasBlockingErrors = true;
     }
@@ -622,7 +588,6 @@ class InvoiceParserFattura implements InvoiceParser {
       hasBlockingErrors = true;
     }
 
-    // Check for positions with missing critical data
     for (const line of lines) {
       if (!line.ean && !line.manufacturerArticleNo) {
         warnings.push({
@@ -637,9 +602,6 @@ class InvoiceParserFattura implements InvoiceParser {
     return !hasBlockingErrors;
   }
 
-  /**
-   * Create the final result object
-   */
   private createResult(
     success: boolean,
     header: ParsedInvoiceHeader,
@@ -659,11 +621,6 @@ class InvoiceParserFattura implements InvoiceParser {
   }
 }
 
-// Export singleton instance
 export const invoiceParserFattura = new InvoiceParserFattura();
-
-// Export class for custom configuration
 export { InvoiceParserFattura };
-
-// Default export
 export default invoiceParserFattura;

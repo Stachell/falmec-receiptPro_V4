@@ -56,6 +56,10 @@ export interface ParsedInvoiceHeader {
   packagesCount: number | null;
   /** Total quantity sum of all Q.TY values */
   totalQty: number;
+  /** Number of parsed positions */
+  parsedPositionsCount: number;
+  /** Validation status: positions count vs totalQty */
+  qtyValidationStatus: 'ok' | 'mismatch' | 'unknown';
 }
 
 /**
@@ -102,14 +106,22 @@ export interface ParserConfig {
   patterns: {
     /** Pattern for invoice number extraction */
     fatturaNumber: RegExp;
+    /** Alternative pattern for invoice number (fallback) */
+    fatturaNumberAlt?: RegExp;
+    /** Third fallback pattern for invoice number */
+    fatturaNumberFallback?: RegExp;
     /** Pattern for invoice date extraction */
     fatturaDate: RegExp;
     /** Pattern for packages count extraction */
     packagesCount: RegExp;
-    /** Pattern for position line detection (contains Q.TY, PZ, PRICE, AMOUNT) */
-    positionLine: RegExp;
+    /** Pattern for position line Format A: "PZ [qty] [price] [amount]" (Falmec standard) */
+    positionLineA: RegExp;
+    /** Pattern for position line Format B: "[qty] PZ [price] [amount]" (alternative) */
+    positionLineB: RegExp;
     /** Pattern for manufacturer article number */
     articleCode: RegExp;
+    /** Alternative pattern for manufacturer article number */
+    articleCodeAlt?: RegExp;
     /** Pattern for 13-digit EAN */
     ean: RegExp;
     /** Pattern for order reference line (Vs. ORDINE) */

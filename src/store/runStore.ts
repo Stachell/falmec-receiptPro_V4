@@ -12,12 +12,12 @@ import {
 } from '@/types';
 import {
   mockRuns,
-  mockInvoiceLines,
   mockIssues,
   mockAuditLog
 } from '@/data/mockData';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
+import { fileStorageService } from '@/services/fileStorageService';
 import {
   parseInvoicePDF,
   convertToInvoiceLines,
@@ -109,6 +109,7 @@ interface RunState {
   addUploadedFile: (file: UploadedFile) => void;
   removeUploadedFile: (type: UploadedFile['type']) => void;
   clearUploadedFiles: () => void;
+  loadStoredFiles: () => Promise<void>;
   createNewRun: () => Run;
   createNewRunWithParsing: () => Promise<Run>;
   updateRunStatus: (runId: string, status: StepStatus) => void;
@@ -131,7 +132,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   // Initial Data
   runs: mockRuns,
   currentRun: null,
-  invoiceLines: mockInvoiceLines,
+  invoiceLines: [],  // Start empty - only use real parsed data, not mock data
   issues: mockIssues,
   auditLog: mockAuditLog,
   uploadedFiles: [],
@@ -163,30 +164,75 @@ export const useRunStore = create<RunState>((set, get) => ({
     globalConfig: { ...state.globalConfig, ...config }
   })),
 
-  addUploadedFile: (file) => set((state) => {
+  addUploadedFile: (file) => {
     // Add uploadedAt timestamp if not present
     const fileWithTimestamp: UploadedFile = {
       ...file,
       uploadedAt: file.uploadedAt || new Date().toISOString(),
     };
-    const newFiles = [
-      ...state.uploadedFiles.filter(f => f.type !== file.type),
-      fileWithTimestamp
-    ];
-    // Persist to localStorage
-    savePersistedFiles(newFiles);
-    return { uploadedFiles: newFiles };
-  }),
 
-  removeUploadedFile: (type) => set((state) => {
-    const newFiles = state.uploadedFiles.filter(f => f.type !== type);
-    savePersistedFiles(newFiles);
-    return { uploadedFiles: newFiles };
-  }),
+    // Save to IndexedDB (async, fire and forget)
+    if (fileStorageService.isAvailable()) {
+      fileStorageService.saveFile(fileWithTimestamp).catch((error) => {
+        console.error('[RunStore] Failed to save file to IndexedDB:', error);
+      });
+    }
+
+    set((state) => {
+      const newFiles = [
+        ...state.uploadedFiles.filter(f => f.type !== file.type),
+        fileWithTimestamp
+      ];
+      // Persist metadata to localStorage
+      savePersistedFiles(newFiles);
+      return { uploadedFiles: newFiles };
+    });
+  },
+
+  removeUploadedFile: (type) => {
+    // Remove from IndexedDB (async, fire and forget)
+    if (fileStorageService.isAvailable()) {
+      fileStorageService.removeFile(type).catch((error) => {
+        console.error('[RunStore] Failed to remove file from IndexedDB:', error);
+      });
+    }
+
+    set((state) => {
+      const newFiles = state.uploadedFiles.filter(f => f.type !== type);
+      savePersistedFiles(newFiles);
+      return { uploadedFiles: newFiles };
+    });
+  },
 
   clearUploadedFiles: () => {
+    // Clear IndexedDB (async, fire and forget)
+    if (fileStorageService.isAvailable()) {
+      fileStorageService.clearAllFiles().catch((error) => {
+        console.error('[RunStore] Failed to clear files from IndexedDB:', error);
+      });
+    }
+
     localStorage.removeItem(UPLOADED_FILES_KEY);
-    return set({ uploadedFiles: [] });
+    set({ uploadedFiles: [] });
+  },
+
+  loadStoredFiles: async () => {
+    if (!fileStorageService.isAvailable()) {
+      console.warn('[RunStore] IndexedDB not available, cannot load stored files');
+      return;
+    }
+
+    try {
+      const storedFiles = await fileStorageService.loadAllFiles();
+      if (storedFiles.length > 0) {
+        console.debug('[RunStore] Loaded', storedFiles.length, 'files from IndexedDB');
+        set({ uploadedFiles: storedFiles });
+        // Also update localStorage metadata
+        savePersistedFiles(storedFiles);
+      }
+    } catch (error) {
+      console.error('[RunStore] Failed to load stored files:', error);
+    }
   },
 
   // Legacy createNewRun (without parsing)
@@ -316,17 +362,36 @@ export const useRunStore = create<RunState>((set, get) => ({
       set({ parsingProgress: 'Lese PDF...' });
 
       const parseSuccess = await parseInvoice(runId);
+      const { parsedInvoiceResult } = get();
 
-      if (parseSuccess) {
-        const { parsedInvoiceResult } = get();
-        if (parsedInvoiceResult) {
-          // Update run with parsed data
-          updateRunWithParsedData(runId, parsedInvoiceResult);
+      if (parseSuccess && parsedInvoiceResult) {
+        // Update run with parsed data
+        updateRunWithParsedData(runId, parsedInvoiceResult);
 
-          // Generate proper run ID with fattura number
+        // Generate proper run ID with fattura number
+        const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
+
+        // Update run ID
+        set((state) => {
+          const updatedRun = state.runs.find(r => r.id === runId);
+          if (updatedRun) {
+            const finalRun = { ...updatedRun, id: newRunId };
+            return {
+              runs: state.runs.map(r => r.id === runId ? finalRun : r),
+              currentRun: finalRun,
+            };
+          }
+          return state;
+        });
+
+        runId = newRunId;
+      } else if (parsedInvoiceResult) {
+        // Parsing had errors but we got some data - update run with partial data
+        updateRunWithParsedData(runId, parsedInvoiceResult);
+
+        // If we have a fattura number, use it for the run ID
+        if (parsedInvoiceResult.header.fatturaNumber) {
           const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
-
-          // Update run ID
           set((state) => {
             const updatedRun = state.runs.find(r => r.id === runId);
             if (updatedRun) {
@@ -338,11 +403,61 @@ export const useRunStore = create<RunState>((set, get) => ({
             }
             return state;
           });
-
           runId = newRunId;
         }
+      } else {
+        // Complete failure - update run with error status
+        set((state) => {
+          const updatedRun = state.runs.find(r => r.id === runId);
+          if (updatedRun) {
+            const failedRun: Run = {
+              ...updatedRun,
+              status: 'failed',
+              invoice: {
+                ...updatedRun.invoice,
+                fattura: 'FEHLER: Parsing fehlgeschlagen',
+              },
+              steps: updatedRun.steps.map(step =>
+                step.stepNo === 1 ? { ...step, status: 'failed' as const, issuesCount: 1 } : step
+              ),
+            };
+            return {
+              runs: state.runs.map(r => r.id === runId ? failedRun : r),
+              currentRun: failedRun,
+            };
+          }
+          return state;
+        });
+
+        logService.error('PDF-Parsing vollständig fehlgeschlagen', {
+          runId,
+          step: 'Rechnung auslesen',
+        });
       }
     } else {
+      // No invoice file - update run with error status
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (updatedRun) {
+          const failedRun: Run = {
+            ...updatedRun,
+            status: 'failed',
+            invoice: {
+              ...updatedRun.invoice,
+              fattura: 'FEHLER: Keine PDF-Datei',
+            },
+            steps: updatedRun.steps.map(step =>
+              step.stepNo === 1 ? { ...step, status: 'failed' as const, issuesCount: 1 } : step
+            ),
+          };
+          return {
+            runs: state.runs.map(r => r.id === runId ? failedRun : r),
+            currentRun: failedRun,
+          };
+        }
+        return state;
+      });
+
       logService.warn('Keine Invoice-Datei für Parsing verfügbar', {
         runId,
         step: 'Rechnung auslesen',
@@ -365,7 +480,7 @@ export const useRunStore = create<RunState>((set, get) => ({
     return get().currentRun || newRun;
   },
 
-  // Parse invoice from uploaded file
+  // Parse invoice from uploaded file with timeout
   parseInvoice: async (runId: string) => {
     const { uploadedFiles, setParsedInvoiceResult, setParsingProgress } = get();
 
@@ -378,10 +493,24 @@ export const useRunStore = create<RunState>((set, get) => ({
       return false;
     }
 
+    // Timeout configuration: 30 seconds for PDF parsing
+    const PARSING_TIMEOUT_MS = 30000;
+
     try {
       setParsingProgress('Extrahiere Text aus PDF...');
 
-      const result = await parseInvoicePDF(invoiceFile.file, runId);
+      // Create a promise that rejects after timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`PDF-Parsing Timeout nach ${PARSING_TIMEOUT_MS / 1000} Sekunden`));
+        }, PARSING_TIMEOUT_MS);
+      });
+
+      // Race between parsing and timeout
+      const result = await Promise.race([
+        parseInvoicePDF(invoiceFile.file, runId),
+        timeoutPromise,
+      ]);
 
       setParsingProgress('Verarbeite Daten...');
 
@@ -402,7 +531,8 @@ export const useRunStore = create<RunState>((set, get) => ({
           details: `${result.warnings.filter(w => w.severity === 'error').length} Fehler`,
         });
         setParsingProgress('Parsing mit Warnungen abgeschlossen');
-        return false;
+        // Return true if we at least got partial data (fattura number)
+        return result.header.fatturaNumber !== '';
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unbekannter Fehler';
@@ -410,7 +540,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         runId,
         step: 'Rechnung auslesen',
       });
-      setParsingProgress('Parsing fehlgeschlagen');
+      setParsingProgress(`Parsing fehlgeschlagen: ${errorMessage}`);
       return false;
     }
   },

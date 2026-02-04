@@ -80,17 +80,44 @@ export default function RunDetail() {
               </Button>
             </Link>
             <div>
-              <p className="text-muted-foreground mb-1">
+              <p className="mb-1" style={{ color: '#D8E6E7' }}>
                 {format(new Date(currentRun.createdAt), "dd. MMMM yyyy, HH:mm 'Uhr'", { locale: de })}
                 {currentRun.invoice.deliveryDate && (
                   <span> • Lieferung: {format(new Date(currentRun.invoice.deliveryDate), 'dd.MM.yyyy', { locale: de })}</span>
                 )}
               </p>
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-foreground">
-                  {currentRun.invoice.fattura}
+                <h1 className="text-2xl font-bold" style={{ color: '#D8E6E7' }}>
+                  {currentRun.id}
                 </h1>
-                <StatusChip status={currentRun.status} />
+                <span
+                  className="status-chip"
+                  style={{
+                    backgroundColor: '#D8E6E7',
+                    color: '#333333',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.375rem',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                  }}
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{
+                      backgroundColor: currentRun.status === 'running' ? '#3b82f6' :
+                        currentRun.status === 'ok' ? '#22c55e' :
+                        currentRun.status === 'failed' ? '#ef4444' :
+                        currentRun.status === 'soft-fail' ? '#f59e0b' : '#6b7280'
+                    }}
+                  />
+                  {currentRun.status === 'running' ? 'In Bearbeitung' :
+                   currentRun.status === 'ok' ? 'Erfolgreich' :
+                   currentRun.status === 'failed' ? 'Fehlgeschlagen' :
+                   currentRun.status === 'soft-fail' ? 'Warnung' : 'Nicht gestartet'}
+                </span>
               </div>
             </div>
           </div>
@@ -121,8 +148,16 @@ export default function RunDetail() {
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
           <KPITile
-            value={currentRun.stats.parsedInvoiceLines}
+            value={`${currentRun.stats.parsedInvoiceLines}/${parsedInvoiceResult?.header.totalQty ?? '?'}`}
             label="Rechnungspositionen"
+            subValue={
+              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+                ? 'Fehler: Anzahl stimmt nicht'
+                : `${parsedInvoiceResult?.header.parsedPositionsCount ?? 0} Positionen`
+            }
+            variant={
+              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch' ? 'warning' : 'default'
+            }
           />
           <KPITile
             value={`${currentRun.stats.matchedOrders}/${currentRun.stats.parsedInvoiceLines - currentRun.stats.notOrderedCount}`}

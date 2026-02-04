@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FileBox, FilePenLine, Archive, Download, RefreshCw } from 'lucide-react';
 import {
@@ -87,7 +87,12 @@ export function AppSidebar() {
   const [isExportHovered, setIsExportHovered] = useState(false);
   const [isNeuHovered, setIsNeuHovered] = useState(false);
   const navigate = useNavigate();
-  const { uploadedFiles, addUploadedFile } = useRunStore();
+  const { uploadedFiles, addUploadedFile, loadStoredFiles } = useRunStore();
+
+  // Load stored files on mount
+  useEffect(() => {
+    loadStoredFiles();
+  }, [loadStoredFiles]);
 
   const invoiceRef = useRef<HTMLInputElement>(null);
   const openWERef = useRef<HTMLInputElement>(null);
@@ -104,7 +109,7 @@ export function AppSidebar() {
   const handleFileChange = (type: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      addUploadedFile({ type: type as any, file, name: file.name });
+      addUploadedFile({ type: type as any, file, name: file.name, size: file.size });
     }
   };
 

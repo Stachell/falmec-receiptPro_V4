@@ -57,6 +57,10 @@ export interface InvoiceHeader {
   packagesCount?: number | null;
   /** Total quantity sum from all positions */
   totalQty?: number;
+  /** Number of parsed positions */
+  parsedPositionsCount?: number;
+  /** Validation status: positions count vs totalQty */
+  qtyValidationStatus?: 'ok' | 'mismatch' | 'unknown';
 }
 
 /** Order status from invoice parsing */
