@@ -93,7 +93,7 @@ export function AppFooter() {
         onMouseLeave={() => setIsToggleHovered(false)}
         className="fixed bottom-2 left-2 z-50 p-3 rounded-lg shadow-md transition-all duration-200 border"
         style={{
-          backgroundColor: isToggleHovered ? HOVER_BG : (isOpen ? '#c9c3b6' : 'var(--sidebar)'),
+          backgroundColor: isToggleHovered ? HOVER_BG : (isOpen ? '#c9c3b6' : '#D8E6E7'),
           borderColor: isToggleHovered ? HOVER_BORDER : (isOpen ? '#666666' : 'var(--sidebar-border)'),
         }}
         title="Konfiguration"
@@ -231,10 +231,10 @@ export function AppFooter() {
               color: isLogfileHovered ? HOVER_TEXT : '#666666',
               borderColor: isLogfileHovered ? HOVER_BORDER : '#666666',
             }}
-            title="Logfile anzeigen"
+            title="Logfile"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Logfile anzeigen</span>
+            <span>Logfile</span>
           </button>
         </div>
       </footer>

@@ -53,6 +53,35 @@ export interface InvoiceHeader {
   fattura: string;
   invoiceDate: string;
   deliveryDate: string | null;
+  /** Number of packages (from invoice) */
+  packagesCount?: number | null;
+  /** Total quantity sum from all positions */
+  totalQty?: number;
+}
+
+/** Order status from invoice parsing */
+export type InvoiceOrderStatus = 'YES' | 'NO' | 'check';
+
+/** Extended invoice line with order candidates (from parsing) */
+export interface ParsedInvoiceLineExtended {
+  positionIndex: number;
+  manufacturerArticleNo: string;
+  ean: string;
+  descriptionIT: string;
+  quantityDelivered: number;
+  unitPrice: number;
+  totalPrice: number;
+  orderCandidates: string[];
+  orderCandidatesText: string;
+  orderStatus: InvoiceOrderStatus;
+}
+
+/** Parser warning from invoice parsing */
+export interface InvoiceParserWarning {
+  code: string;
+  message: string;
+  severity: 'info' | 'warning' | 'error';
+  positionIndex?: number;
 }
 
 export interface Run {

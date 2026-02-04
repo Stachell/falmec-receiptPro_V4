@@ -1,8 +1,9 @@
 import { Run } from '@/types';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { FileText, Calendar, Hash, Settings2, Clock } from 'lucide-react';
+import { FileText, Calendar, Settings2, Clock, Package, Layers } from 'lucide-react';
 import { mockAuditLog } from '@/data/mockData';
+import { useRunStore } from '@/store/runStore';
 
 interface OverviewPanelProps {
   run: Run;
@@ -10,6 +11,7 @@ interface OverviewPanelProps {
 
 export function OverviewPanel({ run }: OverviewPanelProps) {
   const auditEntries = mockAuditLog.filter(entry => entry.runId === run.id);
+  const { parsedInvoiceResult } = useRunStore();
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -38,6 +40,30 @@ export function OverviewPanel({ run }: OverviewPanelProps) {
               </dd>
             </div>
           )}
+          <div className="flex gap-4 pt-2 border-t border-border mt-2">
+            <div>
+              <dt className="text-sm text-muted-foreground flex items-center gap-1">
+                <Package className="w-3 h-3" />
+                Pakete
+              </dt>
+              <dd className="text-sm font-medium">
+                {run.invoice.packagesCount ??
+                 parsedInvoiceResult?.header.packagesCount ??
+                 <span className="text-muted-foreground">n/a</span>}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted-foreground flex items-center gap-1">
+                <Layers className="w-3 h-3" />
+                Gesamtmenge
+              </dt>
+              <dd className="text-sm font-medium">
+                {run.invoice.totalQty ??
+                 parsedInvoiceResult?.header.totalQty ??
+                 run.stats.parsedInvoiceLines}
+              </dd>
+            </div>
+          </div>
         </dl>
       </div>
 

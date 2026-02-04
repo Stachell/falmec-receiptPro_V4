@@ -21,7 +21,7 @@ import {
 
 export default function NewRun() {
   const navigate = useNavigate();
-  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRun } = useRunStore();
+  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing } = useRunStore();
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
 
@@ -52,7 +52,8 @@ export default function NewRun() {
       logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
     }
 
-    const newRun = createNewRun();
+    // Use parsing-enabled run creation
+    const newRun = await createNewRunWithParsing();
     navigate(`/run/${newRun.id}`);
   };
 
@@ -61,8 +62,8 @@ export default function NewRun() {
     if (result.success) {
       setIsDirectoryConfigured(true);
       setShowFolderDialog(false);
-      // Now start processing
-      const newRun = createNewRun();
+      // Now start processing with PDF parsing
+      const newRun = await createNewRunWithParsing();
       navigate(`/run/${newRun.id}`);
     }
   };

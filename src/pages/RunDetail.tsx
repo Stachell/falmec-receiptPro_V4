@@ -16,10 +16,19 @@ import { IssuesCenter } from '@/components/run-detail/IssuesCenter';
 import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
 import { ExportPanel } from '@/components/run-detail/ExportPanel';
 import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
+import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
-  const { currentRun, setCurrentRun, activeTab, setActiveTab } = useRunStore();
+  const {
+    currentRun,
+    setCurrentRun,
+    activeTab,
+    setActiveTab,
+    parsedInvoiceResult,
+    parsedPositions,
+    parserWarnings,
+  } = useRunStore();
 
   useEffect(() => {
     // Find run by ID from mock data or store
@@ -149,6 +158,18 @@ export default function RunDetail() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="bg-card border border-border">
             <TabsTrigger value="overview">Übersicht</TabsTrigger>
+            <TabsTrigger value="invoice-preview">
+              Rechnung
+              {parsedInvoiceResult && (
+                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded ${
+                  parsedInvoiceResult.success
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-status-soft-fail/20 text-status-soft-fail'
+                }`}>
+                  {parsedInvoiceResult.lines.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="items">
               Positionen
               <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded">
@@ -169,6 +190,34 @@ export default function RunDetail() {
 
           <TabsContent value="overview">
             <OverviewPanel run={currentRun} />
+          </TabsContent>
+
+          <TabsContent value="invoice-preview">
+            {parsedInvoiceResult ? (
+              <InvoicePreview
+                header={{
+                  fattura: parsedInvoiceResult.header.fatturaNumber,
+                  invoiceDate: parsedInvoiceResult.header.fatturaDate,
+                  deliveryDate: null,
+                  packagesCount: parsedInvoiceResult.header.packagesCount,
+                  totalQty: parsedInvoiceResult.header.totalQty,
+                }}
+                positions={parsedPositions}
+                warnings={parserWarnings}
+                isSuccess={parsedInvoiceResult.success}
+                sourceFileName={parsedInvoiceResult.sourceFileName}
+              />
+            ) : (
+              <div className="enterprise-card p-8 text-center">
+                <FileWarning className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="font-semibold text-foreground mb-2">
+                  Keine Parsing-Daten verfügbar
+                </h3>
+                <p className="text-muted-foreground">
+                  Die Rechnungsdaten wurden noch nicht geparst oder sind nicht mehr verfügbar.
+                </p>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="items">

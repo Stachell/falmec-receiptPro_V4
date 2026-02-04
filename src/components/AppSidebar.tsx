@@ -118,7 +118,7 @@ export function AppSidebar() {
   };
 
   return (
-    <header className="w-full bg-sidebar border-b border-sidebar-border sticky top-0 z-50 min-h-[calc(4rem+3vh)] flex items-center relative">
+    <header className="w-full bg-sidebar border-b border-sidebar-border sticky top-0 z-50 min-h-[calc(4rem+4vh)] flex items-center relative">
       <div className="flex items-center justify-center px-6 w-full">
         {/* Logo - Left positioned */}
         <div className="absolute left-6 flex items-center gap-4">
@@ -131,7 +131,7 @@ export function AppSidebar() {
               style={{
                 width: isLogoHovered ? '52px' : '40px',
                 height: isLogoHovered ? '52px' : '40px',
-                backgroundColor: isLogoHovered ? '#DC2626' : 'var(--primary)',
+                backgroundColor: isLogoHovered ? '#DC2626' : '#008C99',
                 borderWidth: '2px',
                 borderStyle: 'solid',
                 borderColor: isLogoHovered ? '#991B1B' : 'transparent',
@@ -164,7 +164,7 @@ export function AppSidebar() {
             to="/archiv"
             onMouseEnter={() => setIsArchivHovered(true)}
             onMouseLeave={() => setIsArchivHovered(false)}
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
             style={{
               backgroundColor: isArchivHovered ? HOVER_BG : '#c9c3b6',
               borderColor: isArchivHovered ? HOVER_BORDER : '#666666',
@@ -188,7 +188,7 @@ export function AppSidebar() {
             to="/export"
             onMouseEnter={() => setIsExportHovered(true)}
             onMouseLeave={() => setIsExportHovered(false)}
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
             style={{
               backgroundColor: isExportHovered ? HOVER_BG : '#c9c3b6',
               borderColor: isExportHovered ? HOVER_BORDER : '#666666',
@@ -212,7 +212,7 @@ export function AppSidebar() {
             to="/new-run"
             onMouseEnter={() => setIsNeuHovered(true)}
             onMouseLeave={() => setIsNeuHovered(false)}
-            className="h-[calc((4rem+3vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
             style={{
               backgroundColor: isNeuHovered ? HOVER_BG : '#c9c3b6',
               borderColor: isNeuHovered ? HOVER_BORDER : '#666666',
@@ -232,8 +232,15 @@ export function AppSidebar() {
           </Link>
         </div>
 
-        {/* Upload Status - Right positioned, vertically centered */}
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col">
+        {/* Upload Status - Right positioned, vertically centered, scaled to match button height */}
+        <div
+          className="absolute top-1/2 flex flex-col"
+          style={{
+            right: '1.5rem',
+            transform: 'translateY(-50%) scale(0.85)',
+            transformOrigin: 'right center',
+          }}
+        >
           {UPLOAD_MODULES.map((module, index) => {
             const uploadedFile = uploadedFiles.find(f => f.type === module.type);
             const isUploaded = !!uploadedFile;
