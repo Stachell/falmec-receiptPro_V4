@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Download, FileWarning, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, FileWarning, RefreshCw, Play } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { AppLayout } from '@/components/AppLayout';
@@ -28,6 +28,7 @@ export default function RunDetail() {
     parsedInvoiceResult,
     parsedPositions,
     parserWarnings,
+    advanceToNextStep,
   } = useRunStore();
 
   useEffect(() => {
@@ -67,6 +68,23 @@ export default function RunDetail() {
   }
 
   const totalIssues = currentRun.steps.reduce((acc, step) => acc + step.issuesCount, 0);
+
+  // Determine next workflow step
+  const getNextStep = () => {
+    if (!currentRun) return null;
+
+    // Find first step that is 'not-started' or 'running'
+    const nextStep = currentRun.steps.find(
+      step => step.status === 'not-started' || step.status === 'running'
+    );
+
+    return nextStep || null;
+  };
+
+  const nextStep = getNextStep();
+  const allStepsComplete = currentRun.steps.every(
+    step => step.status === 'ok' || step.status === 'soft-fail'
+  );
 
   return (
     <AppLayout>
@@ -182,11 +200,35 @@ export default function RunDetail() {
             subValue={currentRun.stats.priceMismatchCount > 0 ? `${currentRun.stats.priceMismatchCount} Abweichungen` : undefined}
             variant={currentRun.stats.priceMismatchCount > 0 ? 'warning' : 'success'}
           />
-          <KPITile
-            value={currentRun.stats.exportReady ? 'Bereit' : 'Ausstehend'}
-            label="Export Status"
-            variant={currentRun.stats.exportReady ? 'success' : 'warning'}
-          />
+          {/* Dynamic Next Step Button */}
+          <div
+            className="kpi-tile flex flex-col justify-center items-center cursor-pointer hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: '#c9c3b6' }}
+            onClick={() => {
+              if (allStepsComplete) {
+                // Navigate to export tab
+                setActiveTab('export');
+              } else if (currentRun) {
+                advanceToNextStep(currentRun.id);
+              }
+            }}
+          >
+            <div className="flex flex-col items-center">
+              {allStepsComplete ? (
+                <Download style={{ width: '42px', height: '42px', color: '#666666' }} />
+              ) : (
+                <Play style={{ width: '42px', height: '42px', color: '#666666' }} />
+              )}
+              <span className="text-base font-semibold mt-1" style={{ color: '#666666' }}>
+                {allStepsComplete ? 'Exportdatei herunterladen' : 'nächster Schritt'}
+              </span>
+            </div>
+            {!allStepsComplete && nextStep && (
+              <span className="text-xs mt-1" style={{ color: '#666666', opacity: 0.8 }}>
+                {nextStep.name}
+              </span>
+            )}
+          </div>
         </KPIGrid>
 
         {/* Tabs */}

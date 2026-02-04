@@ -124,6 +124,9 @@ interface RunState {
   clearParsedInvoice: () => void;
   setParsingProgress: (progress: string) => void;
 
+  // Workflow actions
+  advanceToNextStep: (runId: string) => void;
+
   // Run update with parsed data
   updateRunWithParsedData: (runId: string, result: ParsedInvoiceResult) => void;
 }
@@ -674,6 +677,26 @@ export const useRunStore = create<RunState>((set, get) => ({
         : state.currentRun,
     };
   }),
+
+  advanceToNextStep: (runId: string) => {
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) return;
+
+    // Find current running step
+    const runningStep = run.steps.find(s => s.status === 'running');
+    if (runningStep) {
+      // Set current step to 'ok'
+      get().updateStepStatus(runId, runningStep.stepNo, 'ok');
+    }
+
+    // Find next 'not-started' step
+    const nextStep = run.steps.find(s => s.status === 'not-started');
+    if (nextStep) {
+      // Set next step to 'running'
+      get().updateStepStatus(runId, nextStep.stepNo, 'running');
+    }
+  },
 
   updateInvoiceLine: (lineId, updates) => set((state) => ({
     invoiceLines: state.invoiceLines.map(line =>
