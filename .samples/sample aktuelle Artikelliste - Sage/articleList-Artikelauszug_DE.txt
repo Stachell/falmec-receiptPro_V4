@@ -1,0 +1,121 @@
+## Artikelliste `<articleList>` 📃
+
+### Dokumentbeschreibung
+Auszug des aktuellen Artikelstamms aus Sage100. Die Liste wird verwendet für:
+1) **Lagerplatz-Zuweisung** für Wareneingangsbuchungen (z. B. WE Lager vs. WE KDD)  
+2) **Stamm-/Abgleichprüfung** (Artikelstamm vs. empfangene Artikel)  
+3) **Kontrollfunktion** für Rechnungswerte: Summe Wareneingang vs. Stammpreise (Netto)
+
+**Regel:** Alle nicht explizit als wichtig benannten Spalten werden als `ignore` behandelt.
+
+---
+
+### Dateiformat & Aufbau (beide Formate berücksichtigen)
+- **Kann eintreffen als:** `.XLSX` oder `.XML`  
+- **Aufbau:** identische Tabellenstruktur (Header + Datenzeilen)
+- **Header:** Ja – **erste Zeile** ist der Spaltenheader (kein zusätzlicher Report-Header)
+- **Beobachtet (XLSX-Beispiel):**
+  - Sheet: `Tabelle1`
+  - Datensätze: `3778`
+  - Spalten: `24`
+
+---
+
+### Wichtige Spalten (nur diese werden verarbeitet)
+
+1) `<aktiv>` (**Aktiv**)  
+- Bedeutung: Artikelstatus (aktiv/inaktiv)  
+- Werte (beobachtet): `Ja` / `Nein`
+
+2) `<article#DE>` (**Artikelnummer**)  
+- Bedeutung: Artikelnummer (DE/intern), primärer Schlüssel
+
+3) `<articlePrice>` (**Einzelpreis**)  
+- Bedeutung: Einzelpreis je Artikel **Netto**  
+- Hinweis: Dezimalwerte sind möglich (z. B. `265.5`)
+
+4) `<articlegroup#>` (**Artikelgruppe_Wert**)  
+- Bedeutung: Produktgruppe (Zahlenwert)
+
+5) `<articlegroupDescription>` (**Artikelgruppe_Bezeichnung**)  
+- Bedeutung: Produktgruppe (Text)
+
+6) `<articleDescriptionDE>` (**Matchcode_Artikel**)  
+- Bedeutung: Artikelbeschreibung DE (Matchcode)  
+- Hinweis: Im Export heißt die Spalte **Matchcode_Artikel** (nicht „Artikelmatchcode“)
+
+7) `<article#IT>` (**Code-FalmecIT**)  
+- Bedeutung: Herstellerartikelnummer (IT)  
+- Hinweis: kann leer sein → nicht inferieren/erfinden
+
+8) `<articleDescription2DE>` (**Bezeichnung_2**)  
+- Bedeutung: Ergänzende Artikelbeschreibung DE  
+- Hinweis: kann leer sein
+
+9) `<ean>` (**EAN-Nummer**)  
+- Bedeutung: EAN/Barcode  
+- Hinweis: häufig leer → nicht inferieren/erfinden; als String behandeln
+
+10) `<storage#>` (**Hauptlagerplatz**)  
+- Bedeutung: voreingestellter Lagerplatz für Wareneingang/Buchung  
+- Beobachtete Werte im Beispiel:
+  - `WE Lager;0;0;0`
+  - `WE KDD;0;0;0`
+  - `Falmec;0;0;0`
+  - `Werbe.;0;0;0`
+  - `KD;0;0;0`
+  - `Apple;0;0;0`
+  - `B;8;0;0`
+  - `C;1;0;0`
+
+- Erwartete/zu berücksichtigende Lager-Optionen laut Anforderung (auch wenn im Beispiel nicht enthalten):
+  1. `WE Lager;0;0;0` = Wareneingangslager Ware  
+  2. `WE KDD;0;0;0` = Wareneingangslager Kundendienst  
+  3. `Falmec;0;0;0` = Zwischenbuchungslager / Endlager  
+  4. `Werbe.;0;0;0` = Lager Werbeartikel / Sonstiges  
+  5. `LKW-5 Weber` = Zwischenbuchungslager (manuelle Auswahl)  
+  6. `LKW-6 Weber` = Zwischenbuchungslager (manuelle Auswahl)  
+  7. `LKW-7 Weber` = Zwischenbuchungslager (manuelle Auswahl)
+
+11) `<Liefernat#>` (**Hauptlieferant**)  
+- Bedeutung: Hauptlieferantennummer  
+- Hinweis: kann leer sein; im Beispiel mehrere Lieferanten vorhanden (nicht nur 70001)
+
+12) `<serialRequirement>` (**Seriennummernpflicht**)  
+- Bedeutung: Pflicht zur Seriennummernführung  
+- Werte (beobachtet):
+  - `Keine` = keine Seriennummernpflicht
+  - `Lagerführung und Verkauf` = Seriennummer zwingend erforderlich  
+- Normalisierung: case-insensitive, Trim (z. B. `keine` → `Keine`)
+
+---
+
+### `ignore`-Spalten (nicht verarbeiten, aber dokumentiert)
+- `Lagerbestand` (ignore)
+- `Artikelgruppe_Bezeichnung1` (ignore)
+- `Meldebestand` (ignore)
+- `Artikelart` (ignore)
+- `H-Artikelnummer` (ignore)
+- `Bezeichnung_1` (ignore)
+- `Warennummer` (ignore)
+- `Verkauf` (ignore)
+- `Beschaffung` (ignore)
+- `Gewicht_in_kg` (ignore)
+- `Gewicht_LME` (ignore)
+- `Intrastat_Eigenmasse_in_kg` (ignore)
+
+---
+
+### Validierungs- und Kontrollregeln (Soft-Fail statt Erfindung)
+- `Aktiv` muss `Ja` oder `Nein` sein.
+- `Seriennummernpflicht` muss `Keine` oder `Lagerführung und Verkauf` sein (case-insensitive Normalisierung erlaubt).
+- `Einzelpreis` muss als Dezimalzahl parsebar und `>= 0` sein.
+- `Artikelgruppe_Wert` muss Ganzzahl sein.
+- Fehlende Felder **EAN-Nummer**, **Code-FalmecIT**, **Hauptlieferant**, **Hauptlagerplatz** dürfen **nicht** aus anderen Spalten abgeleitet werden.
+  - Wenn **Hauptlagerplatz** fehlt → Soft-Fail + UI-Korrektur (keinen Default erfinden)
+  - Wenn **Hauptlieferant** fehlt → Soft-Fail + UI-Korrektur
+
+---
+
+### README (Kurztext)
+`<articleList>` ist eine Artikelstammliste aus Sage100 (XLSX oder XML mit identischem Aufbau). Pro Zeile ein Artikel. Verarbeitet werden nur: Aktiv, Artikelnummer, Einzelpreis (Netto), Artikelgruppe (Wert/Text), Matchcode_Artikel, Code-FalmecIT, Bezeichnung_2, EAN-Nummer, Hauptlagerplatz, Hauptlieferant und Seriennummernpflicht. Alle übrigen Spalten sind `ignore`. Fehlende Werte werden nicht inferiert; fehlender Hauptlagerplatz/Hauptlieferant führt zu Soft-Fail mit UI-Korrektur.

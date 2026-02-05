@@ -1,0 +1,154 @@
+{
+  "documentType": "serialList",
+  "sourceFile": {
+    "format": "xls",
+    "originHint": "crystal-reports-export",
+    "sheets": ["Sheet1"]
+  },
+
+  "layout": {
+    "sections": [
+      {
+        "name": "reportHeader",
+        "rows": "1-6",
+        "importance": "ignore",
+        "notes": "Contains report date/time, customer name/code, report title."
+      },
+      {
+        "name": "tableHeader",
+        "rows": "7-8",
+        "importance": "required",
+        "notes": "Column titles; many merged cells; header text contains line breaks (\\n)."
+      },
+      {
+        "name": "tableData",
+        "rows": "10-343",
+        "importance": "required",
+        "notes": "Product rows + quantity rows. Footer starts near row 347 (cell B347='Utente:')."
+      },
+      {
+        "name": "footer",
+        "rows": "345-347",
+        "importance": "ignore",
+        "notes": "May contain totals (e.g., an integer in column G) and user info like 'Utente:'."
+      }
+    ]
+  },
+
+  "columns": [
+    {
+      "key": "deliveryDate",
+      "tag": "<deliveryDate>",
+      "headerText": "Data Consegna",
+      "headerRange": "B7:C8",
+      "dataRange": "B:C",
+      "readRule": "Take value from column B (date).",
+      "meaning": "Geplantes Lieferdatum (Data Consegna).",
+      "type": "date",
+      "importance": "required"
+    },
+    {
+      "key": "fattura",
+      "tag": "<Fattura>",
+      "headerText": "N° Fattura",
+      "headerRange": "D7:F8",
+      "dataRange": "D:F",
+      "readRule": "Take value from column D (integer).",
+      "meaning": "Rechnungsnummer.",
+      "type": "integer",
+      "importance": "required"
+    },
+    {
+      "key": "codeIT",
+      "tag": "<Code-IT>",
+      "headerText": "Codice",
+      "headerRange": "G7:L8",
+      "dataRange": "G:L",
+      "readRule": "Product row: take string from column G. Quantity row: integer in column G.",
+      "meaning": "Herstellerartikelnummer (IT).",
+      "type": "string",
+      "importance": "required"
+    },
+    {
+      "key": "descrizioneIT",
+      "tag": "<ArtikelbeschreibungIT>",
+      "headerText": "Descrizione",
+      "headerRange": "M7:P8",
+      "dataRange": "M:P",
+      "readRule": "Take the first non-empty cell within M..P (often N).",
+      "meaning": "Artikelbezeichnung (italienisch).",
+      "type": "string",
+      "importance": "required"
+    },
+    {
+      "key": "serial",
+      "tag": "<Serial>",
+      "headerText": "Matricola",
+      "headerRange": "Q7:Q8",
+      "dataRange": "Q:Q",
+      "readRule": "Take value from column Q.",
+      "meaning": "Seriennummer je Produkt.",
+      "type": "string",
+      "importance": "required"
+    },
+    {
+      "key": "ean",
+      "tag": "<ean>",
+      "headerText": "BarCode",
+      "headerRange": "R7:S8",
+      "dataRange": "R:S",
+      "readRule": "Take value from column R.",
+      "meaning": "EAN/Barcode des Artikels.",
+      "type": "string",
+      "importance": "required"
+    },
+
+    {
+      "key": "customerArticleCode",
+      "headerText": "Cod.Art.Cliente",
+      "headerRange": "T7:V8",
+      "dataRange": "T:V",
+      "meaning": "Kundenartikelnummer (optional).",
+      "importance": "ignore"
+    },
+    {
+      "key": "customerArticleDescription",
+      "headerText": "Descrizione Art.Cliente",
+      "headerRange": "W7:AB8",
+      "dataRange": "W:AB",
+      "meaning": "Kundenartikelbeschreibung (optional).",
+      "importance": "ignore"
+    }
+  ],
+
+  "rowTypes": [
+    {
+      "type": "productRow",
+      "detectRule": "B is date AND D is integer AND G is string",
+      "output": "One output line per row (serialized item).",
+      "importance": "required"
+    },
+    {
+      "type": "quantityRow",
+      "detectRule": "G is integer AND B,D,(M..P),Q,R are empty",
+      "meaning": "Quantity for the immediately preceding block of identical products.",
+      "importance": "required"
+    },
+    {
+      "type": "footerTotalRow",
+      "detectRule": "quantityRow that follows another quantityRow (only empty rows between)",
+      "meaning": "Report total / footer number, not tied to an item block.",
+      "importance": "ignore"
+    }
+  ],
+
+  "groupingAndValidation": {
+    "groupRule": "A group = consecutive productRow(s) followed by one quantityRow.",
+    "quantityMeaning": "If serials exist, quantity should equal number of productRow(s) in the group. If serials are missing, quantity defines delivered amount for that product.",
+    "softFailRules": [
+      "If quantityRow is missing after a product group -> Soft-Fail + UI correction.",
+      "If quantityRow exists but does not match productRow count (when serials are present) -> Soft-Fail + UI correction.",
+      "Never invent serial numbers."
+    ]
+  }
+}

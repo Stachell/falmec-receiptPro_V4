@@ -1,0 +1,1 @@
+In diesem Ordner befinden sich Beispieldateien um den Workflow zu gestalten und zu testen. 

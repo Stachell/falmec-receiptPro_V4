@@ -1,0 +1,92 @@
+Dokumenttyp / Dateiart: PDF-Rechnung („INVOICE“) von Falmec Spa (Vittorio Veneto, IT); mehrseitig (Pag. 1/4 bis 4/4) mit identischem Kopfbereich pro Seite. 
+
+
+
+ Seitenaufbau – Kopfbereich (oben, jede Seite):
+
+Absender-/Firmendaten Falmec Spa inkl. Adresse/Telefon/E-Mail/USt-Infos (oberer Block).
+
+Darunter rechts/zentral: NUMERO DOC./N° (= Fattura / Rechnungsnummer) und DATA DOC./DATE (= FatturaDate / Rechnungsdatum), auf jeder Seite aufgedruckt. 
+
+
+
+Kundenblock mittig/links im Kopf: FALMEC DEUTSCHLAND GMBH + Adresse (DE). 
+
+
+
+Kopfzeile der Tabelle (Start der Positionen) enthält u.a.: DESCRIPTION, Q.TY, UM, PRICE EUR, AMOUNT EUR. 
+
+
+
+ Positionsbereich – Artikelauflistung (mittlerer Bereich jeder Seite):
+
+Jede Position beginnt mit einer italienischen Artikelbezeichnung in der Zeile unter „DESCRIPTION“. 
+
+
+
+In derselben Zeile stehen rechts/nebeneinander:
+
+Q.TY = gelieferte/berechnete Menge (z.B. „PZ 1“, „PZ 4“, „PZ 20“ usw.)
+
+PRICE EUR = Einzelpreis
+
+AMOUNT EUR = kumulierter Positionsbetrag (Einzelpreis × Q.TY) 
+
+
+
+Direkt im Anschluss an die Positionszeile steht die Herstellerartikelnummer (Falmec/IT-Artikelnummer) als eigener Wert/Zeile im Positionsblock (z.B. CAEI20.E0P2#ZZZB461F, KACL.457#NF, CDCN60.E0P7#ZZZD461F, KCVJN.00#3). 
+
+
+
+EAN steht direkt eine Zeile unter der Herstellerartikelnummer (13-stellig, z.B. 8034122354507). 
+
+
+
+Häufig folgt danach eine englische Beschreibung (für den Workflow: nicht wertvoll / ignorieren). 
+
+
+
+ Bestellnummern / Order-Referenzen (Zuordnung zum Artikel):
+
+Zu Positionen können vor dem jeweiligen Artikelblock Referenzzeilen stehen, u.a. „Ns. ORDINE ESTERO Nr. …“ und „Vs. ORDINE ESTERO Nr. …“ sowie „Vs. ORDINE WEB (NET-PORTAL) Nr. …“. 
+
+
+
+Für die App wichtig: Bestellnummern sind 5-stellig (z.B. „10153“, „10158“, „10164“, „10170“, „10175“) und sollen dem nachfolgenden Artikel/Artikelblock zugeordnet werden. 
+
+
+
+Hinweis für Verarbeitung: Nicht alle Bestellnummern sind korrekt oder zuordenbar → App muss „nicht zuordenbar“ markieren können. (Vorgabe aus deiner Beschreibung)
+
+ Seitenfuß (unten, wiederholt auf Seiten):
+
+Rechtliche Hinweise/Datenschutz etc. (nicht wertvoll / ignorieren). 
+
+
+
+ Dokumentende – Summen/Logistik/Intrastat (am Ende, Seite 4):
+
+INTRA-Block mit Warennummern-Aufteilung: „INTRA Net Weight Kg. Total EUR Colli Origine“ + Zeilen je Warennummer (für separate Auswertung nutzbar, aber nicht Teil der Artikelpositionsdaten). 
+
+
+
+Rechnungssumme (TOTAL / Amount to pay): 104.209,50 EUR (erscheint im Endbereich mehrfach als Gesamtbetrag). 
+
+
+
+Fälligkeit / Amount to pay: Datum im Endbereich (z.B. „30/04/2026“) + Betrag. 
+
+
+
+Gesamtzahl Paletten/Packstücke: Feld “Number of packages” = 295. 
+
+
+
+Zusätzliche Logistikfelder (optional/nice-to-have, aber nicht in deiner Pflichtliste): Volume MC, Gross Weight KG, Net Weight KG. 
+
+
+
+ Explizit als „nicht wertvoll“ im Prompt kennzeichnen (ignorieren):
+
+Absender-Bankdaten/IBAN/SWIFT, Zahlungsbedingungen-Text („SWIFT 90 DAYS END OF MONTH“), Telefon/Fax, Datenschutz-/Rechtstexte, englische Langbeschreibungen je Artikel, sonstige Codes/Registrierungsnummern. 
+

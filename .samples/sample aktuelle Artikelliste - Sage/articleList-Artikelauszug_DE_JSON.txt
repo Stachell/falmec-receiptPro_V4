@@ -1,0 +1,248 @@
+{
+  "documentType": "<articleList>",
+  "description": "Artikelliste aus Sage100: Auszug des aktuellen Artikelstamms zur Lagerplatz-Zuweisung (Wareneingang) und zur Plausibilitäts-/Kontrollprüfung (z.B. Rechnungswert vs. Stammpreise).",
+  "sourceFile": {
+    "filename": "Artikelauszug_31.01.2026.xlsx",
+    "openPath": "/mnt/data/Artikelauszug_31.01.2026.xlsx",
+    "observedFormat": "xlsx",
+    "alternateFormats_expected": [
+      {
+        "format": "xml",
+        "note": "Erwartet als strukturierter Tabellendatensatz mit identischen Spaltenüberschriften und gleicher Spaltenreihenfolge wie im XLSX."
+      }
+    ],
+    "sheets": [
+      {
+        "name": "Tabelle1",
+        "hasHeaderRow": true,
+        "headerRowIndex_1based": 1,
+        "rowCount_data": 3778,
+        "columnCount": 24,
+        "notes": [
+          "Kein zusätzlicher Report-Header: Zeile 1 ist direkt der Tabellenheader.",
+          "Alle Spalten, die nicht explizit als wichtig benannt sind, werden als \"ignore\" behandelt."
+        ]
+      }
+    ]
+  },
+  "fields": [
+    {
+      "key": "aktiv",
+      "tag": "<aktiv>",
+      "headerName": "Aktiv",
+      "meaning": "Artikelstatus im ERP (aktiv/inaktiv).",
+      "type": "enum_string",
+      "allowedValues_observed": ["Ja", "Nein"],
+      "required": true,
+      "observed": { "missingCount": 0 }
+    },
+    {
+      "key": "articleDe",
+      "tag": "<article#DE>",
+      "headerName": "Artikelnummer",
+      "meaning": "Zusätzliche Artikelnummer (DE/intern).",
+      "type": "string",
+      "required": true,
+      "observed": { "missingCount": 0 }
+    },
+    {
+      "key": "articlePriceNet",
+      "tag": "<articlePrice>",
+      "headerName": "Einzelpreis",
+      "meaning": "Einzelpreis je Artikel (Netto).",
+      "type": "decimal",
+      "required": true,
+      "observed": {
+        "missingCount": 0,
+        "examples": ["501", "265.5", "0.01"]
+      },
+      "rules": [
+        "Als Dezimalzahl interpretieren (Punkt als Dezimaltrenner in dieser Datei)."
+      ]
+    },
+    {
+      "key": "articleGroupId",
+      "tag": "<articlegroup#>",
+      "headerName": "Artikelgruppe_Wert",
+      "meaning": "Kategorisierung der Produkte (Zahlenwert).",
+      "type": "integer",
+      "required": true,
+      "observed": { "missingCount": 0 }
+    },
+    {
+      "key": "articleGroupText",
+      "tag": "<articlegroupDescription>",
+      "headerName": "Artikelgruppe_Bezeichnung",
+      "meaning": "Kategorisierung der Produkte (Text).",
+      "type": "string",
+      "required": true,
+      "observed": { "missingCount": 0 }
+    },
+    {
+      "key": "articleDescriptionDE",
+      "tag": "<articleDescriptionDE>",
+      "headerName": "Matchcode_Artikel",
+      "meaning": "Artikelbeschreibung deutsch (Matchcode).",
+      "type": "string",
+      "required": true,
+      "observed": { "missingCount": 0 },
+      "notes": [
+        "In dieser Datei heißt das Feld nicht \"Artikelmatchcode\", sondern \"Matchcode_Artikel\"."
+      ]
+    },
+    {
+      "key": "articleIt",
+      "tag": "<article#IT>",
+      "headerName": "Code-FalmecIT",
+      "meaning": "Herstellerartikelnummer (Hauptwerk IT).",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": { "missingCount": 456 },
+      "rules": [
+        "Fehlende Werte nicht inferieren/erfinden."
+      ],
+      "notes": [
+        "In deinem Text wird die Spaltenbezeichnung als (Bestellnummer) beschrieben; im vorliegenden Export steht hierfür \"Code-FalmecIT\"."
+      ]
+    },
+    {
+      "key": "articleDescription2DE",
+      "tag": "<articleDescription2DE>",
+      "headerName": "Bezeichnung_2",
+      "meaning": "Ergänzung der Artikelbeschreibung (DE).",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": { "missingCount": 36 }
+    },
+    {
+      "key": "ean",
+      "tag": "<ean>",
+      "headerName": "EAN-Nummer",
+      "meaning": "EAN-/Barcode-Nummer.",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": { "missingCount": 2665 },
+      "rules": [
+        "Fehlende EAN nicht inferieren/erfinden.",
+        "EAN als String behandeln (führende Nullen möglich)."
+      ]
+    },
+    {
+      "key": "storageMain",
+      "tag": "<storage#>",
+      "headerName": "Hauptlagerplatz",
+      "meaning": "Voreingestellter Hauptlagerplatz für Wareneingang / Buchung.",
+      "type": "enum_string",
+      "required": false,
+      "nullable": true,
+      "observed": {
+        "missingCount": 100,
+        "allowedValues_observed": [
+          "WE Lager;0;0;0",
+          "WE KDD;0;0;0",
+          "Falmec;0;0;0",
+          "Werbe.;0;0;0",
+          "KD;0;0;0",
+          "Apple;0;0;0",
+          "B;8;0;0",
+          "C;1;0;0"
+        ]
+      },
+      "expectedConfigValues_fromRequirement": [
+        { "value": "WE Lager;0;0;0", "meaning": "Wareneingangslager Ware" },
+        { "value": "WE KDD;0;0;0", "meaning": "Wareneingangslager Kundendienst" },
+        { "value": "Falmec;0;0;0", "meaning": "Zwischenbuchungslager und Endlager" },
+        { "value": "Werbe.;0;0;0", "meaning": "Lager für Werbeartikel / sonstiges" },
+        { "value": "LKW-5 Weber", "meaning": "Zwischenbuchungslager (manuelle Auswahl)", "observedInThisFile": false },
+        { "value": "LKW-6 Weber", "meaning": "Zwischenbuchungslager (manuelle Auswahl)", "observedInThisFile": false },
+        { "value": "LKW-7 Weber", "meaning": "Zwischenbuchungslager (manuelle Auswahl)", "observedInThisFile": false }
+      ],
+      "rules": [
+        "Wenn leer -> Soft-Fail + UI-Korrektur (keine automatische Lagerzuweisung erfinden)."
+      ]
+    },
+    {
+      "key": "supplierMain",
+      "tag": "<Liefernat#>",
+      "headerName": "Hauptlieferant",
+      "meaning": "Hauptlieferantennummer.",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": {
+        "missingCount": 214,
+        "uniqueValues_observed": ["70001", "70042", "70240", "70305", "70526", "70550", "70831", "70843"]
+      },
+      "rules": [
+        "Wenn leer -> Soft-Fail + UI-Korrektur (nicht inferieren)."
+      ]
+    },
+    {
+      "key": "serialRequirement",
+      "tag": "<serialRequirement>",
+      "headerName": "Seriennummernpflicht",
+      "meaning": "Pflicht zur Seriennummernführung im Wareneingang.",
+      "type": "enum_string",
+      "required": true,
+      "observed": { "missingCount": 0, "allowedValues_observed": ["Keine", "Lagerführung und Verkauf"] },
+      "normalization": [
+        {
+          "rule": "case-insensitive trim",
+          "map": {
+            "keine": "Keine",
+            "lagerführung und verkauf": "Lagerführung und Verkauf"
+          }
+        }
+      ],
+      "businessMeaning": [
+        { "value": "Keine", "meaning": "Keine Seriennummernpflicht" },
+        { "value": "Lagerführung und Verkauf", "meaning": "Seriennummer ist zwingend erforderlich" }
+      ]
+    }
+  ],
+  "ignoreFields": [
+    { "headerName": "Lagerbestand", "importance": "ignore" },
+    { "headerName": "Artikelgruppe_Bezeichnung1", "importance": "ignore" },
+    { "headerName": "Meldebestand", "importance": "ignore" },
+    { "headerName": "Artikelart", "importance": "ignore" },
+    { "headerName": "H-Artikelnummer", "importance": "ignore" },
+    { "headerName": "Bezeichnung_1", "importance": "ignore" },
+    { "headerName": "Warennummer", "importance": "ignore" },
+    { "headerName": "Verkauf", "importance": "ignore" },
+    { "headerName": "Beschaffung", "importance": "ignore" },
+    { "headerName": "Gewicht_in_kg", "importance": "ignore" },
+    { "headerName": "Gewicht_LME", "importance": "ignore" },
+    { "headerName": "Intrastat_Eigenmasse_in_kg", "importance": "ignore" }
+  ],
+  "rowRules": {
+    "rowType": "oneRowPerArticle",
+    "primaryKeySuggestion": ["Artikelnummer"],
+    "matchingKeysRecommended": ["Artikelnummer", "Code-FalmecIT", "EAN-Nummer"],
+    "validation": [
+      "Aktiv must be one of: Ja/Nein",
+      "Seriennummernpflicht must be one of: Keine | Lagerführung und Verkauf (case-insensitive normalize allowed)",
+      "Einzelpreis must be parseable as decimal >= 0",
+      "Artikelgruppe_Wert must be integer",
+      "Do not infer missing EAN-Nummer / Code-FalmecIT / Hauptlieferant / Hauptlagerplatz"
+    ],
+    "softFailRules": [
+      "Wenn Hauptlagerplatz fehlt -> Soft-Fail + UI-Korrektur (kein Default erfinden)",
+      "Wenn Hauptlieferant fehlt -> Soft-Fail + UI-Korrektur",
+      "Wenn Code-FalmecIT fehlt -> akzeptieren, aber nicht aus anderen Feldern ableiten",
+      "EAN kann fehlen -> akzeptieren, aber nicht ableiten"
+    ],
+    "observedFromThisFile": {
+      "rowsTotal": 3778,
+      "missingCounts": {
+        "Code-FalmecIT": 456,
+        "Bezeichnung_2": 36,
+        "EAN-Nummer": 2665,
+        "Hauptlagerplatz": 100,
+        "Hauptlieferant": 214
+      }
+    }
+  }
+}

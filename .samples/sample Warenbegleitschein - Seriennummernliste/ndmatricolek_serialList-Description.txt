@@ -1,0 +1,127 @@
+## Beschreibung der Datei (für LLM-/Parser-Verarbeitung) 🧾
+
+### 1) Dateityp & Herkunft
+- Datei: `ndmatricolek.31.01.xls` (legacy **.XLS**)
+- Quelle: Export wirkt wie aus **Crystal Reports** („Powered by Crystal“ im Dateimetadaten)
+- Tabellenblatt: **1 Sheet** (`Sheet1`)
+- Besonderheit: Sehr viele **verbundene Zellen (Merged Cells)** → Werte immer über **Zellbereiche** (Merge-Ranges) interpretieren, nicht nur über Spaltenindex.
+
+---
+
+### 2) Grobaufbau (Abschnitte im Sheet)
+Die Datei hat drei logische Bereiche:
+
+1. **Report-Header (Metadaten)**
+   - Zeilen **1–6**
+   - Enthält z. B. Reportdatum/Uhrzeit, Kundenname/-code, Titel
+   - Für das Vorhaben: `"ignore"`
+
+2. **Tabellen-Header (Spaltenüberschriften)**
+   - Zeilen **7–8**
+   - Zweizeilig wegen vertikal verbundener Zellen
+   - Spaltentitel enthalten teils Zeilenumbrüche `\n`
+
+3. **Tabellen-Daten (Produkte + Mengenzeilen)**
+   - Erste Produktzeile startet in dieser Datei ab **Zeile 10**
+   - Daten laufen bis ca. **Zeile 343**
+   - Footer beginnt in dieser Datei bei **Zeile 347** (z. B. `B347 = "Utente:"`) → `"ignore"`
+
+---
+
+### 3) Tabellen-Header (Zeile 7) – Spalten & Zellbereiche
+Wichtig: Die relevanten Spalten sind über Merge-Bereiche definiert.
+
+**Relevante Header (Zeile 7) und zugehörige Bereiche:**
+- `<deliveryDate>` = **"Data Consegna"**  
+  - Header-Range: **B7:C8**  
+  - Daten-Range: **B:C**  
+  - Primärzelle je Datenzeile: **B**  
+  - Bedeutung: geplantes Lieferdatum
+
+- `<Fattura>` = **"N° Fattura"**  
+  - Header-Range: **D7:F8**  
+  - Daten-Range: **D:F**  
+  - Primärzelle je Datenzeile: **D**  
+  - Bedeutung: Rechnungsnummer
+
+- `<Code-IT>` = **"Codice"**  
+  - Header-Range: **G7:L8**  
+  - Daten-Range: **G:L**  
+  - Primärzelle je Datenzeile: **G**  
+  - Bedeutung: Herstellerartikelnummer (IT)
+
+- `<ArtikelbeschreibungIT>` = **"Descrizione"**  
+  - Header-Range: **M7:P8**  
+  - Daten-Range: **M:P**  
+  - Praxis: Text steht häufig in **N**, aber Bereich ist **M–P**  
+  - Bedeutung: Artikelbezeichnung italienisch
+
+- `<Serial>` = **"Matricola"**  
+  - Header-Range: **Q7:Q8**  
+  - Daten-Range: **Q**  
+  - Bedeutung: Seriennummer je Produkt
+
+- `<ean>` = **"BarCode"**  
+  - Header-Range: **R7:S8**  
+  - Daten-Range: **R:S**  
+  - Primärzelle je Datenzeile: **R**  
+  - Bedeutung: EAN / Barcode
+
+**Weitere Spalten (für das Vorhaben: `"ignore"`):**
+- `Cod.Art.Cliente` (Kundenartikelcode) = **T7:V8** → `"ignore"`
+- `Descrizione Art.Cliente` (Kundenartikelbeschreibung) = **W7:AB8** → `"ignore"`
+
+---
+
+### 4) Datensatzlogik (zwei Zeilentypen)
+
+#### A) Produktzeile (1 Seriennummer = 1 Zeile)
+Erkennbar daran, dass typischerweise gesetzt sind:
+- **B** = Datum (Excel-Datewert)
+- **D** = Rechnungsnummer (numerisch)
+- **G** = Codice (String)
+- **Q** = Matricola (String, Seriennummer)
+- **R** = BarCode/EAN (Ziffernfolge)
+
+Beispiel (aus der Datei):
+- `B10 = 2026-01-31`
+- `D10 = 20007`
+- `G10 = CAEI20.E0P2#ZZZB461F`
+- `Q10 = K25645407008K`
+- `R10 = 8034122354507`
+
+#### B) Mengenzeile (Summenzeile für den Block direkt darüber)
+Die Mengenzeile enthält **nur** eine Ganzzahl im **Codice-Bereich** (G:L), praktisch in **G**.
+Alle anderen relevanten Felder sind leer.
+
+**Erkennungsregel Mengenzeile:**
+- `G` ist **Integer**
+- und `B, D, (M..P), Q, R` sind **leer**
+
+Beispiel:
+- `G14 = 2`, sonst leer → Menge bezieht sich auf die Produktzeilen direkt darüber.
+
+---
+
+### 5) Wichtige Besonderheit „Seriennummern vs. Menge“
+- **Wenn Seriennummern vorhanden sind:**  
+  Jede Seriennummer hat eine eigene Produktzeile. Danach kommt eine Mengenzeile mit der Gesamtmenge dieses identischen Artikelblocks.
+
+- **Wenn keine Seriennummern vorhanden wären:**  
+  Erwartetes Verhalten: Produktzeile(n) ohne `Matricola`, darunter Mengenzeile als Liefermenge.
+
+**Soft-Fail-Regeln (keine Erfindung von Daten):**
+- Fehlt die Mengenzeile → Soft-Fail + UI-Korrektur
+- Menge passt nicht zur Anzahl Produktzeilen (wenn Seriennummern vorhanden) → Soft-Fail + UI-Korrektur
+- Niemals Seriennummern „auffüllen“/erfinden
+
+**Footer-/Totals-Falle:**
+Am Ende existiert eine Footer-/Totals-Zeile mit einer Zahl in **G** (z. B. `G345 = 295`), die **nicht** zu einem Artikelblock gehört.
+
+**Robuste Abgrenzung:**
+- Wenn eine „Mengenzeile“ direkt auf eine andere Mengenzeile folgt (ggf. nur Leerzeilen dazwischen) → als Footer/Total behandeln → `"ignore"`
+
+---
+
+### 6) Kurz-Zusammenfassung für README
+Die Datei ist eine `.XLS`-Artikelbegleitliste mit Seriennummern (Matricola) und EAN (BarCode). Sie hat einen Headerblock (ignore), danach einen zweizeiligen Tabellenheader und anschließend Datenzeilen. Produktzeilen enthalten Lieferdatum (B), Rechnungsnummer (D), Codice (G), Descrizione (M–P), Matricola (Q) und BarCode (R). Mengen werden nicht pro Produktzeile geführt, sondern als separate Mengenzeile mit einer Ganzzahl in Spalte G direkt unter dem zugehörigen Produktblock. Footer-/Totals-Zahlen am Ende sind zu ignorieren.

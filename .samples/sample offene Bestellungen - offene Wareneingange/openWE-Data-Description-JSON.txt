@@ -1,0 +1,184 @@
+{
+  "documentType": "<openWE>",
+  "description": "Auszug aller derzeit bestellten, aber noch nicht gelieferten Artikel inkl. Bestellnummer/Vorgang und offener Liefermenge.",
+  "sourceFile": {
+    "filename": "openWE-Beispeil.csv",
+    "openPath": "/mnt/data/openWE-Beispeil.csv",
+    "format": "csv",
+    "delimiter": ";",
+    "encoding": "ISO-8859-1",
+    "hasHeaderRow": true,
+    "headerRowIndex_1based": 1,
+    "rowCount_data": 439,
+    "columnCount": 23,
+    "notes": [
+      "Die erste Zeile ist der Spaltenheader (kein zusätzlicher Report-Header).",
+      "Alle nicht explizit als wichtig genannten Spalten sind als \"ignore\" zu behandeln."
+    ]
+  },
+  "fields": [
+    {
+      "key": "supplierId",
+      "tag": "<Liefernat#>",
+      "headerName": "Lieferant",
+      "meaning": "Lieferantennummer",
+      "type": "string",
+      "required": true,
+      "examples": ["70001"],
+      "observed": {
+        "uniqueValueCount": 1,
+        "uniqueValuesSample": ["70001"]
+      }
+    },
+    {
+      "key": "ean",
+      "tag": "<ean>",
+      "headerName": "EAN-Nummer",
+      "meaning": "EAN/Barcode Nummer",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": {
+        "missingCount": 108
+      },
+      "rules": [
+        "Fehlende EAN nicht inferieren/erfinden."
+      ]
+    },
+    {
+      "key": "articleIt",
+      "tag": "<article#IT>",
+      "headerName": "Bestellnummer",
+      "meaning": "Herstellerartikelnummer (Hauptwerk IT)",
+      "type": "string",
+      "required": false,
+      "nullable": true,
+      "observed": {
+        "missingCount": 14
+      },
+      "rules": [
+        "Fehlende Bestellnummer nicht inferieren/erfinden."
+      ]
+    },
+    {
+      "key": "processId",
+      "tag": "<vorgang>",
+      "headerName": "Vorgang",
+      "meaning": "Vorgangsnummer des Workflows der Bestellung (Sage)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "orderYear",
+      "tag": "<orderYear>",
+      "headerName": "Jahr",
+      "meaning": "Jahr, in dem die Bestellung ausgelöst wurde",
+      "type": "integer",
+      "required": true,
+      "observed": {
+        "uniqueValueCount": 1,
+        "uniqueValuesSample": ["2025"]
+      }
+    },
+    {
+      "key": "documentNo",
+      "tag": "<Belegnummer>",
+      "headerName": "Belegnummer",
+      "meaning": "Belegnummer der Bestellung (zentrale Zuordnung)",
+      "type": "integer",
+      "required": true
+    },
+    {
+      "key": "articleDe",
+      "tag": "<article#DE>",
+      "headerName": "Artikelnummer",
+      "meaning": "Zusätzliche Artikelnummer (DE/intern)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "articleDescriptionDe",
+      "tag": "<articleDescriptionDE>",
+      "headerName": "Artikelmatchcode",
+      "meaning": "Artikelbeschreibung deutsch (Matchcode)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "openQty",
+      "tag": "<openDeliveryPz>",
+      "headerName": "<Offene Menge (vorgangsbezogen)",
+      "meaning": "Offene bestellte Menge des Produkts innerhalb des Vorgangs",
+      "type": "integer",
+      "required": true,
+      "notes": [
+        "Headername ist exakt so in der Datei enthalten (beginnt mit '<' und hat kein schließendes '>')."
+      ]
+    },
+    {
+      "key": "orderedQty",
+      "tag": "<openDeliveryOrderPz>",
+      "headerName": "Menge Belegposition",
+      "meaning": "Ursprüngliche Bestellmenge der Position (ohne Abzug evtl. bereits gelieferter Menge)",
+      "type": "integer",
+      "required": true
+    },
+    {
+      "key": "priceTaxFlag",
+      "tag": "<pricetax>",
+      "headerName": "Preiskennzeichen",
+      "meaning": "Netto/Brutto-Kennzeichen (bezogen auf Einzelpreis)",
+      "type": "string",
+      "required": true,
+      "examples": ["Netto"],
+      "observed": {
+        "uniqueValueCount": 1,
+        "uniqueValuesSample": ["Netto"]
+      }
+    },
+    {
+      "key": "articleGroupId",
+      "tag": "<articlegroup#>",
+      "headerName": "Artikelgruppe_Wert",
+      "meaning": "Kategorisierung der Produkte (Zahlenwert)",
+      "type": "integer",
+      "required": true
+    },
+    {
+      "key": "articleGroupText",
+      "tag": "<articlegroupDescription>",
+      "headerName": "Artikelgruppe_Bezeichnung",
+      "meaning": "Kategorisierung der Produkte (Text)",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "ignoreFields": [
+    { "headerName": "Bezeichnung 2", "importance": "ignore" },
+    { "headerName": "Liefertermin Belegposition", "importance": "ignore" },
+    { "headerName": "Referenznummer", "importance": "ignore" },
+    { "headerName": "ME", "importance": "ignore" },
+    { "headerName": "Erfüllt Vorgang", "importance": "ignore" },
+    { "headerName": "Erfüllt Position", "importance": "ignore" },
+    { "headerName": "Wkz_Wert", "importance": "ignore" },
+    { "headerName": "Wkz_Bezeichnung", "importance": "ignore" },
+    { "headerName": "Besteuerungsart_Wert", "importance": "ignore" },
+    { "headerName": "Besteuerungsart_Bezeichnung", "importance": "ignore" }
+  ],
+  "rowRules": {
+    "rowType": "oneRowPerOrderPosition",
+    "primaryKeySuggestion": ["Belegnummer", "Vorgang", "Artikelnummer", "Bestellnummer"],
+    "validation": [
+      "openQty and orderedQty must be integers >= 0",
+      "openQty <= orderedQty (wenn openQty > orderedQty -> Soft-Fail + UI-Korrektur)",
+      "Do not infer missing ean or articleIt"
+    ],
+    "observedFromThisFile": {
+      "rowsTotal": 439,
+      "eanMissingCount": 108,
+      "articleItMissingCount": 14,
+      "openQtyGreaterThanOrderedQtyCount": 0,
+      "openQtyLessThanOrderedQtyCount": 3
+    }
+  }
+}

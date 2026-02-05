@@ -1,0 +1,6 @@
+Rechnung <Invoice>:
+PDF, mit markierbaren Zeicheninhalt als Rechnung der Lieferung mit allen zur Zahlung ausstehenden Bestellpositionen bzw. Artikel zum Abgleich.
+Inhalt: Herstellerartikelnummer, sowie darunter liegend die EAN-Nummer in der Artikelbox in der ersten Spalte, Bezeichnung-IT (Produktbezeichnung in italienischer Sprache), ggf. in 1-5 Zeilen, übergeordnet und untergeordnet in der Spalte der Bezeichnung-IT, in fetter Schrift sind Bestellnummern abgedruckt – der Aufbau dieser Logik ist zur Zuordnung der Bestellnummer , wenn eine schwarze Schrift über einem Artikel  Fattura (Rechnungsnummer), Lieferdatum, Einzelpreis, Gesamtpreis
+Wichtige Felder: Artikelmenge, Herstellerartikelnummer, **<ean>**, Bezeichnung-IT (Produktbezeichnung in italienischer Sprache), Fattura (Rechnungsnummer), Lieferdatum, Einzelpreis
+Vermerk: Auf der PDF befindet sich auch ein Rechnungskopf sowie ein Rechnungsende, dies ist nicht interessant, lediglich die Einzelpreise für die Kumulation.
+>> WEITERE BESCHREIBUNG ZUM DATENSATZ IN: * Fattura_DOC_Description.txt*
