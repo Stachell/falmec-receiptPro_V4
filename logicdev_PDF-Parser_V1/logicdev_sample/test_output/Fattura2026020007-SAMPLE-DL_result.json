@@ -1,0 +1,765 @@
+{
+  "success": true,
+  "header": {
+    "fields": {
+      "document_number": "20.007",
+      "document_date": "31.01.2026",
+      "packages_count": 295,
+      "invoice_total": 104209.5,
+      "total_qty": 295,
+      "parsed_positions_count": 45,
+      "qty_validation_status": "ok"
+    }
+  },
+  "lines": [
+    {
+      "position_index": 1,
+      "manufacturer_article_no": "KACL.457#NF",
+      "ean": "8034122713656",
+      "description": "KACL.457#NF 8034122713656 KIT ACC. :MENSOLA SHELF 90 (Customizable) NERO",
+      "quantity_delivered": 1,
+      "unit_price": 219.09,
+      "total_price": 219.09,
+      "order_candidates": [
+        "10153"
+      ],
+      "order_candidates_text": "10153",
+      "order_status": "YES",
+      "raw_position_text": "KACL.457#NF 8034122713656 KIT ACC. :MENSOLA SHELF 90 (Customizable) NERO PZ 1 219,09 219,09"
+    },
+    {
+      "position_index": 2,
+      "manufacturer_article_no": "CAEI20.E0P2#ZZZB461F",
+      "ean": "8034122354507",
+      "description": "CAEI20.E0P2#ZZZB461F Vs. CAPPA ORDINE AURA ESTERO IS.120 P.E. Nr. 000000_10158 C/RADIOC. CONO del 18/11/2025 BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB.",
+      "quantity_delivered": 1,
+      "unit_price": 894.45,
+      "total_price": 894.45,
+      "order_candidates": [
+        "10153"
+      ],
+      "order_candidates_text": "10153",
+      "order_status": "YES",
+      "raw_position_text": "CAEI20.E0P2#ZZZB461F Vs. CAPPA ORDINE AURA ESTERO IS.120 P.E. Nr. 000000_10158 C/RADIOC. CONO del 18/11/2025 BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. PZ 1 894,45 894,45"
+    },
+    {
+      "position_index": 3,
+      "manufacturer_article_no": "CENI66.E0P6#ZZZN441F",
+      "ean": "8034122347004",
+      "description": "CENI66.E0P6#ZZZN441F Vs. CAPPA ORDINE MARE ESTERO E-ION ISOLA/ISLAND Nr. 000000000_10163 66 CONO del VETRO 24/11/2025 NERO RAL 9005 220-240V 50-60Hz T45",
+      "quantity_delivered": 4,
+      "unit_price": 899.0,
+      "total_price": 3596.0,
+      "order_candidates": [
+        "10158"
+      ],
+      "order_candidates_text": "10158",
+      "order_status": "YES",
+      "raw_position_text": "CENI66.E0P6#ZZZN441F Vs. CAPPA ORDINE MARE ESTERO E-ION ISOLA/ISLAND Nr. 000000000_10163 66 CONO del VETRO 24/11/2025 NERO RAL 9005 220-240V 50-60Hz T45 PZ 4 899,00 3596,00"
+    },
+    {
+      "position_index": 4,
+      "manufacturer_article_no": "CDCN60.E0P7#ZZZD461F",
+      "ean": "8034122476704",
+      "description": "CDCN60.E0P7#ZZZD461F 8034122476704 CAPPA DAMA IS.60 CANNA DI FUCILE 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 879.0,
+      "total_price": 1758.0,
+      "order_candidates": [
+        "10158"
+      ],
+      "order_candidates_text": "10158",
+      "order_status": "YES",
+      "raw_position_text": "CDCN60.E0P7#ZZZD461F 8034122476704 CAPPA DAMA IS.60 CANNA DI FUCILE 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC PZ 2 879,00 1.758,00"
+    },
+    {
+      "position_index": 5,
+      "manufacturer_article_no": "CDCN60.E0P7#ZZZU461F",
+      "ean": "8034122476728",
+      "description": "CDCN60.E0P7#ZZZU461F PACK CAPPA DAMA IS.60 RAME 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 845.26,
+      "total_price": 1690.52,
+      "order_candidates": [
+        "10158"
+      ],
+      "order_candidates_text": "10158",
+      "order_status": "YES",
+      "raw_position_text": "CDCN60.E0P7#ZZZU461F PACK CAPPA DAMA IS.60 RAME 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC PZ 2 845,26 1.690,52"
+    },
+    {
+      "position_index": 6,
+      "manufacturer_article_no": "CLVI20.E0P7#ZZZF461F",
+      "ean": "8034122477183",
+      "description": "CLVI20.E0P7#ZZZF461F CAPPA LEVANTE IS.120 VETRO BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 1450.0,
+      "total_price": 2900.0,
+      "order_candidates": [
+        "10158"
+      ],
+      "order_candidates_text": "10158",
+      "order_status": "YES",
+      "raw_position_text": "CLVI20.E0P7#ZZZF461F CAPPA LEVANTE IS.120 VETRO BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC PZ 2 1.450,00 2900,00"
+    },
+    {
+      "position_index": 7,
+      "manufacturer_article_no": "CUZQ76.06P8#ZZZN461F",
+      "ean": "8034122901077",
+      "description": "CUZQ76.06P8#ZZZN461F CAPPA ZERO EASY 76 VETRO NERO LUCIDO 220-240V ~ 50-60Hz T60 C/FILTRO IMB.",
+      "quantity_delivered": 4,
+      "unit_price": 865.0,
+      "total_price": 3460.0,
+      "order_candidates": [
+        "10158"
+      ],
+      "order_candidates_text": "10158",
+      "order_status": "YES",
+      "raw_position_text": "CUZQ76.06P8#ZZZN461F CAPPA ZERO EASY 76 VETRO NERO LUCIDO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. PZ 4 865,00 3.460,00"
+    },
+    {
+      "position_index": 8,
+      "manufacturer_article_no": "CUZQ90.06P8#ZZZN461F",
+      "ean": "8034122900940",
+      "description": "CUZQ90.06P8#ZZZN461F CAPPA ZERO EASY 84 VETRO NERO LUCIDO 220-240V ~ 50-60Hz T60 C/FILTRO IMB.",
+      "quantity_delivered": 20,
+      "unit_price": 1550.0,
+      "total_price": 31000.0,
+      "order_candidates": [
+        "10164"
+      ],
+      "order_candidates_text": "10164",
+      "order_status": "YES",
+      "raw_position_text": "CUZQ90.06P8#ZZZN461F CAPPA ZERO EASY 84 VETRO NERO LUCIDO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. PZ 20 1550,00 31.000,00"
+    },
+    {
+      "position_index": 9,
+      "manufacturer_article_no": "CLUN90.E0P1#NEUI491F",
+      "ean": "",
+      "description": "CLUN90.E0P1#NEUI491F 8 0 3 4122324876 LUMEN 90 CAPPA LUMEN PARETE/WALL 90 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80",
+      "quantity_delivered": 10,
+      "unit_price": 470.0,
+      "total_price": 4700.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CLUN90.E0P1#NEUI491F 8 0 3 4122324876 LUMEN 90 CAPPA LUMEN PARETE/WALL 90 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80 PZ 10 470,00 4700,00"
+    },
+    {
+      "position_index": 10,
+      "manufacturer_article_no": "CPLN90.E5P2#ZZZI491F",
+      "ean": "",
+      "description": "CPLN90.E5P2#ZZZI491F 8 0 34122331317 STREAM 90 CAPPA STREAM PARETE/WALL 90 CONO INOX 220-240V 50-60Hz T80 C/FILTRO IMB.",
+      "quantity_delivered": 1,
+      "unit_price": 365.0,
+      "total_price": 365.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CPLN90.E5P2#ZZZI491F 8 0 34122331317 STREAM 90 CAPPA STREAM PARETE/WALL 90 CONO INOX 220-240V 50-60Hz T80 C/FILTRO IMB. PZ 1 365,00 365,00"
+    },
+    {
+      "position_index": 11,
+      "manufacturer_article_no": "KCVJN.00#3",
+      "ean": "8034122707686",
+      "description": "KCVJN.00#3 FALMEC KIT CAMINO PACK. VIRGOLA-MOVE H=185 + PROL. H=185 (C/Imballo) CONO ACCIAIO",
+      "quantity_delivered": 20,
+      "unit_price": 12.2,
+      "total_price": 244.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "KCVJN.00#3 FALMEC KIT CAMINO PACK. VIRGOLA-MOVE H=185 + PROL. H=185 (C/Imballo) CONO ACCIAIO PZ 20 12,20 244,00"
+    },
+    {
+      "position_index": 12,
+      "manufacturer_article_no": "CFPN85.E2P2#ZZZQ490F",
+      "ean": "8034122353739",
+      "description": "CFPN85.E2P2#ZZZQ490F CAPPA FLIPPER 85 NRS P.E. CONO VETRO NERO ACIDATO RAL 9005 220-240V ~ 50-60Hz",
+      "quantity_delivered": 1,
+      "unit_price": 488.0,
+      "total_price": 488.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CFPN85.E2P2#ZZZQ490F CAPPA FLIPPER 85 NRS P.E. CONO VETRO NERO ACIDATO RAL 9005 220-240V ~ 50-60Hz PZ 1 488,00 488,00"
+    },
+    {
+      "position_index": 13,
+      "manufacturer_article_no": "KACL.796#4AF",
+      "ean": "8034122709611",
+      "description": "KACL.796#4AF 8034122709611 KIT ACC. :ASPIRATORE ESTERNO 220-240V ~ 50-60Hz T1500 IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 233.38,
+      "total_price": 233.38,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "KACL.796#4AF 8034122709611 KIT ACC. :ASPIRATORE ESTERNO 220-240V ~ 50-60Hz T1500 IMB. FALMEC PZ 1 233,38 233,38"
+    },
+    {
+      "position_index": 14,
+      "manufacturer_article_no": "",
+      "ean": "8034122710938",
+      "description": "KACL.943 8034122710938 KIT ACC. :RICAMBIO FILTRI x UNITA CARBON-ZEO (x Cappe Inclinate)",
+      "quantity_delivered": 3,
+      "unit_price": 42.05,
+      "total_price": 126.15,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "KACL.943 8034122710938 KIT ACC. :RICAMBIO FILTRI x UNITA CARBON-ZEO (x Cappe Inclinate) PZ 3 42,05 126,15"
+    },
+    {
+      "position_index": 15,
+      "manufacturer_article_no": "CLVI20.E0P7#ZZZN461F",
+      "ean": "8034122476933",
+      "description": "CLVI20.E0P7#ZZZN461F 8034122476933 CAPPA LEVANTE IS.120 VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T60 C/FILTRO",
+      "quantity_delivered": 3,
+      "unit_price": 1600.0,
+      "total_price": 4800.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CLVI20.E0P7#ZZZN461F 8034122476933 CAPPA LEVANTE IS.120 VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T60 C/FILTRO PZ 3 1.600,00 4.800,00"
+    },
+    {
+      "position_index": 16,
+      "manufacturer_article_no": "CLVI20.E0P7#ZZZF461F",
+      "ean": "8034122477183",
+      "description": "CLVI20.E0P7#ZZZF461F CAPPA LEVANTE IS.120 VETRO BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 1450.0,
+      "total_price": 2900.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CLVI20.E0P7#ZZZF461F CAPPA LEVANTE IS.120 VETRO BIANCO 220-240V ~ 50-60Hz T60 C/FILTRO IMB. FALMEC PZ 2 1.450,00 2.900,00"
+    },
+    {
+      "position_index": 17,
+      "manufacturer_article_no": "CVXN85.E1P2#ZZZN490F",
+      "ean": "8034122360546",
+      "description": "CVXN85.E1P2#ZZZN490F 8034122360546 CAPPA VERSO NRS 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80",
+      "quantity_delivered": 4,
+      "unit_price": 500.0,
+      "total_price": 2000.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CVXN85.E1P2#ZZZN490F 8034122360546 CAPPA VERSO NRS 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 PZ 4 500,00 2.000,00"
+    },
+    {
+      "position_index": 18,
+      "manufacturer_article_no": "CVXN85.E2P2#ZZZN491F",
+      "ean": "8034122365640",
+      "description": "CVXN85.E2P2#ZZZN491F CAPPA VERSO EASY 85 VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 C/FILTRO",
+      "quantity_delivered": 8,
+      "unit_price": 355.0,
+      "total_price": 2840.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CVXN85.E2P2#ZZZN491F CAPPA VERSO EASY 85 VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 C/FILTRO PZ 8 355,00 2.840,00"
+    },
+    {
+      "position_index": 19,
+      "manufacturer_article_no": "CVJN90.E25P2#EU3490F",
+      "ean": "8034122367477",
+      "description": "CVJN90.E25P2#EU3490F CAPPA VIRGOLA TOUCH 90 EU ACCIAIO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 265.0,
+      "total_price": 265.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CVJN90.E25P2#EU3490F CAPPA VIRGOLA TOUCH 90 EU ACCIAIO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 265,00 265,00"
+    },
+    {
+      "position_index": 20,
+      "manufacturer_article_no": "CMUN90.E10P2#ZZZ3460F",
+      "ean": "8034122366883",
+      "description": "CMUN90.E10P2#ZZZ3460F CAPPA MERCURIO EVO 90 (con ricevitore radio) ACCIAIO 220-240V ~ 50-60Hz T60 S/FILTRO",
+      "quantity_delivered": 1,
+      "unit_price": 215.0,
+      "total_price": 215.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CMUN90.E10P2#ZZZ3460F CAPPA MERCURIO EVO 90 (con ricevitore radio) ACCIAIO 220-240V ~ 50-60Hz T60 S/FILTRO PZ 1 215,00 215,00"
+    },
+    {
+      "position_index": 21,
+      "manufacturer_article_no": "CPLI90.E23P2#EUI490F",
+      "ean": "8034122367057",
+      "description": "CPLI90.E23P2#EUI490F 600 CAPPA m3/h PLANE WITHOUT PLUS FILTER ISLAND FALMEC 90 EU INOX PACK 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 375.0,
+      "total_price": 375.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CPLI90.E23P2#EUI490F 600 CAPPA m3/h PLANE WITHOUT PLUS FILTER ISLAND FALMEC 90 EU INOX PACK 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 375,00 375,00"
+    },
+    {
+      "position_index": 22,
+      "manufacturer_article_no": "CMFI40.E14P2#EUN490F",
+      "ean": "8034122368399",
+      "description": "CMFI40.E14P2#EUN490F CAPPA MIRA PLUS ISLAND 40 EU NERO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 355.0,
+      "total_price": 355.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CMFI40.E14P2#EUN490F CAPPA MIRA PLUS ISLAND 40 EU NERO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 355,00 355,00"
+    },
+    {
+      "position_index": 23,
+      "manufacturer_article_no": "CMFI40.E14P2#EUI490F",
+      "ean": "8034122368382",
+      "description": "CMFI40.E14P2#EUI490F 8034122368382 CAPPA MIRA PLUS ISLAND 40 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 305.0,
+      "total_price": 305.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CMFI40.E14P2#EUI490F 8034122368382 CAPPA MIRA PLUS ISLAND 40 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 305,00 305,00"
+    },
+    {
+      "position_index": 24,
+      "manufacturer_article_no": "CVXN85.E0P2#ZZZN490F",
+      "ean": "8034122368665",
+      "description": "CVXN85.E0P2#ZZZN490F 8034122368665 CAPPA VERSO 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80",
+      "quantity_delivered": 24,
+      "unit_price": 285.0,
+      "total_price": 6840.0,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "CVXN85.E0P2#ZZZN490F 8034122368665 CAPPA VERSO 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 PZ 24 285,00 6.840,00"
+    },
+    {
+      "position_index": 25,
+      "manufacturer_article_no": "",
+      "ean": "8034122714424",
+      "description": "KACL.1048 8034122714424 KIT ACC. :FILTRO CARBON-ZEO MICROTECH (Coppia) (CIRCLE TECH)",
+      "quantity_delivered": 9,
+      "unit_price": 55.86,
+      "total_price": 502.74,
+      "order_candidates": [
+        "10170",
+        "10173",
+        "10172"
+      ],
+      "order_candidates_text": "10170|10173|10172",
+      "order_status": "check",
+      "raw_position_text": "KACL.1048 8034122714424 KIT ACC. :FILTRO CARBON-ZEO MICROTECH (Coppia) (CIRCLE TECH) PZ 9 55,86 502,74"
+    },
+    {
+      "position_index": 26,
+      "manufacturer_article_no": "CEIA00.E0P1#CRII491F",
+      "ean": "",
+      "description": "CEIA00.E0P1#CRII491F 8 0 34122306322 ELIOS 100 CAPPA ELIOS ANGOLO/CORNER 100 C0001 CROMATO INOX CONO INOX 220-240V 50-60Hz",
+      "quantity_delivered": 1,
+      "unit_price": 317.0,
+      "total_price": 317.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CEIA00.E0P1#CRII491F 8 0 34122306322 ELIOS 100 CAPPA ELIOS ANGOLO/CORNER 100 C0001 CROMATO INOX CONO INOX 220-240V 50-60Hz PZ 1 317,00 317,00"
+    },
+    {
+      "position_index": 27,
+      "manufacturer_article_no": "CLUN60.E0P1#NEUI491F",
+      "ean": "",
+      "description": "CLUN60.E0P1#NEUI491F CAPPA LUMEN PARETE/WALL 60 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80",
+      "quantity_delivered": 3,
+      "unit_price": 265.5,
+      "total_price": 796.5,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CLUN60.E0P1#NEUI491F CAPPA LUMEN PARETE/WALL 60 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80 PZ 3 265,50 796,50"
+    },
+    {
+      "position_index": 28,
+      "manufacturer_article_no": "CLUN90.E0P1#NEUI491F",
+      "ean": "",
+      "description": "CLUN90.E0P1#NEUI491F m3/h CAPPA WITH LUMEN FILTER PARETE/WALL FALMEC PACK. 90 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80",
+      "quantity_delivered": 10,
+      "unit_price": 275.0,
+      "total_price": 2700.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CLUN90.E0P1#NEUI491F m3/h CAPPA WITH LUMEN FILTER PARETE/WALL FALMEC PACK. 90 C0001 NEUTRO CONO INOX 220-240V 50-60Hz T80 PZ 10 275,00 2.700,00"
+    },
+    {
+      "position_index": 29,
+      "manufacturer_article_no": "CMKN60.E0P2#ZZZN490F",
+      "ean": "8034122352169",
+      "description": "CMKN60.E0P2#ZZZN490F 8034122352169 CAPPA MOVE PARETE/WALL 60 CONO VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz",
+      "quantity_delivered": 30,
+      "unit_price": 295.5,
+      "total_price": 8865.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CMKN60.E0P2#ZZZN490F 8034122352169 CAPPA MOVE PARETE/WALL 60 CONO VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz PZ 30 295,50 8.865,00"
+    },
+    {
+      "position_index": 30,
+      "manufacturer_article_no": "CMKN90.E0P2#ZZZN490F",
+      "ean": "8034122352183",
+      "description": "CMKN90.E0P2#ZZZN490F CAPPA MOVE PARETE/WALL 90 CONO VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz",
+      "quantity_delivered": 10,
+      "unit_price": 295.5,
+      "total_price": 2955.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CMKN90.E0P2#ZZZN490F CAPPA MOVE PARETE/WALL 90 CONO VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz PZ 10 295,50 2.955,00"
+    },
+    {
+      "position_index": 31,
+      "manufacturer_article_no": "CMHN90.E3P2#ZZZI410F",
+      "ean": "8034122355221",
+      "description": "CMHN90.E3P2#ZZZI410F WITHOUT CAPPA MARTE FILTER PRO FALMEC 90 P.E. PACK. INOX 220-240V ~ 50-60Hz T100 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 450.0,
+      "total_price": 900.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CMHN90.E3P2#ZZZI410F WITHOUT CAPPA MARTE FILTER PRO FALMEC 90 P.E. PACK. INOX 220-240V ~ 50-60Hz T100 S/FILTRO IMB. FALMEC PZ 2 450,00 900,00"
+    },
+    {
+      "position_index": 32,
+      "manufacturer_article_no": "CNBI90.E2P2#ZZZB400F",
+      "ean": "8034122363226",
+      "description": "CNBI90.E2P2#ZZZB400F CAPPA NUBE EVO IS.90 BIANCO 220-240V ~ 50-60Hz S/MOTORE S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 335.5,
+      "total_price": 335.5,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CNBI90.E2P2#ZZZB400F CAPPA NUBE EVO IS.90 BIANCO 220-240V ~ 50-60Hz S/MOTORE S/FILTRO IMB. FALMEC PZ 1 335,50 335,50"
+    },
+    {
+      "position_index": 33,
+      "manufacturer_article_no": "CPLN90.E24P2#EUI490F",
+      "ean": "8034122367361",
+      "description": "CPLN90.E24P2#EUI490F 8034122367361 CAPPA PLANE NRS PLUS 90 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 2,
+      "unit_price": 425.0,
+      "total_price": 850.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CPLN90.E24P2#EUI490F 8034122367361 CAPPA PLANE NRS PLUS 90 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 2 425,00 850,00"
+    },
+    {
+      "position_index": 34,
+      "manufacturer_article_no": "",
+      "ean": "8034122714349",
+      "description": "KACL.1036 8034122714349 KIT ACC. : KIT DEFLETTORE ANTI-RUMORE QUANTUM-ZERO",
+      "quantity_delivered": 8,
+      "unit_price": 24.08,
+      "total_price": 192.64,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "KACL.1036 8034122714349 KIT ACC. : KIT DEFLETTORE ANTI-RUMORE QUANTUM-ZERO PZ 8 24,08 192,64"
+    },
+    {
+      "position_index": 35,
+      "manufacturer_article_no": "CSMI90.E3P2#ZZZB400F",
+      "ean": "8034122368566",
+      "description": "CSMI90.E3P2#ZZZB400F 8034122368566 CAPPA STELLA PLUS IS.90 BIANCO 220-240V ~ 50-60Hz S/MOTORE S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 485.55,
+      "total_price": 485.55,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CSMI90.E3P2#ZZZB400F 8034122368566 CAPPA STELLA PLUS IS.90 BIANCO 220-240V ~ 50-60Hz S/MOTORE S/FILTRO IMB. FALMEC PZ 1 485,55 485,55"
+    },
+    {
+      "position_index": 36,
+      "manufacturer_article_no": "CMFI40.E14P2#EUN490F",
+      "ean": "8034122368399",
+      "description": "CMFI40.E14P2#EUN490F FILTER CAPPA FALMEC MIRA PLUS PACK ISLAND 40 EU NERO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 355.0,
+      "total_price": 355.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CMFI40.E14P2#EUN490F FILTER CAPPA FALMEC MIRA PLUS PACK ISLAND 40 EU NERO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 355,00 355,00"
+    },
+    {
+      "position_index": 37,
+      "manufacturer_article_no": "CMFI40.E14P2#EUI490F",
+      "ean": "8034122368382",
+      "description": "CMFI40.E14P2#EUI490F 8034122368382 CAPPA MIRA PLUS ISLAND 40 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 345.0,
+      "total_price": 345.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CMFI40.E14P2#EUI490F 8034122368382 CAPPA MIRA PLUS ISLAND 40 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 345,00 345,00"
+    },
+    {
+      "position_index": 38,
+      "manufacturer_article_no": "CVXN55.E0P2#ZZZN490F",
+      "ean": "8034122368634",
+      "description": "CVXN55.E0P2#ZZZN490F 8034122368634 CAPPA VERSO 55 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80",
+      "quantity_delivered": 8,
+      "unit_price": 340.5,
+      "total_price": 2724.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CVXN55.E0P2#ZZZN490F 8034122368634 CAPPA VERSO 55 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 PZ 8 340,50 2.724,00"
+    },
+    {
+      "position_index": 39,
+      "manufacturer_article_no": "CVXN55.E0P2#ZZZA490F",
+      "ean": "8034122368610",
+      "description": "CVXN55.E0P2#ZZZA490F CAPPA VERSO 55 P.E.CAP. VETRO GRIGIO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 8,
+      "unit_price": 275.5,
+      "total_price": 2204.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CVXN55.E0P2#ZZZA490F CAPPA VERSO 55 P.E.CAP. VETRO GRIGIO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 8 275,50 2.204,00"
+    },
+    {
+      "position_index": 40,
+      "manufacturer_article_no": "CVXN85.E0P2#ZZZN490F",
+      "ean": "8034122368665",
+      "description": "CVXN85.E0P2#ZZZN490F 8034122368665 CAPPA VERSO 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80",
+      "quantity_delivered": 16,
+      "unit_price": 285.0,
+      "total_price": 4560.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CVXN85.E0P2#ZZZN490F 8034122368665 CAPPA VERSO 85 P.E.CAP. VETRO NERO LUCIDO RAL 9005 220-240V ~ 50-60Hz T80 PZ 16 285,00 4.560,00"
+    },
+    {
+      "position_index": 41,
+      "manufacturer_article_no": "",
+      "ean": "8034122714585",
+      "description": "KACL.1059 8034122714585 KIT ACC.: DEFLETTORE ARIA PER USCITA da D=150mm",
+      "quantity_delivered": 10,
+      "unit_price": 8.03,
+      "total_price": 80.3,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "KACL.1059 8034122714585 KIT ACC.: DEFLETTORE ARIA PER USCITA da D=150mm PZ 10 8,03 80,30"
+    },
+    {
+      "position_index": 42,
+      "manufacturer_article_no": "",
+      "ean": "8034122714424",
+      "description": "KACL.1048 8034122714424 KIT ACC. :FILTRO CARBON-ZEO MICROTECH (Coppia) (CIRCLE TECH)",
+      "quantity_delivered": 4,
+      "unit_price": 55.86,
+      "total_price": 223.44,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "KACL.1048 8034122714424 KIT ACC. :FILTRO CARBON-ZEO MICROTECH (Coppia) (CIRCLE TECH) PZ 4 55,86 223,44"
+    },
+    {
+      "position_index": 43,
+      "manufacturer_article_no": "CPON90.E11P2#EUB490F",
+      "ean": "8034122369204",
+      "description": "CPON90.E11P2#EUB490F 8034122369204 CAPPA POLAR EVO WALL 35 EU BIANCO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 375.0,
+      "total_price": 293.74,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CPON90.E11P2#EUB490F 8034122369204 CAPPA POLAR EVO WALL 35 EU BIANCO 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 375,00 293,74"
+    },
+    {
+      "position_index": 44,
+      "manufacturer_article_no": "CPOI90.E11P2#EUI490F",
+      "ean": "8034122369174",
+      "description": "CPOI90.E11P2#EUI490F 8034122369174 CAPPA POLAR EVO ISLAND 35 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC",
+      "quantity_delivered": 1,
+      "unit_price": 365.5,
+      "total_price": 365.5,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "CPOI90.E11P2#EUI490F 8034122369174 CAPPA POLAR EVO ISLAND 35 EU INOX 220-240V ~ 50-60Hz T80 S/FILTRO IMB. FALMEC PZ 1 365,50 365,50"
+    },
+    {
+      "position_index": 45,
+      "manufacturer_article_no": "KCQAN.00#N",
+      "ean": "8034122711317",
+      "description": "KCQAN.00#N m3/h KIT CAMINO WITHOUT VERSO FILTER CONO FALMEC NERO PACK",
+      "quantity_delivered": 50,
+      "unit_price": 31.78,
+      "total_price": 1589.0,
+      "order_candidates": [
+        "10175"
+      ],
+      "order_candidates_text": "10175",
+      "order_status": "YES",
+      "raw_position_text": "KCQAN.00#N m3/h KIT CAMINO WITHOUT VERSO FILTER CONO FALMEC NERO PACK PZ 50 31,78 1.589,00"
+    }
+  ],
+  "warnings": [],
+  "validation_results": [
+    {
+      "rule_id": "amount_vs_total",
+      "rule_name": "Line Amounts vs Invoice Total",
+      "passed": true,
+      "message": "SUM(amount)=104209.5 matches invoice_total=104209.5",
+      "severity": "info",
+      "details": {
+        "sum_line_totals": 104209.5,
+        "invoice_total": 104209.5,
+        "difference": 0.0
+      }
+    },
+    {
+      "rule_id": "position_identifier",
+      "rule_name": "Position Must Have Identifier",
+      "passed": true,
+      "message": "All positions have an identifier (EAN or article number)",
+      "severity": "info",
+      "details": {
+        "missing_positions": []
+      }
+    },
+    {
+      "rule_id": "qty_vs_packages",
+      "rule_name": "Quantity Sum vs Packages Count",
+      "passed": true,
+      "message": "SUM(qty)=295 matches packages_count=295",
+      "severity": "info",
+      "details": {
+        "sum_qty": 295,
+        "packages_count": 295,
+        "difference": 0
+      }
+    }
+  ],
+  "parser_unit": "fattura_falmec_v1",
+  "parsed_at": "2026-02-12T15:54:55.967678",
+  "source_file_name": "Fattura2026020007-SAMPLE-DL.pdf"
+}

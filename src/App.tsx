@@ -6,8 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
-import Archiv from "./pages/Archiv";
-import Export from "./pages/Export";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,8 +20,6 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/new-run" element={<NewRun />} />
           <Route path="/run/:runId" element={<RunDetail />} />
-          <Route path="/archiv" element={<Archiv />} />
-          <Route path="/export" element={<Export />} />
           {/* /runs route removed */}
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

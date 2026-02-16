@@ -1,15 +1,14 @@
 /**
  * Invoice Parser Service
  *
- * High-level service for parsing invoice PDFs.
- * Coordinates parser selection and result handling.
+ * High-level service for parsing invoice PDFs using pure TypeScript with pdfjs-dist.
+ * No server dependency required - all parsing runs in the browser.
  *
  * @module services/invoiceParserService
  */
 
 import {
   findParserForFile,
-  invoiceParserFattura,
   type ParsedInvoiceResult,
   type ParsedInvoiceLine,
 } from './parsers';
@@ -34,47 +33,34 @@ export async function parseInvoicePDF(
   });
 
   try {
-    // Find appropriate parser
     const parser = await findParserForFile(pdfFile);
 
-    if (!parser) {
-      logService.warn('Kein passender Parser gefunden, verwende Standard-Parser', {
-        runId,
-        step: 'Rechnung auslesen',
-      });
-    }
-
-    const selectedParser = parser || invoiceParserFattura;
-
-    logService.info(`Parser ausgewählt: ${selectedParser.moduleName} v${selectedParser.version}`, {
+    logService.info(`Parser: ${parser.moduleName} v${parser.version}`, {
       runId,
       step: 'Rechnung auslesen',
     });
 
-    // Parse the invoice
-    const result = await selectedParser.parseInvoice(pdfFile);
+    const result = await parser.parseInvoice(pdfFile);
 
-    // Log results
     if (result.success) {
+      const totalEur = result.header.invoiceTotal != null
+        ? `, Rechnungsgesamt: ${result.header.invoiceTotal.toFixed(2)} EUR`
+        : '';
       logService.info(
         `PDF erfolgreich geparst: ${result.lines.length} Positionen, Fattura: ${result.header.fatturaNumber}`,
         {
           runId,
           step: 'Rechnung auslesen',
-          details: `Gesamtmenge: ${result.header.totalQty}, Pakete: ${result.header.packagesCount ?? 'n/a'}`,
+          details: `Gesamtmenge: ${result.header.totalQty}, Pakete: ${result.header.packagesCount ?? 'n/a'}${totalEur}`,
         }
       );
     } else {
       logService.warn(
         `PDF-Parsing mit Fehlern: ${result.warnings.filter(w => w.severity === 'error').length} Fehler`,
-        {
-          runId,
-          step: 'Rechnung auslesen',
-        }
+        { runId, step: 'Rechnung auslesen' }
       );
     }
 
-    // Log warnings
     for (const warning of result.warnings) {
       if (warning.severity === 'error') {
         logService.error(warning.message, {
@@ -100,7 +86,6 @@ export async function parseInvoicePDF(
       step: 'Rechnung auslesen',
     });
 
-    // Return error result
     return {
       success: false,
       header: {
@@ -108,15 +93,15 @@ export async function parseInvoicePDF(
         fatturaDate: '',
         packagesCount: null,
         totalQty: 0,
+        parsedPositionsCount: 0,
+        qtyValidationStatus: 'unknown',
       },
       lines: [],
-      warnings: [
-        {
-          code: 'PARSE_EXCEPTION',
-          message: errorMessage,
-          severity: 'error',
-        },
-      ],
+      warnings: [{
+        code: 'PARSE_EXCEPTION',
+        message: errorMessage,
+        severity: 'error',
+      }],
       parserModule: 'unknown',
       parsedAt: new Date().toISOString(),
       sourceFileName: pdfFile.name,
@@ -139,7 +124,6 @@ export function convertToInvoiceLines(
     qty: parsed.quantityDelivered,
     unitPriceInvoice: parsed.unitPrice,
     totalLineAmount: parsed.totalPrice,
-    // Initial values for fields to be populated in later workflow steps
     orderNumberAssigned: parsed.orderCandidates.length === 1 ? parsed.orderCandidates[0] : null,
     orderAssignmentReason: parsed.orderStatus === 'YES' ? 'direct-match' : 'pending',
     serialNumber: null,
@@ -159,7 +143,6 @@ export function convertToInvoiceLines(
 export function convertToInvoiceHeader(
   parsedResult: ParsedInvoiceResult
 ): InvoiceHeader {
-  // Parse date string to ISO format
   let invoiceDate = parsedResult.header.fatturaDate;
 
   // Convert DD.MM.YYYY to YYYY-MM-DD
@@ -167,7 +150,6 @@ export function convertToInvoiceHeader(
     const [day, month, year] = invoiceDate.split('.');
     invoiceDate = `${year}-${month}-${day}`;
   } else if (invoiceDate && /^\d{2}\.\d{2}\.\d{2}$/.test(invoiceDate)) {
-    // Handle DD.MM.YY format
     const [day, month, year] = invoiceDate.split('.');
     const fullYear = parseInt(year) > 50 ? `19${year}` : `20${year}`;
     invoiceDate = `${fullYear}-${month}-${day}`;
@@ -176,33 +158,23 @@ export function convertToInvoiceHeader(
   return {
     fattura: parsedResult.header.fatturaNumber,
     invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
-    deliveryDate: null, // To be extracted from other sources if available
+    deliveryDate: null,
   };
 }
 
 /**
  * Generate Run ID based on Fattura number
- *
  * Schema: Fattura-[FatturaNumber]-[YYYYMMDD]-[HHMMSS]
- * Example: Fattura-20.007-20260204-130456
  */
 export function generateRunId(fatturaNumber: string): string {
   const now = new Date();
-
-  // Format: YYYYMMDD
   const datePart = now.getFullYear().toString() +
     (now.getMonth() + 1).toString().padStart(2, '0') +
     now.getDate().toString().padStart(2, '0');
-
-  // Format: HHMMSS
   const timePart = now.getHours().toString().padStart(2, '0') +
     now.getMinutes().toString().padStart(2, '0') +
     now.getSeconds().toString().padStart(2, '0');
-
-  // Keep fattura number as-is (preserve dots, etc.)
-  const sanitizedFattura = fatturaNumber.trim();
-
-  return `Fattura-${sanitizedFattura}-${datePart}-${timePart}`;
+  return `Fattura-${fatturaNumber.trim()}-${datePart}-${timePart}`;
 }
 
 // Export types for convenience

@@ -35,6 +35,19 @@ const ARCHIVE_RUNS_KEY = 'falmec-archive-runs';
 const ARCHIVE_FILES_PREFIX = 'falmec-archive-file-';
 
 class ArchiveService {
+  private safeSetItem(key: string, value: string): boolean {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (error) {
+      logService.warn('Archivspeicher voll oder nicht verfuegbar', {
+        step: 'Archiv',
+        details: `${key}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return false;
+    }
+  }
+
   // Format timestamp for folder names: YYYY-MM-DD_HHmmss
   private formatFolderTimestamp(date: Date = new Date()): string {
     const pad = (n: number) => n.toString().padStart(2, '0');
@@ -53,7 +66,11 @@ class ArchiveService {
 
   // Save archived runs
   private saveArchivedRuns(runs: ArchiveRun[]): void {
-    localStorage.setItem(ARCHIVE_RUNS_KEY, JSON.stringify(runs));
+    const serialized = JSON.stringify(runs);
+    if (!this.safeSetItem(ARCHIVE_RUNS_KEY, serialized)) {
+      // Keep only the newest entries as fallback.
+      this.safeSetItem(ARCHIVE_RUNS_KEY, JSON.stringify(runs.slice(0, 25)));
+    }
   }
 
   // Get a specific archived run
@@ -132,7 +149,7 @@ class ArchiveService {
       const reader = new FileReader();
       reader.onload = () => {
         const key = `${ARCHIVE_FILES_PREFIX}${archiveFile.id}`;
-        localStorage.setItem(key, reader.result as string);
+        this.safeSetItem(key, reader.result as string);
       };
       reader.readAsDataURL(file);
     }

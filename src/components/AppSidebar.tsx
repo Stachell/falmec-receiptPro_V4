@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import { useClickLock } from '@/hooks/useClickLock';
 import { Link, useNavigate } from 'react-router-dom';
-import { FileBox, FilePenLine, Archive, Download, RefreshCw } from 'lucide-react';
+import { FileBox, FilePenLine, RefreshCw } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -83,11 +84,10 @@ function getUploadStatus(uploadedAt: string | undefined): UploadStatus {
 export function AppSidebar() {
   const [showHomeDialog, setShowHomeDialog] = useState(false);
   const [isLogoHovered, setIsLogoHovered] = useState(false);
-  const [isArchivHovered, setIsArchivHovered] = useState(false);
-  const [isExportHovered, setIsExportHovered] = useState(false);
   const [isNeuHovered, setIsNeuHovered] = useState(false);
   const navigate = useNavigate();
   const { uploadedFiles, addUploadedFile, loadStoredFiles } = useRunStore();
+  const { wrap: lockWrap, isLocked: uploadIsLocked } = useClickLock();
 
   // Load stored files on mount
   useEffect(() => {
@@ -162,88 +162,12 @@ export function AppSidebar() {
           <div className="h-10 w-px bg-border" />
         </div>
 
-        {/* Sidebar Buttons - Centered */}
-        <div className="flex items-center gap-2">
-          {/* Archiv Button */}
-          <Link
-            to="/archiv"
-            onMouseEnter={() => setIsArchivHovered(true)}
-            onMouseLeave={() => setIsArchivHovered(false)}
-            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
-            style={{
-              backgroundColor: isArchivHovered ? HOVER_BG : '#c9c3b6',
-              borderColor: isArchivHovered ? HOVER_BORDER : '#666666',
-            }}
-            title="Archiv"
-          >
-            <Archive
-              className="flex-1 w-full max-h-[141%]"
-              style={{ color: isArchivHovered ? HOVER_TEXT : '#666666' }}
-            />
-            <span
-              className="text-xs"
-              style={{ color: isArchivHovered ? HOVER_TEXT : '#666666' }}
-            >
-              Archiv
-            </span>
-          </Link>
-
-          {/* Export Button */}
-          <Link
-            to="/export"
-            onMouseEnter={() => setIsExportHovered(true)}
-            onMouseLeave={() => setIsExportHovered(false)}
-            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
-            style={{
-              backgroundColor: isExportHovered ? HOVER_BG : '#c9c3b6',
-              borderColor: isExportHovered ? HOVER_BORDER : '#666666',
-            }}
-            title="Export"
-          >
-            <Download
-              className="flex-1 w-full max-h-[141%]"
-              style={{ color: isExportHovered ? HOVER_TEXT : '#666666' }}
-            />
-            <span
-              className="text-xs"
-              style={{ color: isExportHovered ? HOVER_TEXT : '#666666' }}
-            >
-              Export
-            </span>
-          </Link>
-
-          {/* NEU Button */}
-          <Link
-            to="/new-run"
-            onMouseEnter={() => setIsNeuHovered(true)}
-            onMouseLeave={() => setIsNeuHovered(false)}
-            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
-            style={{
-              backgroundColor: isNeuHovered ? HOVER_BG : '#c9c3b6',
-              borderColor: isNeuHovered ? HOVER_BORDER : '#666666',
-            }}
-            title="Neuer Lauf"
-          >
-            <FilePenLine
-              className="flex-1 w-full max-h-[141%]"
-              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
-            />
-            <span
-              className="text-xs"
-              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
-            >
-              NEU
-            </span>
-          </Link>
-        </div>
-
-        {/* Upload Status - Right positioned, vertically centered, scaled to match button height */}
+        {/* Upload Status - Centered */}
         <div
-          className="absolute top-1/2 flex flex-col"
+          className="flex flex-col"
           style={{
-            right: '1.5rem',
-            transform: 'translateY(-50%) scale(0.85)',
-            transformOrigin: 'right center',
+            transform: 'scale(0.85)',
+            transformOrigin: 'center',
           }}
         >
           {UPLOAD_MODULES.map((module, index) => {
@@ -261,7 +185,8 @@ export function AppSidebar() {
             return (
               <button
                 key={module.type}
-                onClick={() => fileInputRefs[module.type]?.current?.click()}
+                onClick={lockWrap(module.type, () => fileInputRefs[module.type]?.current?.click())}
+                disabled={uploadIsLocked(module.type)}
                 className={`flex items-center gap-1.5 px-2 py-0.5 border-x border-t border-[#666666] transition-colors text-left ${isFirst ? 'rounded-t' : ''} ${isLast ? 'rounded-b border-b' : ''}`}
                 style={{ backgroundColor: '#D8E6E7' }}
                 title={isUploaded ? `${uploadedFile.name} | Upload: ${fullTimestamp}` : 'Klicken zum Hochladen'}
@@ -311,6 +236,32 @@ export function AppSidebar() {
               </button>
             );
           })}
+        </div>
+
+        {/* NEU Button - Right positioned */}
+        <div className="absolute right-6 flex items-center">
+          <Link
+            to="/new-run"
+            onMouseEnter={() => setIsNeuHovered(true)}
+            onMouseLeave={() => setIsNeuHovered(false)}
+            className="h-[calc((4rem+4vh)*0.82)] aspect-square rounded-lg border transition-all duration-200 flex flex-col items-center justify-end p-[2px]"
+            style={{
+              backgroundColor: isNeuHovered ? HOVER_BG : '#c9c3b6',
+              borderColor: isNeuHovered ? HOVER_BORDER : '#666666',
+            }}
+            title="Neuer Lauf"
+          >
+            <FilePenLine
+              className="flex-1 w-full max-h-[141%]"
+              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
+            />
+            <span
+              className="text-xs"
+              style={{ color: isNeuHovered ? HOVER_TEXT : '#666666' }}
+            >
+              NEU
+            </span>
+          </Link>
         </div>
       </div>
 

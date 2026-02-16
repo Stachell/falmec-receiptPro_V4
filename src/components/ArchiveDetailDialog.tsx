@@ -32,8 +32,6 @@ function formatDate(isoString: string): string {
 export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDialogProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['00_Uploads']));
 
-  if (!run) return null;
-
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
       const next = new Set(prev);
@@ -51,11 +49,11 @@ export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDi
   };
 
   const handleViewRunLog = () => {
+    if (!run) return;
     const logs = logService.getRunLog(run.runId);
     if (logs.length > 0) {
       logService.openLogInNewTab(logs, `falmec ReceiptPro - Run Log: ${run.fattura}`);
     } else {
-      // If no specific run logs, show a message
       const tempLogs = [{
         id: 'temp',
         timestamp: new Date().toISOString(),
@@ -72,63 +70,69 @@ export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDi
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Folder className="w-5 h-5" style={{ color: '#666666' }} />
-            Archiv: {run.fattura}
+            {run ? `Archiv: ${run.fattura}` : 'Archiv'}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* Metadata */}
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground">Erstellt:</span>{' '}
-              <span className="font-medium">{formatDate(run.createdAt)}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Status:</span>{' '}
-              <span className="font-medium">{run.status}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Run ID:</span>{' '}
-              <span className="font-mono text-xs">{run.runId}</span>
-            </div>
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleViewRunLog}
-                className="gap-1.5"
-              >
-                <FileText className="w-4 h-4" />
-                Run-Logfile anzeigen
-              </Button>
-            </div>
-          </div>
-
-          {/* Folder Structure */}
-          <div className="border rounded-lg bg-background/50">
-            <div className="p-3 border-b bg-muted/30">
-              <h3 className="font-medium text-sm">Ordnerstruktur</h3>
-            </div>
-            <ScrollArea className="h-[300px]">
-              <div className="p-2">
-                {run.folders.map((folder) => (
-                  <FolderItem
-                    key={folder.id}
-                    folder={folder}
-                    isExpanded={expandedFolders.has(folder.name)}
-                    onToggle={() => toggleFolder(folder.name)}
-                    onDownloadFile={handleDownloadFile}
-                  />
-                ))}
-                {run.folders.length === 0 && (
-                  <p className="text-sm text-muted-foreground p-4 text-center">
-                    Keine Ordner vorhanden
-                  </p>
-                )}
+        {!run ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            Kein Archiv-Eintrag für diesen Lauf vorhanden.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {/* Metadata */}
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Erstellt:</span>{' '}
+                <span className="font-medium">{formatDate(run.createdAt)}</span>
               </div>
-            </ScrollArea>
+              <div>
+                <span className="text-muted-foreground">Status:</span>{' '}
+                <span className="font-medium">{run.status}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Run ID:</span>{' '}
+                <span className="font-mono text-xs">{run.runId}</span>
+              </div>
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleViewRunLog}
+                  className="gap-1.5"
+                >
+                  <FileText className="w-4 h-4" />
+                  Run-Logfile anzeigen
+                </Button>
+              </div>
+            </div>
+
+            {/* Folder Structure */}
+            <div className="border rounded-lg bg-background/50">
+              <div className="p-3 border-b bg-muted/30">
+                <h3 className="font-medium text-sm">Ordnerstruktur</h3>
+              </div>
+              <ScrollArea className="h-[300px]">
+                <div className="p-2">
+                  {run.folders.map((folder) => (
+                    <FolderItem
+                      key={folder.id}
+                      folder={folder}
+                      isExpanded={expandedFolders.has(folder.name)}
+                      onToggle={() => toggleFolder(folder.name)}
+                      onDownloadFile={handleDownloadFile}
+                    />
+                  ))}
+                  {run.folders.length === 0 && (
+                    <p className="text-sm text-muted-foreground p-4 text-center">
+                      Keine Ordner vorhanden
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -92,26 +92,6 @@ export function InvoicePreview({
   return (
     <div className="space-y-6">
       {/* Status Alert */}
-      {!isSuccess && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Parsing fehlgeschlagen</AlertTitle>
-          <AlertDescription>
-            Das PDF konnte nicht vollständig geparst werden. Bitte überprüfen Sie die Warnungen unten.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {isSuccess && errorCount === 0 && (
-        <Alert className="border-green-500 bg-green-50 text-green-800">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertTitle>Erfolgreich geparst</AlertTitle>
-          <AlertDescription>
-            Die Rechnung wurde erfolgreich ausgelesen. {positions.length} Positionen gefunden.
-          </AlertDescription>
-        </Alert>
-      )}
-
       {/* Header Information */}
       <Card>
         <CardHeader>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useClickLock } from '@/hooks/useClickLock';
 import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { Run } from '@/types';
@@ -14,8 +15,10 @@ export function ExportPanel({ run }: ExportPanelProps) {
   const { invoiceLines, issues } = useRunStore();
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const { wrap, isLocked } = useClickLock();
 
-  const openBlockingIssues = issues.filter(i => i.status === 'open' && i.severity === 'blocking');
+  const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
+  const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'blocking');
   const missingLocations = invoiceLines.filter(line => !line.storageLocation);
   const isExportReady = openBlockingIssues.length === 0 && missingLocations.length === 0;
 
@@ -151,8 +154,8 @@ ${invoiceLines.map(line => `    <Item>
         <Button 
           size="lg" 
           className="gap-2"
-          disabled={!isExportReady || downloading}
-          onClick={handleDownload}
+          disabled={!isExportReady || downloading || isLocked('xml-export')}
+          onClick={wrap('xml-export', handleDownload)}
         >
           <Download className="w-4 h-4" />
           {downloading ? 'Wird exportiert...' : 'XML exportieren'}

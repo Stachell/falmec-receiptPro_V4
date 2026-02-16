@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import { useClickLock } from '@/hooks/useClickLock';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, AlertTriangle, FolderOpen, Loader2 } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
@@ -22,6 +23,7 @@ import {
 export default function NewRun() {
   const navigate = useNavigate();
   const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing, loadStoredFiles } = useRunStore();
+  const { wrap, isLocked } = useClickLock();
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
@@ -49,22 +51,31 @@ export default function NewRun() {
     initialize();
   }, [loadStoredFiles]);
 
-  const handleStartProcessing = async () => {
+  const handleStartProcessing = () => {
     // Check if folder structure is configured
     if (!isDirectoryConfigured) {
       setShowFolderDialog(true);
       return;
     }
 
-    // Ensure folder structure exists
-    const structureReady = await fileSystemService.ensureFolderStructure();
-    if (!structureReady) {
-      logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
-    }
+    // Ensure folder structure (fire-and-forget, non-blocking)
+    fileSystemService.ensureFolderStructure().then(structureReady => {
+      if (!structureReady) {
+        logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
+      }
+    });
 
-    // Use parsing-enabled run creation
-    const newRun = await createNewRunWithParsing();
-    navigate(`/run/${newRun.id}`);
+    // Start parsing â€“ navigate immediately, parsing continues in background
+    const parsingPromise = createNewRunWithParsing();
+    const initialRun = useRunStore.getState().currentRun;
+    if (initialRun) {
+      navigate(`/run/${encodeURIComponent(initialRun.id)}`);
+      parsingPromise.then(finalRun => {
+        if (finalRun && finalRun.id !== initialRun.id) {
+          navigate(`/run/${encodeURIComponent(finalRun.id)}`, { replace: true });
+        }
+      });
+    }
   };
 
   const handleSelectDirectory = async () => {
@@ -72,9 +83,17 @@ export default function NewRun() {
     if (result.success) {
       setIsDirectoryConfigured(true);
       setShowFolderDialog(false);
-      // Now start processing with PDF parsing
-      const newRun = await createNewRunWithParsing();
-      navigate(`/run/${newRun.id}`);
+      // Start parsing â€“ navigate immediately, parsing continues in background
+      const parsingPromise = createNewRunWithParsing();
+      const initialRun = useRunStore.getState().currentRun;
+      if (initialRun) {
+        navigate(`/run/${encodeURIComponent(initialRun.id)}`);
+        parsingPromise.then(finalRun => {
+          if (finalRun && finalRun.id !== initialRun.id) {
+            navigate(`/run/${encodeURIComponent(finalRun.id)}`, { replace: true });
+          }
+        });
+      }
     }
   };
 
@@ -126,8 +145,8 @@ export default function NewRun() {
               required
             />
             <FileUploadZone
-              label="offene Bestellungen / offene Wareneingänge (CSV)"
-              description="Exportdatei aus Modul *offene Wareneingänge*"
+              label="offene Bestellungen / offene WareneingÃ¤nge (CSV)"
+              description="Exportdatei aus Modul *offene WareneingÃ¤nge*"
               accept={{ 'text/csv': ['.csv'], 'application/vnd.ms-excel': ['.csv'] }}
               fileType="openWE"
               onFileAccepted={(file) => addUploadedFile(file)}
@@ -175,15 +194,16 @@ export default function NewRun() {
               {allFilesUploaded && !isDirectoryConfigured && (
                 <p className="text-sm text-yellow-600 flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4" />
-                  Bitte wählen Sie ein Datenverzeichnis im Footer
+                  Bitte wÃ¤hlen Sie ein Datenverzeichnis im Footer
                 </p>
               )}
             </div>
             <Button
+              type="button"
               size="lg"
               className="gap-2"
-              disabled={!allFilesUploaded}
-              onClick={handleStartProcessing}
+              disabled={!allFilesUploaded || isLocked('start')}
+              onClick={wrap('start', handleStartProcessing)}
             >
               <Play className="w-4 h-4" />
               Verarbeitung starten
@@ -201,14 +221,14 @@ export default function NewRun() {
               Datenverzeichnis erforderlich
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Bevor die Verarbeitung gestartet werden kann, muss ein Datenverzeichnis ausgewählt werden.
+              Bevor die Verarbeitung gestartet werden kann, muss ein Datenverzeichnis ausgewÃ¤hlt werden.
               Dort werden die Archiv-Dateien und Logs gespeichert.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Abbruch</AlertDialogCancel>
             <AlertDialogAction onClick={handleSelectDirectory}>
-              Ordner auswählen
+              Ordner auswÃ¤hlen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -216,3 +236,4 @@ export default function NewRun() {
     </AppLayout>
   );
 }
+

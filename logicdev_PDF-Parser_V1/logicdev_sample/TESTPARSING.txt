@@ -1,0 +1,33 @@
+# =============================================
+#  devlogic PDF-PARSER_V1 - Testkonfiguration
+# =============================================
+#
+#  ANLEITUNG:
+#  1. PDF-Datei nach "test_pdfs\" kopieren
+#  2. Unten den Dateinamen eintragen
+#  3. Das passende Parsing-Skript waehlen
+#  4. run_test.bat doppelklicken
+#  5. Ergebnis erscheint in "test_output\"
+#
+#  VERFUEGBARE SKRIPTE:
+#  - fattura_falmec_v1  =  Falmec Rechnungen (Fattura)
+#
+# =============================================
+
+[test]
+
+# --- HIER EINTRAGEN ---
+
+# Name der PDF-Datei (muss in test_pdfs\ liegen):
+pdf_file=Fattura2026020007-SAMPLE-DL.pdf
+
+# Parsing-Skript (siehe Liste oben):
+parsing_skript=fattura_falmec_v1
+
+
+# --- OPTIONALE EINSTELLUNGEN (Standard passt meistens) ---
+
+# output_format=json
+y_tolerance=10.0
+# run_validation=true
+# log_level=INFO

@@ -8,7 +8,8 @@ export type IssueType =
   | 'price-mismatch' 
   | 'inactive-article' 
   | 'missing-storage-location' 
-  | 'missing-ean';
+  | 'missing-ean'
+  | 'parser-error';
 
 export type PriceCheckStatus = 'ok' | 'mismatch' | 'pending';
 
@@ -27,6 +28,7 @@ export interface RunConfig {
   priceType: 'EK' | 'VK';
   tolerance: number;
   eingangsart: string;
+  clickLockSeconds: number;
 }
 
 export interface RunStats {
@@ -155,6 +157,7 @@ export interface ArticleMaster {
 
 export interface Issue {
   id: string;
+  runId?: string;
   severity: IssueSeverity;
   stepNo: number;
   type: IssueType;

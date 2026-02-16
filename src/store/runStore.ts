@@ -25,6 +25,8 @@ import {
   generateRunId,
   type ParsedInvoiceResult,
 } from '@/services/invoiceParserService';
+import { getParsingTimeoutMs } from '@/services/parsers/config';
+import type { ParserWarning } from '@/services/parsers/types';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -58,15 +60,23 @@ function savePersistedFiles(files: UploadedFile[]): void {
     type: f.type,
     uploadedAt: f.uploadedAt,
   }));
-  localStorage.setItem(UPLOADED_FILES_KEY, JSON.stringify(persistedFiles));
+  try {
+    localStorage.setItem(UPLOADED_FILES_KEY, JSON.stringify(persistedFiles));
+  } catch (error) {
+    console.warn('[RunStore] Failed to persist uploaded files metadata:', error);
+  }
 }
 
 // Persist parsed invoice result (without File objects)
 function saveParsedInvoice(result: ParsedInvoiceResult | null): void {
-  if (result) {
-    localStorage.setItem(PARSED_INVOICE_KEY, JSON.stringify(result));
-  } else {
-    localStorage.removeItem(PARSED_INVOICE_KEY);
+  try {
+    if (result) {
+      localStorage.setItem(PARSED_INVOICE_KEY, JSON.stringify(result));
+    } else {
+      localStorage.removeItem(PARSED_INVOICE_KEY);
+    }
+  } catch (error) {
+    console.warn('[RunStore] Failed to persist parsed invoice result:', error);
   }
 }
 
@@ -78,6 +88,34 @@ function loadParsedInvoice(): ParsedInvoiceResult | null {
   } catch {
     return null;
   }
+}
+
+function mapParserWarningToIssueType(code: string): Issue['type'] {
+  const normalized = code.toUpperCase();
+  if (normalized.includes('EAN')) return 'missing-ean';
+  if (normalized.includes('IDENTIFIER')) return 'missing-ean';
+  if (normalized.includes('PRICE')) return 'price-mismatch';
+  return 'parser-error';
+}
+
+function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue[] {
+  const parserErrors = warnings.filter((warning) => warning.severity === 'error');
+  return parserErrors.map((warning, index) => ({
+    id: `issue-${runId}-step1-${warning.code || 'unknown'}-${index}-${Date.now()}`,
+    runId,
+    severity: 'blocking',
+    stepNo: 1,
+    type: mapParserWarningToIssueType(warning.code),
+    message: warning.message || 'Parserfehler ohne Meldung',
+    details: `Code: ${warning.code || 'unknown'}${
+      warning.positionIndex ? `, Position: ${warning.positionIndex}` : ''
+    }`,
+    relatedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    resolvedAt: null,
+    resolutionNote: null,
+  }));
 }
 
 interface RunState {
@@ -126,18 +164,19 @@ interface RunState {
 
   // Workflow actions
   advanceToNextStep: (runId: string) => void;
+  deleteRun: (runId: string) => void;
 
   // Run update with parsed data
   updateRunWithParsedData: (runId: string, result: ParsedInvoiceResult) => void;
 }
 
 export const useRunStore = create<RunState>((set, get) => ({
-  // Initial Data
-  runs: mockRuns,
+  // Initial Data (no mock data - start clean)
+  runs: [],
   currentRun: null,
-  invoiceLines: [],  // Start empty - only use real parsed data, not mock data
-  issues: mockIssues,
-  auditLog: mockAuditLog,
+  invoiceLines: [],  // Start empty - only use real parsed data
+  issues: [], // Start empty - no mock issues
+  auditLog: [], // Start empty - no mock audit logs
   uploadedFiles: [],
 
   // Parsed invoice data
@@ -151,6 +190,7 @@ export const useRunStore = create<RunState>((set, get) => ({
     priceType: 'EK',
     tolerance: 0.01,
     eingangsart: 'Standard',
+    clickLockSeconds: 0,
   },
 
   // UI State
@@ -173,6 +213,13 @@ export const useRunStore = create<RunState>((set, get) => ({
       ...file,
       uploadedAt: file.uploadedAt || new Date().toISOString(),
     };
+
+    // Clear old parsed invoice data when a new invoice is uploaded
+    // This ensures fresh parsing with the new file
+    if (file.type === 'invoice') {
+      console.log('[RunStore] New invoice uploaded, clearing cached parse results');
+      get().clearParsedInvoice();
+    }
 
     // Save to IndexedDB (async, fire and forget)
     if (fileStorageService.isAvailable()) {
@@ -280,13 +327,21 @@ export const useRunStore = create<RunState>((set, get) => ({
       details: `Fattura: ${newRun.invoice.fattura}, Config: ${JSON.stringify(globalConfig)}`,
     });
 
-    // Create archive entry with uploaded files
-    archiveService.createArchiveEntry(
-      newRun.id,
-      newRun.invoice.fattura,
-      globalConfig,
-      uploadedFiles
-    );
+    // Create archive entry with uploaded files (non-blocking if storage fails)
+    try {
+      archiveService.createArchiveEntry(
+        newRun.id,
+        newRun.invoice.fattura,
+        globalConfig,
+        uploadedFiles
+      );
+    } catch (error) {
+      console.warn('[RunStore] Failed to create archive entry:', error);
+      logService.warn('Archiv-Eintrag konnte nicht erstellt werden', {
+        runId: newRun.id,
+        step: 'Archiv',
+      });
+    }
 
     // Log step start
     logService.info('Schritt gestartet: Rechnung auslesen', {
@@ -304,10 +359,12 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   // New createNewRun with PDF parsing
   createNewRunWithParsing: async () => {
+    console.log('[RunStore] createNewRunWithParsing() called');
     const { globalConfig, uploadedFiles, parseInvoice, updateRunWithParsedData } = get();
 
     // Find invoice file
     const invoiceFile = uploadedFiles.find(f => f.type === 'invoice');
+    console.log('[RunStore] Invoice file found:', invoiceFile ? { name: invoiceFile.name, hasFile: !!invoiceFile.file } : 'null');
 
     // Create initial run with placeholder data
     let runId = `run-${Date.now()}`;
@@ -382,6 +439,9 @@ export const useRunStore = create<RunState>((set, get) => ({
             return {
               runs: state.runs.map(r => r.id === runId ? finalRun : r),
               currentRun: finalRun,
+              issues: state.issues.map(issue =>
+                issue.runId === runId ? { ...issue, runId: newRunId } : issue
+              ),
             };
           }
           return state;
@@ -402,6 +462,9 @@ export const useRunStore = create<RunState>((set, get) => ({
               return {
                 runs: state.runs.map(r => r.id === runId ? finalRun : r),
                 currentRun: finalRun,
+                issues: state.issues.map(issue =>
+                  issue.runId === runId ? { ...issue, runId: newRunId } : issue
+                ),
               };
             }
             return state;
@@ -470,12 +533,20 @@ export const useRunStore = create<RunState>((set, get) => ({
     // Create archive entry
     const finalRun = get().currentRun;
     if (finalRun) {
-      archiveService.createArchiveEntry(
-        finalRun.id,
-        finalRun.invoice.fattura,
-        globalConfig,
-        uploadedFiles
-      );
+      try {
+        archiveService.createArchiveEntry(
+          finalRun.id,
+          finalRun.invoice.fattura,
+          globalConfig,
+          uploadedFiles
+        );
+      } catch (error) {
+        console.warn('[RunStore] Failed to create archive entry:', error);
+        logService.warn('Archiv-Eintrag konnte nicht erstellt werden', {
+          runId: finalRun.id,
+          step: 'Archiv',
+        });
+      }
     }
 
     set({ isProcessing: false, parsingProgress: '' });
@@ -493,18 +564,38 @@ export const useRunStore = create<RunState>((set, get) => ({
         runId,
         step: 'Rechnung auslesen',
       });
+      setParsedInvoiceResult({
+        success: false,
+        header: {
+          fatturaNumber: '',
+          fatturaDate: '',
+          packagesCount: null,
+          totalQty: 0,
+          parsedPositionsCount: 0,
+          qtyValidationStatus: 'unknown',
+        },
+        lines: [],
+        warnings: [{
+          code: 'NO_INVOICE_FILE',
+          message: 'Keine Invoice-PDF-Datei gefunden',
+          severity: 'error',
+        }],
+        parserModule: 'workflow',
+        parsedAt: new Date().toISOString(),
+        sourceFileName: '',
+      });
       return false;
     }
 
-    // Timeout configuration: 30 seconds for PDF parsing
-    const PARSING_TIMEOUT_MS = 30000;
+    const PARSING_TIMEOUT_MS = getParsingTimeoutMs();
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
     try {
       setParsingProgress('Extrahiere Text aus PDF...');
 
       // Create a promise that rejects after timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timeoutHandle = setTimeout(() => {
           reject(new Error(`PDF-Parsing Timeout nach ${PARSING_TIMEOUT_MS / 1000} Sekunden`));
         }, PARSING_TIMEOUT_MS);
       });
@@ -514,6 +605,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         parseInvoicePDF(invoiceFile.file, runId),
         timeoutPromise,
       ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
 
       setParsingProgress('Verarbeite Daten...');
 
@@ -538,10 +630,31 @@ export const useRunStore = create<RunState>((set, get) => ({
         return result.header.fatturaNumber !== '';
       }
     } catch (error) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       const errorMessage = error instanceof Error ? error.message : 'Unbekannter Fehler';
       logService.error(`PDF-Parsing fehlgeschlagen: ${errorMessage}`, {
         runId,
         step: 'Rechnung auslesen',
+      });
+      setParsedInvoiceResult({
+        success: false,
+        header: {
+          fatturaNumber: '',
+          fatturaDate: '',
+          packagesCount: null,
+          totalQty: 0,
+          parsedPositionsCount: 0,
+          qtyValidationStatus: 'unknown',
+        },
+        lines: [],
+        warnings: [{
+          code: 'PARSE_EXCEPTION',
+          message: errorMessage,
+          severity: 'error',
+        }],
+        parserModule: 'workflow',
+        parsedAt: new Date().toISOString(),
+        sourceFileName: invoiceFile.file.name,
       });
       setParsingProgress(`Parsing fehlgeschlagen: ${errorMessage}`);
       return false;
@@ -606,9 +719,10 @@ export const useRunStore = create<RunState>((set, get) => ({
   updateRunWithParsedData: (runId, result) => {
     const invoiceHeader = convertToInvoiceHeader(result);
     const invoiceLines = convertToInvoiceLines(result.lines, runId);
+    const step1Issues = buildStep1ParserIssues(runId, result.warnings);
 
     // Determine step status based on parse result
-    const hasErrors = result.warnings.some(w => w.severity === 'error');
+    const hasErrors = step1Issues.length > 0;
     const stepStatus: StepStatus = result.success
       ? (hasErrors ? 'soft-fail' : 'ok')
       : 'failed';
@@ -633,7 +747,7 @@ export const useRunStore = create<RunState>((set, get) => ({
             ? {
                 ...step,
                 status: stepStatus,
-                issuesCount: result.warnings.filter(w => w.severity === 'error').length,
+                issuesCount: step1Issues.length,
               }
             : step
         ),
@@ -644,6 +758,10 @@ export const useRunStore = create<RunState>((set, get) => ({
         runs: state.runs.map(r => r.id === runId ? newRun : r),
         currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
         invoiceLines: [...invoiceLines, ...state.invoiceLines.filter(l => !l.lineId.startsWith(runId))],
+        issues: [
+          ...state.issues.filter(issue => !(issue.runId === runId && issue.stepNo === 1)),
+          ...step1Issues,
+        ],
       };
     });
 
@@ -653,6 +771,14 @@ export const useRunStore = create<RunState>((set, get) => ({
       step: 'Rechnung auslesen',
       details: `Status: ${stepStatus}, Fattura: ${result.header.fatturaNumber}`,
     });
+
+    // Auto-advance to next step if parsing was successful
+    if (stepStatus === 'ok' || stepStatus === 'soft-fail') {
+      setTimeout(() => {
+        const currentState = get();
+        currentState.advanceToNextStep(runId);
+      }, 500);
+    }
   },
 
   updateRunStatus: (runId, status) => set((state) => ({
@@ -715,6 +841,11 @@ export const useRunStore = create<RunState>((set, get) => ({
           }
         : issue
     ),
+  })),
+
+  deleteRun: (runId) => set((state) => ({
+    runs: state.runs.filter((r) => r.id !== runId),
+    currentRun: state.currentRun?.id === runId ? null : state.currentRun,
   })),
 
   addAuditEntry: (entry) => set((state) => ({

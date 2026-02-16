@@ -23,6 +23,16 @@ const LOG_SNAPSHOTS_KEY = 'falmec-log-snapshots';
 const MAX_SYSTEM_LOG_ENTRIES = 10000;
 
 class LogService {
+  private safeSetItem(key: string, value: string): boolean {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (error) {
+      console.warn(`[LogService] localStorage write failed for key "${key}"`, error);
+      return false;
+    }
+  }
+
   // Format timestamp for folder/file names: YYYY-MM-DD-HHmmss
   private formatTimestamp(date: Date = new Date()): string {
     const pad = (n: number) => n.toString().padStart(2, '0');
@@ -89,7 +99,11 @@ class LogService {
       logs.length = MAX_SYSTEM_LOG_ENTRIES;
     }
 
-    localStorage.setItem(SYSTEM_LOG_KEY, JSON.stringify(logs));
+    const serialized = JSON.stringify(logs);
+    if (!this.safeSetItem(SYSTEM_LOG_KEY, serialized)) {
+      // Retry once with a much smaller log payload in low-storage scenarios.
+      this.safeSetItem(SYSTEM_LOG_KEY, JSON.stringify(logs.slice(0, 500)));
+    }
   }
 
   // Add entry to run-specific log
@@ -97,7 +111,10 @@ class LogService {
     const key = `${RUN_LOG_PREFIX}${runId}`;
     const logs = this.getRunLog(runId);
     logs.unshift(entry);
-    localStorage.setItem(key, JSON.stringify(logs));
+    const serialized = JSON.stringify(logs);
+    if (!this.safeSetItem(key, serialized)) {
+      this.safeSetItem(key, JSON.stringify(logs.slice(0, 300)));
+    }
   }
 
   // Get all system logs
@@ -177,7 +194,7 @@ class LogService {
     // Save snapshot to list
     const snapshots = this.getLogSnapshots();
     snapshots.unshift(snapshot);
-    localStorage.setItem(LOG_SNAPSHOTS_KEY, JSON.stringify(snapshots));
+    this.safeSetItem(LOG_SNAPSHOTS_KEY, JSON.stringify(snapshots));
 
     return snapshot;
   }

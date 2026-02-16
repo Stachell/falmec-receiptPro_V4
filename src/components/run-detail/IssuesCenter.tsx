@@ -28,17 +28,22 @@ const issueTypeLabels: Record<string, string> = {
   'inactive-article': 'Inaktiver Artikel',
   'missing-storage-location': 'Fehlender Lagerort',
   'missing-ean': 'Fehlende EAN',
+  'parser-error': 'Parser-Fehler',
 };
 
 export function IssuesCenter() {
-  const { issues, resolveIssue } = useRunStore();
+  const { issues, resolveIssue, currentRun } = useRunStore();
   const [stepFilter, setStepFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
 
-  const filteredIssues = issues.filter(issue => {
+  const scopedIssues = currentRun
+    ? issues.filter(issue => !issue.runId || issue.runId === currentRun.id)
+    : issues;
+
+  const filteredIssues = scopedIssues.filter(issue => {
     return (
       (stepFilter === 'all' || issue.stepNo.toString() === stepFilter) &&
       (severityFilter === 'all' || issue.severity === severityFilter) &&
@@ -60,7 +65,7 @@ export function IssuesCenter() {
   const handleExportIssues = () => {
     const csvContent = [
       ['ID', 'Schweregrad', 'Schritt', 'Typ', 'Nachricht', 'Details', 'Status'].join(','),
-      ...issues.map(issue => [
+      ...scopedIssues.map(issue => [
         issue.id,
         issue.severity,
         issue.stepNo,

@@ -242,6 +242,27 @@ class FileSystemService {
     }
   }
 
+  // Save a file to Temp/.del (soft delete / recycle bin)
+  async saveToBin(fileName: string, content: string): Promise<boolean> {
+    if (!this.rootFolderHandle) {
+      logService.warn('Kein Datenverzeichnis konfiguriert – saveToBin übersprungen', { step: 'System' });
+      return false;
+    }
+    try {
+      const tempHandle = await this.rootFolderHandle.getDirectoryHandle('Temp', { create: true });
+      const delHandle = await tempHandle.getDirectoryHandle('.del', { create: true });
+      const fileHandle = await delHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      logService.info(`In Papierkorb gespeichert: ${fileName}`, { step: 'System' });
+      return true;
+    } catch (error: any) {
+      logService.warn(`saveToBin fehlgeschlagen: ${error.message}`, { step: 'System' });
+      return false;
+    }
+  }
+
   // Get folder status
   getFolderStatus(): FolderStatus {
     return {

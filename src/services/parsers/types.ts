@@ -54,6 +54,8 @@ export interface ParsedInvoiceHeader {
   fatturaDate: string;
   /** Number of packages (from last page) */
   packagesCount: number | null;
+  /** Invoice total amount in EUR (TOTAL EUR, from last page) */
+  invoiceTotal?: number;
   /** Total quantity sum of all Q.TY values */
   totalQty: number;
   /** Number of parsed positions */
@@ -79,6 +81,18 @@ export interface ParserWarning {
 }
 
 /**
+ * Post-parse validation rule result
+ */
+export interface ValidationResult {
+  ruleId: string;
+  ruleName: string;
+  passed: boolean;
+  message: string;
+  severity: WarningSeverity;
+  details?: Record<string, unknown>;
+}
+
+/**
  * Complete parsed invoice result
  */
 export interface ParsedInvoiceResult {
@@ -90,6 +104,8 @@ export interface ParsedInvoiceResult {
   lines: ParsedInvoiceLine[];
   /** Warnings and errors encountered during parsing */
   warnings: ParserWarning[];
+  /** Validation rule results (post-parse checks) */
+  validationResults?: ValidationResult[];
   /** Parser module identifier */
   parserModule: string;
   /** Parsing timestamp */

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { useClickLock } from '@/hooks/useClickLock';
 import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, FileText, CheckCircle } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
@@ -31,6 +32,7 @@ export function AppFooter() {
   const [isLogfileHovered, setIsLogfileHovered] = useState(false);
   const [isDirHovered, setIsDirHovered] = useState(false);
   const { globalConfig, setGlobalConfig } = useRunStore();
+  const { wrap, isLocked } = useClickLock();
 
   // Initialize data path from fileSystemService
   useEffect(() => {
@@ -88,9 +90,10 @@ export function AppFooter() {
     <>
       {/* Toggle Button - Always visible at bottom left */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={wrap('toggle', () => setIsOpen(!isOpen))}
         onMouseEnter={() => setIsToggleHovered(true)}
         onMouseLeave={() => setIsToggleHovered(false)}
+        disabled={isLocked('toggle')}
         className="fixed bottom-2 left-2 z-50 p-3 rounded-lg shadow-md transition-all duration-200 border"
         style={{
           backgroundColor: isToggleHovered ? HOVER_BG : (isOpen ? '#c9c3b6' : '#D8E6E7'),
@@ -218,6 +221,32 @@ export function AppFooter() {
                 <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
               )}
             </button>
+          </div>
+
+          {/* Maussperre */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="footer-clickLock" className="text-xs text-sidebar-foreground whitespace-nowrap">
+              Maussperre
+            </Label>
+            <Select
+              value={(globalConfig.clickLockSeconds ?? 0).toFixed(1)}
+              onValueChange={(v) => setGlobalConfig({ clickLockSeconds: parseFloat(v) })}
+            >
+              <SelectTrigger id="footer-clickLock" className="h-7 w-16 text-xs bg-surface-elevated">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                {Array.from({ length: 31 }, (_, i) => {
+                  const val = (i * 0.1).toFixed(1);
+                  return (
+                    <SelectItem key={val} value={val}>
+                      {val.replace('.', ',')}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-sidebar-foreground whitespace-nowrap">Sekunden</span>
           </div>
 
           {/* Logfile Button */}
