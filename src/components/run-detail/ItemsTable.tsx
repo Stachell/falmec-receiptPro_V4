@@ -46,7 +46,6 @@ export function ItemsTable() {
       (statusFilter === 'pending' && line.matchStatus === 'pending') ||
       (statusFilter === 'price-mismatch' && line.priceCheckStatus === 'mismatch') ||
       (statusFilter === 'price-missing' && line.priceCheckStatus === 'missing') ||
-      (statusFilter === 'missing-location' && !line.storageLocation) ||
       (statusFilter === 'not-ordered' && !line.orderNumberAssigned);
 
     return matchesSearch && matchesStatus;
@@ -87,7 +86,6 @@ export function ItemsTable() {
               <SelectItem value="pending">Ausstehend</SelectItem>
               <SelectItem value="price-mismatch">Preisabweichung</SelectItem>
               <SelectItem value="price-missing">Preis fehlt</SelectItem>
-              <SelectItem value="missing-location">Ohne Lagerort</SelectItem>
               <SelectItem value="not-ordered">Nicht bestellt</SelectItem>
             </SelectContent>
           </Select>
@@ -111,7 +109,6 @@ export function ItemsTable() {
               <TableHead className="w-12 text-right">Menge</TableHead>
               <TableHead className="w-36 text-right">Preis</TableHead>
               <TableHead className="w-24">Bestellung</TableHead>
-              <TableHead className="w-20">Lagerort</TableHead>
               <TableHead className="w-14">SN</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -185,16 +182,7 @@ export function ItemsTable() {
                   )}
                 </TableCell>
 
-                {/* #10: Lagerort */}
-                <TableCell className="text-xs truncate">
-                  {line.storageLocation ? (
-                    line.storageLocation.split(';')[0]
-                  ) : (
-                    <span className="text-status-failed">Fehlt</span>
-                  )}
-                </TableCell>
-
-                {/* #11: Serial-# */}
+                {/* #10: Serial-# */}
                 <TableCell className="text-xs">
                   {line.serialNumber
                     ? <span className="break-all">{line.serialNumber}</span>

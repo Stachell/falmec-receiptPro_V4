@@ -221,10 +221,10 @@ export default function RunDetail() {
 
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
-          {/* Kachel 1: Rechnungspositionen */}
+          {/* Kachel 1: erkannte Positionen */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines}/${parsedInvoiceResult?.header.totalQty ?? '?'}`}
-            label="Rechnungspositionen"
+            label="erkannte Positionen"
             subValue={
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
                 ? 'Fehler: Anzahl stimmt nicht'
@@ -241,10 +241,10 @@ export default function RunDetail() {
             subValue={currentRun.stats.noMatchCount > 0 ? `${currentRun.stats.noMatchCount} ohne Match` : undefined}
             variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
           />
-          {/* Kachel 3: Seriennummer anfuegen */}
+          {/* Kachel 3: Serial parsen */}
           <KPITile
             value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
-            label="Seriennummer anfuegen"
+            label="Serial parsen"
             subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
             variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
           />
@@ -287,11 +287,11 @@ export default function RunDetail() {
                 <Play style={{ width: '42px', height: '42px', color: '#666666' }} />
               )}
               <span className="text-base font-semibold mt-1" style={{ color: '#666666' }}>
-                {allStepsComplete ? 'Exportdatei herunterladen' : 'nÃ¤chster Schritt'}
+                {allStepsComplete ? 'Export' : 'Start'}
               </span>
             </div>
             {!allStepsComplete && nextStep && (
-              <span className="text-xs mt-1" style={{ color: '#666666', opacity: 0.8 }}>
+              <span className="text-xs mt-0.5" style={{ color: '#666666', opacity: 0.8 }}>
                 {nextStep.name}
               </span>
             )}
@@ -303,7 +303,6 @@ export default function RunDetail() {
           {/* Tab-Leiste + Ereignisfeld nebeneinander */}
           <div className="flex items-center gap-4">
             <TabsList className="bg-card border border-border">
-              <TabsTrigger value="overview">Details</TabsTrigger>
               <TabsTrigger value="invoice-preview">
                 Rechnung
                 {parsedInvoiceResult && (
@@ -323,7 +322,7 @@ export default function RunDetail() {
                 </span>
               </TabsTrigger>
               <TabsTrigger value="issues">
-                Issues
+                Fehler
                 {totalIssues > 0 && (
                   <span className="ml-1.5 text-xs bg-status-soft-fail/20 text-status-soft-fail px-1.5 py-0.5 rounded">
                     {totalIssues}
@@ -331,6 +330,7 @@ export default function RunDetail() {
                 )}
               </TabsTrigger>
               <TabsTrigger value="warehouse">Lagerorte</TabsTrigger>
+              <TabsTrigger value="overview">Details</TabsTrigger>
               <TabsTrigger value="export">Export</TabsTrigger>
             </TabsList>
 

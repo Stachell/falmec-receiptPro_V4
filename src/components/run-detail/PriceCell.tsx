@@ -14,11 +14,11 @@ interface PriceCellProps {
 }
 
 const BADGE_CONFIG: Record<PriceCheckStatus, { text: string; className: string }> = {
-  pending:  { text: 'Preis-Check folgt', className: 'bg-gray-100 text-gray-600' },
-  ok:       { text: 'OK',               className: 'bg-green-100 text-green-700' },
-  mismatch: { text: 'PRUEFEN',          className: 'bg-yellow-100 text-yellow-700' },
-  missing:  { text: 'fehlt',            className: 'bg-red-100 text-red-700' },
-  custom:   { text: 'angepasst',        className: 'bg-blue-100 text-blue-700' },
+  pending:  { text: 'folgt',     className: 'bg-amber-100 text-amber-700' },
+  ok:       { text: 'OK',        className: 'bg-green-100 text-green-700' },
+  mismatch: { text: 'PRUEFEN',   className: 'bg-yellow-100 text-yellow-700' },
+  missing:  { text: 'fehlt',     className: 'bg-red-100 text-red-700' },
+  custom:   { text: 'angepasst', className: 'bg-blue-100 text-blue-700' },
 };
 
 const formatPrice = (price: number) =>
@@ -59,7 +59,7 @@ export function PriceCell({ line, onSetPrice }: PriceCellProps) {
         <PopoverTrigger asChild>
           <button
             type="button"
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity ${badge.className}`}
+            className={`inline-flex items-center rounded-md px-1.5 py-px text-[10px] leading-4 font-medium cursor-pointer hover:opacity-80 transition-opacity ${badge.className}`}
           >
             {badge.text}
           </button>
