@@ -134,6 +134,17 @@ export function convertToInvoiceLines(
     unitPriceSage: null,
     activeFlag: true,
     priceCheckStatus: 'pending',
+    // PROJ-11 new fields
+    positionIndex: parsed.positionIndex,
+    expansionIndex: 0,
+    matchStatus: 'pending',
+    serialRequired: false,
+    unitPriceFinal: null,
+    orderYear: null,
+    orderCode: null,
+    orderVorgang: null,
+    orderOpenQty: null,
+    supplierId: null,
   }));
 }
 

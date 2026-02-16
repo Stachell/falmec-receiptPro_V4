@@ -2,25 +2,36 @@ export type StepStatus = 'not-started' | 'running' | 'ok' | 'soft-fail' | 'faile
 
 export type IssueSeverity = 'blocking' | 'soft-fail';
 
-export type IssueType = 
-  | 'order-assignment' 
-  | 'serial-mismatch' 
-  | 'price-mismatch' 
-  | 'inactive-article' 
-  | 'missing-storage-location' 
+export type IssueType =
+  | 'order-assignment'
+  | 'serial-mismatch'
+  | 'price-mismatch'
+  | 'inactive-article'
+  | 'missing-storage-location'
   | 'missing-ean'
-  | 'parser-error';
+  | 'parser-error'
+  | 'no-article-match'
+  | 'price-missing'
+  | 'order-no-match';
 
-export type PriceCheckStatus = 'ok' | 'mismatch' | 'pending';
+export type MatchStatus =
+  | 'pending'
+  | 'full-match'
+  | 'code-it-only'
+  | 'ean-only'
+  | 'no-match';
+
+export type PriceCheckStatus = 'pending' | 'ok' | 'mismatch' | 'missing' | 'custom';
 
 export type SerialSource = 'serialList' | 'openWE' | 'manual' | 'none';
 
-export type OrderAssignmentReason = 
-  | 'direct-match' 
-  | 'exact-qty-match' 
-  | 'oldest-first' 
-  | 'manual' 
-  | 'not-ordered' 
+export type OrderAssignmentReason =
+  | 'direct-match'
+  | 'exact-qty-match'
+  | 'oldest-first'
+  | 'manual'
+  | 'manual-ok'
+  | 'not-ordered'
   | 'pending';
 
 export interface RunConfig {
@@ -42,6 +53,17 @@ export interface RunStats {
   priceOkCount: number;
   priceMismatchCount: number;
   exportReady: boolean;
+
+  // PROJ-11 additions
+  expandedLineCount: number;
+  fullMatchCount: number;
+  codeItOnlyCount: number;
+  eanOnlyCount: number;
+  noMatchCount: number;
+  serialRequiredCount: number;
+  priceMissingCount: number;
+  priceCustomCount: number;
+  manualOkOrderCount: number;
 }
 
 export interface WorkflowStep {
@@ -101,6 +123,7 @@ export interface Run {
 }
 
 export interface InvoiceLine {
+  // --- existing fields ---
   lineId: string;
   manufacturerArticleNo: string;
   ean: string;
@@ -118,6 +141,28 @@ export interface InvoiceLine {
   unitPriceSage: number | null;
   activeFlag: boolean;
   priceCheckStatus: PriceCheckStatus;
+
+  // --- PROJ-11: Position tracking ---
+  positionIndex: number;
+  expansionIndex: number;
+
+  // --- PROJ-11: Match status ---
+  matchStatus: MatchStatus;
+
+  // --- PROJ-11: Serial requirement ---
+  serialRequired: boolean;
+
+  // --- PROJ-11: Final price ---
+  unitPriceFinal: number | null;
+
+  // --- PROJ-11: Order data (from openWE) ---
+  orderYear: number | null;
+  orderCode: string | null;
+  orderVorgang: string | null;
+  orderOpenQty: number | null;
+
+  // --- PROJ-11: Supplier ---
+  supplierId: string | null;
 }
 
 export interface OpenWEPosition {

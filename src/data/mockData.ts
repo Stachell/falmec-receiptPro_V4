@@ -35,6 +35,8 @@ export const mockRuns: Run[] = [
       priceOkCount: 23,
       priceMismatchCount: 1,
       exportReady: true,
+      expandedLineCount: 24, fullMatchCount: 20, codeItOnlyCount: 2, eanOnlyCount: 1, noMatchCount: 1,
+      serialRequiredCount: 10, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
@@ -71,6 +73,8 @@ export const mockRuns: Run[] = [
       priceOkCount: 14,
       priceMismatchCount: 4,
       exportReady: false,
+      expandedLineCount: 18, fullMatchCount: 12, codeItOnlyCount: 2, eanOnlyCount: 1, noMatchCount: 3,
+      serialRequiredCount: 8, priceMissingCount: 2, priceCustomCount: 0, manualOkOrderCount: 0,
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
@@ -107,6 +111,8 @@ export const mockRuns: Run[] = [
       priceOkCount: 0,
       priceMismatchCount: 0,
       exportReady: false,
+      expandedLineCount: 0, fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
+      serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
@@ -138,6 +144,9 @@ export const mockInvoiceLines: InvoiceLine[] = [
     unitPriceSage: 459.99,
     activeFlag: true,
     priceCheckStatus: 'ok',
+    positionIndex: 0, expansionIndex: 0, matchStatus: 'full-match',
+    serialRequired: true, unitPriceFinal: 459.99,
+    orderYear: 2025, orderCode: '12345', orderVorgang: 'Bestellung', orderOpenQty: 2, supplierId: 'SUP-FAL-001',
   },
   {
     lineId: 'line-002',
@@ -157,6 +166,9 @@ export const mockInvoiceLines: InvoiceLine[] = [
     unitPriceSage: 330.00,
     activeFlag: true,
     priceCheckStatus: 'mismatch',
+    positionIndex: 1, expansionIndex: 0, matchStatus: 'full-match',
+    serialRequired: true, unitPriceFinal: null,
+    orderYear: 2025, orderCode: '12346', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
   },
   {
     lineId: 'line-003',
@@ -176,6 +188,9 @@ export const mockInvoiceLines: InvoiceLine[] = [
     unitPriceSage: 24.99,
     activeFlag: true,
     priceCheckStatus: 'ok',
+    positionIndex: 2, expansionIndex: 0, matchStatus: 'code-it-only',
+    serialRequired: false, unitPriceFinal: 24.99,
+    orderYear: null, orderCode: null, orderVorgang: null, orderOpenQty: null, supplierId: null,
   },
   {
     lineId: 'line-004',
@@ -195,6 +210,9 @@ export const mockInvoiceLines: InvoiceLine[] = [
     unitPriceSage: 1299.00,
     activeFlag: true,
     priceCheckStatus: 'ok',
+    positionIndex: 3, expansionIndex: 0, matchStatus: 'ean-only',
+    serialRequired: true, unitPriceFinal: 1299.00,
+    orderYear: 2025, orderCode: '12347', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
   },
   {
     lineId: 'line-005',
@@ -214,6 +232,9 @@ export const mockInvoiceLines: InvoiceLine[] = [
     unitPriceSage: 199.00,
     activeFlag: false,
     priceCheckStatus: 'ok',
+    positionIndex: 4, expansionIndex: 0, matchStatus: 'no-match',
+    serialRequired: false, unitPriceFinal: 199.00,
+    orderYear: 2025, orderCode: '12348', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
   },
 ];
 

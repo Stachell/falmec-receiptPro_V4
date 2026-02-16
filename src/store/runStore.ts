@@ -309,6 +309,8 @@ export const useRunStore = create<RunState>((set, get) => ({
         priceOkCount: 0,
         priceMismatchCount: 0,
         exportReady: false,
+        expandedLineCount: 0, fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
+        serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
@@ -392,6 +394,8 @@ export const useRunStore = create<RunState>((set, get) => ({
         priceOkCount: 0,
         priceMismatchCount: 0,
         exportReady: false,
+        expandedLineCount: 0, fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
+        serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },

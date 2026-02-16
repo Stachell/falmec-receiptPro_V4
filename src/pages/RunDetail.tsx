@@ -221,6 +221,7 @@ export default function RunDetail() {
 
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
+          {/* Kachel 1: Rechnungspositionen */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines}/${parsedInvoiceResult?.header.totalQty ?? '?'}`}
             label="Rechnungspositionen"
@@ -233,28 +234,39 @@ export default function RunDetail() {
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch' ? 'warning' : 'default'
             }
           />
+          {/* Kachel 2: Artikel extrahieren */}
           <KPITile
-            value={`${currentRun.stats.matchedOrders}/${currentRun.stats.parsedInvoiceLines - currentRun.stats.notOrderedCount}`}
-            label="Bestellungen zugeordnet"
-            variant={currentRun.stats.matchedOrders === currentRun.stats.parsedInvoiceLines - currentRun.stats.notOrderedCount ? 'success' : 'warning'}
+            value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            label="Artikel extrahieren"
+            subValue={currentRun.stats.noMatchCount > 0 ? `${currentRun.stats.noMatchCount} ohne Match` : undefined}
+            variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
           />
+          {/* Kachel 3: Seriennummer anfuegen */}
           <KPITile
-            value={currentRun.stats.serialMatchedCount}
-            label="Seriennummern"
-            subValue={currentRun.stats.mismatchedGroupsCount > 0 ? `${currentRun.stats.mismatchedGroupsCount} Gruppen fehlerhaft` : undefined}
-            variant={currentRun.stats.mismatchedGroupsCount > 0 ? 'warning' : 'success'}
+            value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
+            label="Seriennummer anfuegen"
+            subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
+            variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
           />
+          {/* Kachel 4: Preise checken */}
           <KPITile
-            value={currentRun.stats.articleMatchedCount}
-            label="Artikel zugeordnet"
-            subValue={currentRun.stats.inactiveArticlesCount > 0 ? `${currentRun.stats.inactiveArticlesCount} inaktiv` : undefined}
-            variant={currentRun.stats.inactiveArticlesCount > 0 ? 'warning' : 'success'}
+            value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            label="Preise checken"
+            subValue={
+              currentRun.stats.priceMismatchCount > 0
+                ? `${currentRun.stats.priceMismatchCount} Abweichungen`
+                : currentRun.stats.priceMissingCount > 0
+                  ? `${currentRun.stats.priceMissingCount} fehlen`
+                  : undefined
+            }
+            variant={currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0 ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default'}
           />
+          {/* Kachel 5: Bestellungen mappen */}
           <KPITile
-            value={currentRun.stats.priceOkCount}
-            label="Preise OK"
-            subValue={currentRun.stats.priceMismatchCount > 0 ? `${currentRun.stats.priceMismatchCount} Abweichungen` : undefined}
-            variant={currentRun.stats.priceMismatchCount > 0 ? 'warning' : 'success'}
+            value={`${currentRun.stats.matchedOrders}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            label="Bestellungen mappen"
+            subValue={currentRun.stats.notOrderedCount > 0 ? `${currentRun.stats.notOrderedCount} nicht bestellt` : undefined}
+            variant={currentRun.stats.notOrderedCount > 0 ? 'warning' : currentRun.stats.matchedOrders > 0 ? 'success' : 'default'}
           />
           {/* Dynamic Next Step Button */}
           <div
