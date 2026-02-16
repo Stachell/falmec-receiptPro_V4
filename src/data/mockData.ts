@@ -40,11 +40,10 @@ export const mockRuns: Run[] = [
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
-      { stepNo: 2, name: 'Order Assignment', status: 'ok', issuesCount: 0 },
-      { stepNo: 3, name: 'Serial Matching', status: 'ok', issuesCount: 0 },
-      { stepNo: 4, name: 'Article Master', status: 'ok', issuesCount: 1 },
-      { stepNo: 5, name: 'Warehouse Location', status: 'ok', issuesCount: 0 },
-      { stepNo: 6, name: 'XML Export', status: 'ok', issuesCount: 0 },
+      { stepNo: 2, name: 'Artikel extrahieren', status: 'ok', issuesCount: 1 },
+      { stepNo: 3, name: 'Seriennummer anfügen', status: 'ok', issuesCount: 0 },
+      { stepNo: 4, name: 'Bestellungen mappen', status: 'ok', issuesCount: 0 },
+      { stepNo: 5, name: 'Export', status: 'ok', issuesCount: 0 },
     ],
   },
   {
@@ -78,11 +77,10 @@ export const mockRuns: Run[] = [
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
-      { stepNo: 2, name: 'Order Assignment', status: 'soft-fail', issuesCount: 3 },
-      { stepNo: 3, name: 'Serial Matching', status: 'soft-fail', issuesCount: 2 },
-      { stepNo: 4, name: 'Article Master', status: 'soft-fail', issuesCount: 5 },
-      { stepNo: 5, name: 'Warehouse Location', status: 'not-started', issuesCount: 0 },
-      { stepNo: 6, name: 'XML Export', status: 'not-started', issuesCount: 0 },
+      { stepNo: 2, name: 'Artikel extrahieren', status: 'soft-fail', issuesCount: 5 },
+      { stepNo: 3, name: 'Seriennummer anfügen', status: 'soft-fail', issuesCount: 2 },
+      { stepNo: 4, name: 'Bestellungen mappen', status: 'not-started', issuesCount: 0 },
+      { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
     ],
   },
   {
@@ -116,11 +114,10 @@ export const mockRuns: Run[] = [
     },
     steps: [
       { stepNo: 1, name: 'Rechnung auslesen', status: 'ok', issuesCount: 0 },
-      { stepNo: 2, name: 'Order Assignment', status: 'running', issuesCount: 0 },
-      { stepNo: 3, name: 'Serial Matching', status: 'not-started', issuesCount: 0 },
-      { stepNo: 4, name: 'Article Master', status: 'not-started', issuesCount: 0 },
-      { stepNo: 5, name: 'Warehouse Location', status: 'not-started', issuesCount: 0 },
-      { stepNo: 6, name: 'XML Export', status: 'not-started', issuesCount: 0 },
+      { stepNo: 2, name: 'Artikel extrahieren', status: 'running', issuesCount: 0 },
+      { stepNo: 3, name: 'Seriennummer anfügen', status: 'not-started', issuesCount: 0 },
+      { stepNo: 4, name: 'Bestellungen mappen', status: 'not-started', issuesCount: 0 },
+      { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
     ],
   },
 ];

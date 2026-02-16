@@ -314,11 +314,10 @@ export const useRunStore = create<RunState>((set, get) => ({
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
-        { stepNo: 2, name: 'Order Assignment', status: 'not-started', issuesCount: 0 },
-        { stepNo: 3, name: 'Serial Matching', status: 'not-started', issuesCount: 0 },
-        { stepNo: 4, name: 'Article Master', status: 'not-started', issuesCount: 0 },
-        { stepNo: 5, name: 'Warehouse Location', status: 'not-started', issuesCount: 0 },
-        { stepNo: 6, name: 'XML Export', status: 'not-started', issuesCount: 0 },
+        { stepNo: 2, name: 'Artikel extrahieren', status: 'not-started', issuesCount: 0 },
+        { stepNo: 3, name: 'Seriennummer anfügen', status: 'not-started', issuesCount: 0 },
+        { stepNo: 4, name: 'Bestellungen mappen', status: 'not-started', issuesCount: 0 },
+        { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
       ],
     };
 
@@ -399,11 +398,10 @@ export const useRunStore = create<RunState>((set, get) => ({
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
-        { stepNo: 2, name: 'Order Assignment', status: 'not-started', issuesCount: 0 },
-        { stepNo: 3, name: 'Serial Matching', status: 'not-started', issuesCount: 0 },
-        { stepNo: 4, name: 'Article Master', status: 'not-started', issuesCount: 0 },
-        { stepNo: 5, name: 'Warehouse Location', status: 'not-started', issuesCount: 0 },
-        { stepNo: 6, name: 'XML Export', status: 'not-started', issuesCount: 0 },
+        { stepNo: 2, name: 'Artikel extrahieren', status: 'not-started', issuesCount: 0 },
+        { stepNo: 3, name: 'Seriennummer anfügen', status: 'not-started', issuesCount: 0 },
+        { stepNo: 4, name: 'Bestellungen mappen', status: 'not-started', issuesCount: 0 },
+        { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
       ],
     };
 

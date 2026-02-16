@@ -99,21 +99,21 @@ export function ItemsTable() {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <Table>
+        <Table className="table-fixed w-full">
           <TableHeader>
             <TableRow className="data-table-header">
-              <TableHead className="w-[40px] text-center">#</TableHead>
-              <TableHead className="w-[48px]">Checkbox</TableHead>
-              <TableHead className="w-[80px]">Artikel-# (DE)</TableHead>
-              <TableHead className="w-[160px]">Artikel-# (IT)</TableHead>
-              <TableHead className="w-[140px]">EAN</TableHead>
-              <TableHead className="min-w-[200px]">Bezeichnung (DE)</TableHead>
-              <TableHead className="w-[60px] text-right">Menge</TableHead>
-              <TableHead className="w-[120px] text-right">Preis</TableHead>
-              <TableHead className="w-[120px]">Bestellung</TableHead>
-              <TableHead className="w-[100px]">Lagerort</TableHead>
-              <TableHead className="w-[60px]">Serial-#</TableHead>
-              <TableHead className="w-[48px]">Details</TableHead>
+              <TableHead className="w-9 text-center">#</TableHead>
+              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-16">DE</TableHead>
+              <TableHead className="w-36">Artikel-# (IT)</TableHead>
+              <TableHead className="w-28">EAN</TableHead>
+              <TableHead>Bezeichnung (DE)</TableHead>
+              <TableHead className="w-12 text-right">Menge</TableHead>
+              <TableHead className="w-36 text-right">Preis</TableHead>
+              <TableHead className="w-24">Bestellung</TableHead>
+              <TableHead className="w-20">Lagerort</TableHead>
+              <TableHead className="w-14">SN</TableHead>
+              <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -125,12 +125,12 @@ export function ItemsTable() {
                 } ${!line.activeFlag ? 'bg-status-soft-fail/5' : ''}`}
               >
                 {/* #1: Position */}
-                <TableCell className="font-mono text-muted-foreground text-center">
+                <TableCell className="font-mono text-xs text-muted-foreground text-center">
                   {line.positionIndex + 1}
                 </TableCell>
 
                 {/* #2: Checkbox (Match-Status) */}
-                <TableCell>
+                <TableCell className="px-1">
                   <StatusCheckbox
                     status={line.matchStatus}
                     onClick={() => setDetailLine(line)}
@@ -138,36 +138,34 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* #3: Artikel-# (DE) */}
-                <TableCell className="font-mono text-sm">
+                <TableCell className="font-mono text-xs truncate">
                   {line.falmecArticleNo ?? <span className="text-muted-foreground">--</span>}
                 </TableCell>
 
                 {/* #4: Artikel-# (IT) */}
-                <TableCell className="font-mono text-sm">
+                <TableCell className="font-mono text-xs truncate" title={line.manufacturerArticleNo}>
                   {line.manufacturerArticleNo}
                 </TableCell>
 
                 {/* #5: EAN */}
-                <TableCell className="font-mono text-sm">
+                <TableCell className="font-mono text-xs truncate" title={line.ean}>
                   {line.ean}
                 </TableCell>
 
                 {/* #6: Bezeichnung (DE) */}
                 <TableCell>
-                  <div className="max-w-[200px]">
-                    <div className="text-sm truncate" title={line.descriptionDE ?? line.descriptionIT}>
-                      {line.descriptionDE ?? line.descriptionIT}
-                    </div>
-                    {line.descriptionDE && (
-                      <div className="text-xs text-muted-foreground truncate" title={line.descriptionIT}>
-                        {line.descriptionIT}
-                      </div>
-                    )}
+                  <div className="text-xs truncate" title={line.descriptionDE ?? line.descriptionIT}>
+                    {line.descriptionDE ?? line.descriptionIT}
                   </div>
+                  {line.descriptionDE && (
+                    <div className="text-[11px] text-muted-foreground truncate" title={line.descriptionIT}>
+                      {line.descriptionIT}
+                    </div>
+                  )}
                 </TableCell>
 
                 {/* #7: Menge */}
-                <TableCell className="text-right font-medium">
+                <TableCell className="text-right text-xs font-medium">
                   {line.qty}
                 </TableCell>
 
@@ -179,30 +177,27 @@ export function ItemsTable() {
                 {/* #9: Bestellung */}
                 <TableCell>
                   {line.orderNumberAssigned ? (
-                    <div className="flex flex-col">
-                      <span className="font-mono text-sm">{line.orderNumberAssigned}</span>
-                      <span className="text-xs text-muted-foreground capitalize">
-                        {line.orderAssignmentReason.replace(/-/g, ' ')}
-                      </span>
+                    <div>
+                      <span className="font-mono text-xs">{line.orderNumberAssigned}</span>
                     </div>
                   ) : (
-                    <span className="text-sm text-status-soft-fail">Nicht bestellt</span>
+                    <span className="text-xs text-status-soft-fail">--</span>
                   )}
                 </TableCell>
 
                 {/* #10: Lagerort */}
-                <TableCell>
+                <TableCell className="text-xs truncate">
                   {line.storageLocation ? (
-                    <span className="text-sm">{line.storageLocation.split(';')[0]}</span>
+                    line.storageLocation.split(';')[0]
                   ) : (
-                    <span className="text-sm text-status-failed">Fehlt</span>
+                    <span className="text-status-failed">Fehlt</span>
                   )}
                 </TableCell>
 
                 {/* #11: Serial-# */}
-                <TableCell className="text-sm">
+                <TableCell className="text-xs">
                   {line.serialNumber
-                    ? line.serialNumber
+                    ? <span className="break-all">{line.serialNumber}</span>
                     : line.serialRequired
                       ? <span className="text-muted-foreground">ja</span>
                       : <span className="text-muted-foreground">nein</span>
@@ -210,14 +205,14 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* #12: Details */}
-                <TableCell>
+                <TableCell className="px-1">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-6 w-6"
                     onClick={() => setDetailLine(line)}
                   >
-                    <Info className="w-4 h-4" />
+                    <Info className="w-3.5 h-3.5" />
                   </Button>
                 </TableCell>
               </TableRow>

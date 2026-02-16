@@ -53,8 +53,8 @@ export function PriceCell({ line, onSetPrice }: PriceCellProps) {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="font-mono text-sm">{formatPrice(displayPrice)}</span>
+    <div className="flex items-center gap-1 justify-end">
+      <span className="font-mono text-xs">{formatPrice(displayPrice)}</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button

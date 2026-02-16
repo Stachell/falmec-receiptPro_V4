@@ -57,7 +57,7 @@ export function WorkflowStepper({ steps, currentStep, onStepClick }: WorkflowSte
                 currentStep !== step.stepNo && "opacity-70"
               )}
             >
-              <div className={cn("stepper-circle", getStepCircleClass(step.status))}>
+              <div className={cn("stepper-circle flex-shrink-0", getStepCircleClass(step.status))}>
                 {getStepIcon(step.status) || step.stepNo}
               </div>
               <div className="flex flex-col items-start">
