@@ -7,11 +7,10 @@
  * @component
  */
 
-import { AlertCircle, CheckCircle, AlertTriangle, FileText, Package, Calendar, Hash } from 'lucide-react';
+import { AlertCircle, AlertTriangle, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended } from '@/types';
 
@@ -36,30 +35,6 @@ function formatCurrency(value: number): string {
     style: 'currency',
     currency: 'EUR',
   }).format(value);
-}
-
-/**
- * Format date to German locale
- */
-function formatDate(dateStr: string): string {
-  if (!dateStr) return '-';
-
-  // Try to parse as ISO date
-  try {
-    const date = new Date(dateStr);
-    if (!isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat('de-DE').format(date);
-    }
-  } catch {
-    // Fall through
-  }
-
-  // If already in DD.MM.YYYY format, return as is
-  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
-    return dateStr;
-  }
-
-  return dateStr;
 }
 
 /**
@@ -91,64 +66,6 @@ export function InvoicePreview({
 
   return (
     <div className="space-y-6">
-      {/* Status Alert */}
-      {/* Header Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Rechnungsdaten
-          </CardTitle>
-          {sourceFileName && (
-            <CardDescription>Quelldatei: {sourceFileName}</CardDescription>
-          )}
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Fattura Number */}
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Hash className="h-4 w-4" />
-                Rechnungsnummer
-              </div>
-              <p className="font-semibold text-lg">
-                {header.fattura || <span className="text-destructive">Fehlt</span>}
-              </p>
-            </div>
-
-            {/* Invoice Date */}
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Calendar className="h-4 w-4" />
-                Rechnungsdatum
-              </div>
-              <p className="font-semibold text-lg">
-                {formatDate(header.invoiceDate) || <span className="text-destructive">Fehlt</span>}
-              </p>
-            </div>
-
-            {/* Packages Count */}
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Package className="h-4 w-4" />
-                Paketanzahl
-              </div>
-              <p className="font-semibold text-lg">
-                {header.packagesCount ?? <span className="text-muted-foreground">n/a</span>}
-              </p>
-            </div>
-
-            {/* Total Quantity */}
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                Gesamtmenge
-              </div>
-              <p className="font-semibold text-lg">{header.totalQty ?? 0}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Warnings Section */}
       {warnings.length > 0 && (
         <Card>
@@ -159,7 +76,7 @@ export function InvoicePreview({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[150px]">
+            <div className="h-auto min-h-[40px] max-h-[300px] overflow-y-auto">
               <ul className="space-y-2">
                 {warnings.map((warning, index) => (
                   <li
@@ -188,7 +105,7 @@ export function InvoicePreview({
                   </li>
                 ))}
               </ul>
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}

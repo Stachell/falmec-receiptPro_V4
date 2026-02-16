@@ -65,6 +65,26 @@ export default function RunDetail() {
     return () => clearTimeout(timer);
   }, [parsedInvoiceResult]);
 
+  // Auto-switch tab based on current workflow step
+  useEffect(() => {
+    if (!currentRun) return;
+    const currentStep = currentRun.steps.find(s => s.status === 'running');
+    if (!currentStep) {
+      // All done? Switch to export
+      if (currentRun.steps.every(s => s.status === 'ok' || s.status === 'soft-fail')) {
+        setActiveTab('export');
+      }
+      return;
+    }
+    if (currentStep.stepNo === 1) {
+      setActiveTab('invoice-preview');
+    } else if (currentStep.stepNo >= 2 && currentStep.stepNo <= 4) {
+      setActiveTab('items');
+    } else if (currentStep.stepNo === 5) {
+      setActiveTab('export');
+    }
+  }, [currentRun?.steps, setActiveTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!currentRun) {
     if (isProcessing) {
       // Brief transition: run ID was renamed, URL update pending
@@ -297,6 +317,9 @@ export default function RunDetail() {
             )}
           </div>
         </KPIGrid>
+
+        {/* Spacer between KPIs and Tabs */}
+        <div className="mb-4" />
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
