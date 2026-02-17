@@ -34,7 +34,9 @@ export default function NewRun() {
   const articleListFile = uploadedFiles.find(f => f.type === 'articleList');
 
   const allFilesUploaded = invoiceFile && openWEFile && serialListFile && articleListFile;
-  const canStartProcessing = allFilesUploaded && isDirectoryConfigured;
+  // Also check fileSystemService directly – the folder might have been
+  // configured via the AppFooter after this page mounted.
+  const canStartProcessing = allFilesUploaded && (isDirectoryConfigured || !!fileSystemService.getDataPath());
 
   // Load stored files and check directory configuration on mount
   useEffect(() => {
@@ -52,11 +54,15 @@ export default function NewRun() {
   }, [loadStoredFiles]);
 
   const handleStartProcessing = () => {
-    // Check if folder structure is configured
-    if (!isDirectoryConfigured) {
+    // Re-check directory configuration from service (not stale React state).
+    // The user may have configured the folder via the AppFooter since mount.
+    const dirConfigured = isDirectoryConfigured || !!fileSystemService.getDataPath();
+    if (!dirConfigured) {
       setShowFolderDialog(true);
       return;
     }
+    // Sync local state so the button stays enabled
+    if (!isDirectoryConfigured) setIsDirectoryConfigured(true);
 
     // Ensure folder structure (fire-and-forget, non-blocking)
     fileSystemService.ensureFolderStructure().then(structureReady => {

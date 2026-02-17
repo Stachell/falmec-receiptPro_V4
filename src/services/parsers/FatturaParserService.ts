@@ -1,9 +1,14 @@
 /**
- * Fattura PDF Parser Service
- * Ported from Python parser (logicdev_PDF-Parser_V1/logicdev_Pars-Units/fattura_falmec_v1.py)
+ * Fattura PDF Parser Service — Bounding-Box & Column Model (v2)
  *
- * Pure TypeScript implementation using pdfjs-dist for PDF text extraction.
- * No server dependency required.
+ * Architecture:
+ * 1. Zone Detection — header/body/footer boundaries per page via anchor lines
+ * 2. Y-Axis Matching — PZ-anchored rows, cross-reference columns at same Y ±5px
+ * 3. Column-Based Extraction — article/EAN from left, qty/prices from right
+ * 4. Label-Based Header/Footer — search by label position, extract value below
+ *
+ * Replaces the previous state-machine approach that was unstable with variable
+ * line spacing (positions 14, 15, 40).
  */
 
 import { logService } from '../logService';
@@ -16,55 +21,53 @@ import type {
 } from './types';
 import {
   extractTextFromPDF,
-  groupTextByLine,
   type ExtractedPage,
-  type GroupedLine,
+  type ExtractedTextItem,
 } from './utils/pdfTextExtractor';
 import { OrderBlockTracker, extractOrderReferences } from './utils/OrderBlockTracker';
-import { parsePrice, parseIntSafe, extractTwoPrices } from './utils/priceParser';
+import { enrichOrderCandidates } from './utils/ExtendedOrderRecognition';
+import { parsePrice, parseIntSafe } from './utils/priceParser';
 import {
   INVOICE_NUMBER_PATTERNS,
-  ARTICLE_PATTERNS,
-  EAN_PATTERN,
-  PRICE_LINE_PATTERN,
-  PARTIAL_PZ_PATTERN,
   PRICE_VALUE_PATTERN,
   FATTURA_DATE,
-  PACKAGES_COUNT,
-  PACKAGES_COUNT_ALT,
   CONTRIBUTO_MARKER,
   AMOUNT_TO_PAY_MARKER,
-  shouldSkipLine,
-  isOrderReferenceLine,
 } from './constants/fatturaPatterns';
 
-interface PriceData {
-  qty: number;
-  unitPrice: number;
-  totalPrice: number;
+// ─── Constants ────────────────────────────────────────────────────────
+/** Y-coordinate tolerance for matching items on the same logical row */
+const Y_TOLERANCE = 5;
+
+/** EAN inline pattern (13 digits starting with 803) */
+const EAN_INLINE = /\b(803\d{10})\b/;
+
+/** PZ keyword pattern — anchors a position row */
+const PZ_ANCHOR = /\bPZ\b/i;
+
+/** Body start anchor: the column header row */
+const BODY_START_LABELS = ['DESCRIPTION', 'Q.TY', 'PRICE'];
+
+/** Body end anchors */
+const BODY_END_PATTERNS = [
+  /Number\s+of\s+packages/i,
+  /Volume\s+MC/i,
+  /CONTRIBUTO\s+AMBIENTALE/i,
+  /AMOUNT\s+.*TO\s+PAY/i,
+  /^TOTAL/i,
+];
+
+// ─── Interfaces ───────────────────────────────────────────────────────
+interface ZoneBounds {
+  bodyStartY: number; // Y below which body content starts (pdfjs: lower Y = lower on page)
+  bodyEndY: number;   // Y above which body content ends
 }
 
-interface FullPriceMatch extends PriceData {
-  startIndex: number;
-  endIndex: number;
-}
-
-interface ParseLinesResult {
-  lines: ParsedInvoiceLine[];
-  warnings: ParserWarning[];
-}
-
-interface ParseCandidateResult extends ParseLinesResult {
-  tolerance: number;
-  totalQty: number;
-  score: number;
-  pages: ExtractedPage[];
-}
-
+// ─── Parser Class ─────────────────────────────────────────────────────
 export class FatturaParserService implements InvoiceParser {
-  readonly moduleId = 'logicdev_pdf_parser_integrated_v1';
+  readonly moduleId = 'logicdev_pdf_parser_integrated_v2';
   readonly moduleName = 'logicdev_PDF-Parser';
-  readonly version = '1.0.0';
+  readonly version = '2.0.0';
 
   private orderTracker = new OrderBlockTracker();
 
@@ -72,39 +75,69 @@ export class FatturaParserService implements InvoiceParser {
     const runId = `run_${Date.now()}`;
     const startTime = Date.now();
 
-    logService.info(`PDF-Parsing gestartet: ${pdfFile.name}`, {
+    logService.info(`[v2] PDF-Parsing gestartet: ${pdfFile.name}`, {
       runId,
       step: 'Rechnung auslesen',
       details: `Dateigroesse: ${(pdfFile.size / 1024).toFixed(2)} KB`,
     });
 
     try {
-      const pages = await extractTextFromPDF(pdfFile, 10);
+      // Extract at y_tolerance=5 — we do our own Y-matching
+      const pages = await extractTextFromPDF(pdfFile, Y_TOLERANCE);
       logService.info(`${pages.length} Seiten extrahiert`, { runId });
 
-      const header = this.parseHeader(pages[0], runId);
-      const packagesCountFromLastPage = this.parsePackagesCount(pages[pages.length - 1], runId);
-      if (packagesCountFromLastPage > 0) {
-        header.packagesCount = packagesCountFromLastPage;
-      }
-      const parsedLines = this.parseLinesAdaptive(pages, runId, header.packagesCount);
-      const lines = parsedLines.lines;
+      // 1. Header (page 1 only)
+      const header = this.parseHeaderFromItems(pages[0], runId);
 
-      const invoiceTotal = this.parseInvoiceTotal(parsedLines.pages[parsedLines.pages.length - 1], runId);
+      // 2. Packages count (last page)
+      const packagesCount = this.parsePackagesCountFromItems(pages[pages.length - 1], runId);
+      if (packagesCount > 0) {
+        header.packagesCount = packagesCount;
+      }
+
+      // 3. Parse positions from ALL pages using bounding-box model
+      const { lines, warnings } = this.parsePositionsBoundingBox(pages, runId);
+
+      // 4. Invoice total (last page)
+      const invoiceTotal = this.parseInvoiceTotalFromItems(pages[pages.length - 1], runId);
       if (invoiceTotal > 0) {
         header.invoiceTotal = invoiceTotal;
       }
 
-      header.totalQty = lines.reduce((sum, line) => sum + line.quantityDelivered, 0);
+      // 5. Totals & validation
+      header.totalQty = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
       header.parsedPositionsCount = lines.length;
-      header.qtyValidationStatus =
-        header.packagesCount && header.totalQty === header.packagesCount
-          ? 'ok'
-          : header.packagesCount
-            ? 'mismatch'
-            : 'unknown';
 
-      const warnings: ParserWarning[] = [...parsedLines.warnings];
+      // Qty validation
+      if (header.packagesCount && header.totalQty > 0) {
+        header.qtyValidationStatus =
+          header.totalQty === header.packagesCount ? 'ok' : 'mismatch';
+      } else {
+        header.qtyValidationStatus = 'unknown';
+      }
+
+      // Price validation (warning only)
+      if (header.invoiceTotal && header.invoiceTotal > 0) {
+        const sumAmount = lines.reduce((sum, l) => sum + l.totalPrice, 0);
+        const priceDiff = Math.abs(sumAmount - header.invoiceTotal);
+        if (priceDiff > 0.02) {
+          warnings.push({
+            code: 'PRICE_SUM_MISMATCH',
+            message: `Preissumme ${sumAmount.toFixed(2)} != Rechnungstotal ${header.invoiceTotal.toFixed(2)} (Diff: ${priceDiff.toFixed(2)})`,
+            severity: 'warning',
+          });
+        }
+      }
+
+      // Qty validation warning
+      if (header.qtyValidationStatus === 'mismatch') {
+        warnings.push({
+          code: 'QTY_SUM_MISMATCH',
+          message: `Mengensumme ${header.totalQty} != Paketzahl ${header.packagesCount}`,
+          severity: 'warning',
+        });
+      }
+
       if (!header.fatturaNumber) {
         warnings.push({
           code: 'MISSING_FATTURA_NUMBER',
@@ -113,14 +146,22 @@ export class FatturaParserService implements InvoiceParser {
         });
       }
 
+      if (lines.length === 0) {
+        warnings.push({
+          code: 'NO_POSITIONS_FOUND',
+          message: 'Keine Rechnungspositionen gefunden',
+          severity: 'error',
+        });
+      }
+
       const duration = Date.now() - startTime;
-      logService.info(`PDF-Parsing abgeschlossen (${duration}ms): ${lines.length} Positionen`, {
-        runId,
-        details: `RgNr: ${header.fatturaNumber || 'N/A'}, Datum: ${header.fatturaDate || 'N/A'}`,
-      });
+      logService.info(
+        `[v2] PDF-Parsing abgeschlossen (${duration}ms): ${lines.length} Positionen, ${header.totalQty} Gesamtmenge`,
+        { runId, details: `RgNr: ${header.fatturaNumber || 'N/A'}, Datum: ${header.fatturaDate || 'N/A'}` }
+      );
 
       return {
-        success: warnings.filter((w) => w.severity === 'error').length === 0,
+        success: warnings.filter(w => w.severity === 'error').length === 0,
         header,
         lines,
         warnings,
@@ -130,7 +171,7 @@ export class FatturaParserService implements InvoiceParser {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logService.error(`PDF-Parsing fehlgeschlagen: ${errorMsg}`, {
+      logService.error(`[v2] PDF-Parsing fehlgeschlagen: ${errorMsg}`, {
         runId,
         details: error instanceof Error ? error.stack : undefined,
       });
@@ -138,69 +179,46 @@ export class FatturaParserService implements InvoiceParser {
     }
   }
 
-  private parseHeader(firstPage: ExtractedPage, runId: string): ParsedInvoiceHeader {
-    const fullText = firstPage.fullText;
-    const groupedLines = firstPage.groupedLines;
+  // ═══════════════════════════════════════════════════════════════════
+  // HEADER EXTRACTION (Page 1 only, label-based with search radius)
+  // ═══════════════════════════════════════════════════════════════════
+
+  private parseHeaderFromItems(page: ExtractedPage, runId: string): ParsedInvoiceHeader {
+    const items = page.items;
+    const fullText = page.fullText;
 
     let invoiceNumber = '';
     for (const { name, regex } of INVOICE_NUMBER_PATTERNS) {
       const match = fullText.match(regex);
       if (match) {
-        invoiceNumber = name === 'FATTURA_NUMBER_FLEXIBLE' ? `${match[1]}.${match[2]}` : match[1];
-        logService.info(`Rechnungsnummer gefunden: ${invoiceNumber} (Muster: ${name})`, {
-          runId,
-          step: 'Header',
-        });
+        invoiceNumber = name === 'FATTURA_NUMBER_FLEXIBLE'
+          ? `${match[1]}.${match[2]}`
+          : match[1];
+        logService.info(`[v2] Rechnungsnummer: ${invoiceNumber} (${name})`, { runId, step: 'Header' });
         break;
       }
-    }
-
-    if (!invoiceNumber) {
-      const snippet = fullText.slice(0, 200).replace(/\n/g, ' ');
-      logService.warn(
-        `Rechnungsnummer nicht gefunden. ${INVOICE_NUMBER_PATTERNS.length} Muster versucht. Text: ${snippet}`,
-        { runId, step: 'Header' }
-      );
     }
 
     let date = '';
     const dateMatch = fullText.match(FATTURA_DATE);
     if (dateMatch) {
       date = dateMatch[1].replace(/\//g, '.');
-      logService.info(`Datum gefunden: ${date}`, { runId, step: 'Header' });
+      logService.info(`[v2] Datum: ${date}`, { runId, step: 'Header' });
     }
 
     let packagesCount = 0;
-    let packMatch = fullText.match(PACKAGES_COUNT);
-    if (packMatch) {
-      packagesCount = parseIntSafe(packMatch[1]);
-    }
-
-    if (packagesCount === 0) {
-      for (let i = 0; i < groupedLines.length; i++) {
-        const line = groupedLines[i].text;
-        if (/Number\s+of\s+packages/i.test(line)) {
-          for (let j = i + 1; j < Math.min(i + 3, groupedLines.length); j++) {
-            const numMatch = groupedLines[j].text.match(/(\d{1,3})/);
-            if (numMatch) {
-              packagesCount = parseIntSafe(numMatch[1]);
-              break;
-            }
-          }
+    const packLabel = items.find(it => /Number\s+of\s+packages/i.test(it.text));
+    if (packLabel) {
+      const below = items.filter(
+        it => it.y < packLabel.y && Math.abs(it.x - packLabel.x) < 80 && (packLabel.y - it.y) < 30
+      );
+      for (const item of below) {
+        const num = item.text.match(/(\d{1,4})/);
+        if (num) {
+          packagesCount = parseIntSafe(num[1]);
           break;
         }
       }
-    }
-
-    if (packagesCount === 0) {
-      packMatch = fullText.match(PACKAGES_COUNT_ALT);
-      if (packMatch) {
-        packagesCount = parseIntSafe(packMatch[1]);
-      }
-    }
-
-    if (packagesCount > 0) {
-      logService.info(`Paketzahl gefunden: ${packagesCount}`, { runId, step: 'Header' });
     }
 
     return {
@@ -214,655 +232,372 @@ export class FatturaParserService implements InvoiceParser {
     };
   }
 
-  private parseLinesAdaptive(
-    pages: ExtractedPage[],
-    runId: string,
-    packagesCount: number | null
-  ): ParseCandidateResult {
-    const tolerances = [10, 8, 6, 4];
-    let best: ParseCandidateResult | null = null;
+  // ═══════════════════════════════════════════════════════════════════
+  // ZONE DETECTION — find body boundaries per page
+  // ═══════════════════════════════════════════════════════════════════
 
-    for (const tolerance of tolerances) {
-      const candidatePages = this.rebuildPagesForTolerance(pages, tolerance);
-      const result = this.parseLines(candidatePages, runId);
-      const totalQty = result.lines.reduce((sum, line) => sum + line.quantityDelivered, 0);
-      const score = this.scoreParseCandidate(result, packagesCount, totalQty);
-      const missingIdentifierCount = result.warnings.filter(
-        (warning) => warning.code === 'POSITION_MISSING_IDENTIFIER'
-      ).length;
+  private detectZone(page: ExtractedPage): ZoneBounds {
+    const items = page.items;
 
-      const candidate: ParseCandidateResult = {
-        ...result,
-        tolerance,
-        totalQty,
-        score,
-        pages: candidatePages,
-      };
-
-      if (!best || this.isBetterCandidate(candidate, best)) {
-        best = candidate;
+    let bodyStartY = Number.POSITIVE_INFINITY;
+    for (const item of items) {
+      const text = item.text.trim().toUpperCase();
+      if (BODY_START_LABELS.some(label => text.includes(label))) {
+        if (item.y < bodyStartY) {
+          bodyStartY = item.y;
+        }
       }
-
-      logService.debug(
-        `Adaptive Kandidat yTolerance=${tolerance}: Positionen=${result.lines.length}, Gesamtmenge=${totalQty}, MissingIdentifier=${missingIdentifierCount}, Score=${score}`,
-        { runId, step: 'Position' }
-      );
     }
 
-    if (!best) {
-      return {
-        lines: [],
-        warnings: [],
-        tolerance: 10,
-        totalQty: 0,
-        score: Number.NEGATIVE_INFINITY,
-        pages,
-      };
+    let bodyEndY = Number.NEGATIVE_INFINITY;
+    for (const item of items) {
+      if (BODY_END_PATTERNS.some(pat => pat.test(item.text))) {
+        if (bodyEndY === Number.NEGATIVE_INFINITY || item.y > bodyEndY) {
+          bodyEndY = item.y;
+        }
+      }
     }
 
-    logService.info(
-      `Adaptive Parsing: yTolerance=${best.tolerance}, Positionen=${best.lines.length}, Gesamtmenge=${best.totalQty}`,
-      { runId, step: 'Position' }
+    if (bodyStartY === Number.POSITIVE_INFINITY) {
+      bodyStartY = Math.max(...items.map(it => it.y)) + 1;
+    }
+    if (bodyEndY === Number.NEGATIVE_INFINITY) {
+      bodyEndY = Math.min(...items.map(it => it.y)) - 1;
+    }
+
+    return { bodyStartY, bodyEndY };
+  }
+
+  private getBodyItems(page: ExtractedPage, zone: ZoneBounds): ExtractedTextItem[] {
+    return page.items.filter(
+      it => it.y < zone.bodyStartY && it.y > zone.bodyEndY
     );
-
-    return best;
   }
 
-  private rebuildPagesForTolerance(pages: ExtractedPage[], tolerance: number): ExtractedPage[] {
-    if (tolerance === 10) {
-      return pages;
-    }
+  // ═══════════════════════════════════════════════════════════════════
+  // POSITION EXTRACTION — Bounding Box & Y-Axis Matching
+  // ═══════════════════════════════════════════════════════════════════
 
-    return pages.map((page) => {
-      const groupedLines = groupTextByLine(page.items, tolerance);
-      return {
-        ...page,
-        groupedLines,
-        fullText: groupedLines.map((line) => line.text).join('\n'),
-      };
-    });
-  }
-
-  private scoreParseCandidate(
-    result: ParseLinesResult,
-    packagesCount: number | null,
-    totalQty: number
-  ): number {
-    const lineCount = result.lines.length;
-    if (lineCount === 0) return Number.NEGATIVE_INFINITY;
-
-    const missingIdentifierCount = result.warnings.filter(
-      (warning) => warning.code === 'POSITION_MISSING_IDENTIFIER'
-    ).length;
-    const identifiedCount = lineCount - missingIdentifierCount;
-
-    let score = lineCount * 100 - missingIdentifierCount * 5 + identifiedCount * 2;
-
-    if (packagesCount && packagesCount > 0) {
-      const diff = Math.abs(totalQty - packagesCount);
-      score -= diff * 1000;
-      if (diff === 0) {
-        score += 5000;
-      }
-    }
-
-    return score;
-  }
-
-  private isBetterCandidate(candidate: ParseCandidateResult, currentBest: ParseCandidateResult): boolean {
-    if (candidate.score !== currentBest.score) {
-      return candidate.score > currentBest.score;
-    }
-
-    if (candidate.lines.length !== currentBest.lines.length) {
-      return candidate.lines.length > currentBest.lines.length;
-    }
-
-    const candidateMissing = candidate.warnings.filter(
-      (warning) => warning.code === 'POSITION_MISSING_IDENTIFIER'
-    ).length;
-    const bestMissing = currentBest.warnings.filter(
-      (warning) => warning.code === 'POSITION_MISSING_IDENTIFIER'
-    ).length;
-
-    if (candidateMissing !== bestMissing) {
-      return candidateMissing < bestMissing;
-    }
-
-    return candidate.totalQty > currentBest.totalQty;
-  }
-
-  private parseLines(pages: ExtractedPage[], runId: string): ParseLinesResult {
-    const lines: ParsedInvoiceLine[] = [];
-    const warnings: ParserWarning[] = [];
+  private parsePositionsBoundingBox(
+    pages: ExtractedPage[],
+    runId: string
+  ): { lines: ParsedInvoiceLine[]; warnings: ParserWarning[] } {
+    const allLines: ParsedInvoiceLine[] = [];
+    const allWarnings: ParserWarning[] = [];
+    const allBodyItems: Array<{ pageNumber: number; items: ExtractedTextItem[] }> = [];
+    const allOrderRefs: Array<{ pageNumber: number; y: number; orders: string[] }> = [];
     this.orderTracker.reset();
-
     let positionIndex = 0;
-    let currentArticle = '';
-    let currentEan = '';
-
-    logService.info(`Starting position parsing for ${pages.length} pages`, {
-      runId,
-      step: 'Position',
-    });
 
     for (const page of pages) {
-      const groupedLines = page.groupedLines;
-      logService.info(`Page ${page.pageNumber}: ${groupedLines.length} lines to process`, {
-        runId,
-        step: 'Position',
-      });
+      const zone = this.detectZone(page);
+      const bodyItems = this.getBodyItems(page, zone);
 
-      if (groupedLines.length === 0) {
-        logService.warn(`Page ${page.pageNumber}: No lines found - text extraction may have failed`, {
-          runId,
-          step: 'Position',
-        });
+      logService.debug(
+        `[v2] Page ${page.pageNumber}: zone Y=[${zone.bodyEndY.toFixed(0)}..${zone.bodyStartY.toFixed(0)}], ${bodyItems.length} body items`,
+        { runId, step: 'Position' }
+      );
+
+      if (bodyItems.length === 0) continue;
+
+      allBodyItems.push({ pageNumber: page.pageNumber, items: bodyItems });
+
+      const rows = this.groupItemsIntoRows(bodyItems);
+
+      const pzRows: { rowY: number; rowText: string; rowItems: ExtractedTextItem[]; pzItem: ExtractedTextItem }[] = [];
+      const orderRefs: { y: number; orders: string[] }[] = [];
+
+      for (const row of rows) {
+        const rowText = row.items.map(it => it.text).join(' ');
+
+        if (/Vs\.\s*ORDINE/i.test(rowText)) {
+          const orders = extractOrderReferences(rowText);
+          if (orders.length > 0) {
+            orderRefs.push({ y: row.y, orders });
+          }
+          continue; 
+        }
+
+        const pzItem = row.items.find(it => PZ_ANCHOR.test(it.text));
+        if (pzItem && /PZ\s+\d+/i.test(rowText)) {
+          pzRows.push({ rowY: row.y, rowText, rowItems: row.items, pzItem });
+        }
+      }
+
+      orderRefs.sort((a, b) => b.y - a.y);
+
+      for (const ref of orderRefs) {
+        allOrderRefs.push({ pageNumber: page.pageNumber, ...ref });
+      }
+
+      if (pzRows.length === 0) {
+        logService.debug(`[v2] Page ${page.pageNumber}: no PZ rows found`, { runId, step: 'Position' });
         continue;
       }
 
-      for (let i = 0; i < groupedLines.length; i++) {
-        const line = groupedLines[i];
-        const text = line.text.trim();
-        if (!text) continue;
+      pzRows.sort((a, b) => b.rowY - a.rowY);
 
-        if (isOrderReferenceLine(text)) {
-          const orders = extractOrderReferences(text);
-          if (orders.length > 0) {
-            this.orderTracker.startNewBlock(orders);
-            logService.debug(`Neue Bestellung(en) gefunden: ${orders.join(', ')}`, {
-              runId,
-              step: 'Position',
-            });
-          }
-          continue;
-        }
+      for (const { rowY, rowText, rowItems, pzItem } of pzRows) {
+        const pzMatch = rowText.match(/PZ\s+(\d+)/i);
+        if (!pzMatch) continue;
 
-        const skipOnlyHeaderFooter =
-          shouldSkipLine(text) &&
-          !PRICE_LINE_PATTERN.test(text) &&
-          !PARTIAL_PZ_PATTERN.test(text) &&
-          !this.extractEAN(text) &&
-          !this.extractArticleFromText(text);
-        if (skipOnlyHeaderFooter) continue;
+        const qty = parseIntSafe(pzMatch[1]);
+        if (qty <= 0) continue;
 
-        const combinedMatch = ARTICLE_PATTERNS[0]?.regex.exec(text);
-        if (combinedMatch) {
-          currentArticle = combinedMatch[1] || currentArticle;
-          currentEan = combinedMatch[2] || currentEan;
-        }
-
-        const leftItems = line.items.filter((item) => item.x < 100);
-        for (const item of leftItems) {
-          const itemText = item.text.trim();
-          if (!itemText) continue;
-          const article = this.extractArticleNumber(itemText);
-          if (article && itemText.includes('#')) {
-            currentArticle = article;
-          }
-          const ean = this.extractEAN(itemText);
-          if (ean) {
-            currentEan = ean;
+        for (const ref of orderRefs) {
+          if (ref.y > rowY + Y_TOLERANCE) {
+            this.orderTracker.startNewBlock(ref.orders);
+            break;
           }
         }
 
-        for (const item of line.items) {
-          const itemText = item.text.trim();
-          if (!itemText) continue;
+        const priceMatches = this.extractPricesFromText(rowText);
 
-          const article = this.extractArticleNumber(itemText);
-          if (article && !currentArticle) {
-            currentArticle = article;
-          }
+        if (priceMatches.length < 2) {
+          for (const nextRow of rows) {
+            if (nextRow.y >= rowY - Y_TOLERANCE) continue; 
+            if (rowY - nextRow.y > 25) break; 
 
-          const ean = this.extractEAN(itemText);
-          if (ean && !currentEan) {
-            currentEan = ean;
-          }
+            const nextRowText = nextRow.items.map(it => it.text).join(' ');
+            if (/Vs\.\s*ORDINE/i.test(nextRowText)) break;
+            if (/PZ\s+\d+/i.test(nextRowText)) break;
 
-          if (!currentArticle && (/^\d{9}$/.test(itemText) || /^\d{8}F#\d{2}$/i.test(itemText))) {
-            currentArticle = itemText;
+            const nextPrices = this.extractPricesFromText(nextRowText);
+            priceMatches.push(...nextPrices);
+            if (priceMatches.length >= 2) break;
           }
         }
 
-        if (
-          currentEan &&
-          !currentArticle &&
-          !PRICE_LINE_PATTERN.test(text) &&
-          !PARTIAL_PZ_PATTERN.test(text) &&
-          lines.length > 0 &&
-          !lines[lines.length - 1].ean
-        ) {
-          lines[lines.length - 1].ean = currentEan;
-          logService.debug(
-            `Trailing EAN ${currentEan} zu Position ${lines[lines.length - 1].positionIndex} zugewiesen`,
-            { runId, step: 'Position' }
-          );
-          currentEan = '';
+        let unitPrice = 0;
+        let totalPrice = 0;
+        if (priceMatches.length >= 2) {
+          unitPrice = priceMatches[priceMatches.length - 2];
+          totalPrice = priceMatches[priceMatches.length - 1];
+        } else if (priceMatches.length === 1) {
+          unitPrice = priceMatches[0];
+          totalPrice = priceMatches[0];
         }
 
-        const fullPriceMatches = this.extractFullPriceMatches(text);
-        if (fullPriceMatches.length > 0) {
-          let segmentStart = 0;
-          let pendingArticle = currentArticle;
-          let pendingEan = currentEan;
+        if (totalPrice <= 0) continue; 
 
-          for (const match of fullPriceMatches) {
-            const segment = text.slice(segmentStart, match.endIndex);
-            const article = pendingArticle || this.extractArticleFromText(segment);
-            const ean = pendingEan || this.extractEAN(segment) || '';
+        const leftItems = rowItems.filter(it => it.x < pzItem.x);
+        const leftText = leftItems.map(it => it.text).join(' ');
 
-            positionIndex = this.appendParsedPosition(
-              lines,
-              warnings,
-              positionIndex,
-              article,
-              ean,
-              this.extractDescription(segment),
-              match,
-              segment,
-              runId
-            );
+        const aboveItems = bodyItems
+          .filter(it =>
+            it.y > rowY + Y_TOLERANCE &&
+            it.y < rowY + 80 && // ERHÖHTER RADIUS, WIE BESPROCHEN
+            !orderRefs.some(ref => Math.abs(it.y - ref.y) <= Y_TOLERANCE) &&
+            !pzRows.some(pr => pr !== pzRows.find(p => p.rowY === rowY) && Math.abs(it.y - pr.rowY) <= Y_TOLERANCE)
+          )
+          .sort((a, b) => b.y - a.y);
+        const aboveText = aboveItems.map(it => it.text).join(' ');
 
-            segmentStart = match.endIndex;
-            pendingArticle = '';
-            pendingEan = '';
-          }
+        const searchText = aboveText ? `${aboveText} ${leftText}` : leftText;
+        const { articleNo, ean, description } = this.extractArticleEanFromBlock(searchText);
 
-          currentArticle = '';
-          currentEan = '';
-          continue;
-        }
+        positionIndex += 1;
+        const orderCandidates = this.orderTracker.getOrdersForPosition();
+        const orderStatus: 'YES' | 'NO' | 'check' =
+          orderCandidates.length === 1 ? 'YES' : orderCandidates.length === 0 ? 'NO' : 'check';
 
-        const partialPriceData = this.extractPartialPriceData(text, groupedLines, i);
-        if (!partialPriceData) continue;
-
-        positionIndex = this.appendParsedPosition(
-          lines,
-          warnings,
+        allLines.push({
           positionIndex,
-          currentArticle,
-          currentEan,
-          this.extractDescription(text),
-          partialPriceData,
-          text,
-          runId
-        );
-
-        currentArticle = '';
-        currentEan = '';
-      }
-    }
-
-    if (currentArticle || currentEan) {
-      warnings.push({
-        code: 'INCOMPLETE_POSITION',
-        message: `Unvollstaendige Position am Ende: Art=${currentArticle || 'N/A'}, EAN=${currentEan || 'N/A'}`,
-        severity: 'warning',
-      });
-    }
-
-    if (lines.length === 0) {
-      const fallbackLines = this.parsePositionsFallback(pages, runId);
-      if (fallbackLines.length > 0) {
-        lines.push(...fallbackLines);
-        warnings.push({
-          code: 'FALLBACK_PARSING',
-          message: `Fallback-Parsing verwendet: ${fallbackLines.length} Position(en) ohne Order-Assignment`,
-          severity: 'warning',
+          manufacturerArticleNo: articleNo,
+          ean,
+          descriptionIT: description,
+          quantityDelivered: qty,
+          unitPrice,
+          totalPrice,
+          orderCandidates,
+          orderCandidatesText: orderCandidates.join('|'),
+          orderStatus,
+          rawPositionText: rowText,
         });
-      }
-    }
 
-    if (lines.length === 0) {
-      warnings.push({
-        code: 'NO_POSITIONS_FOUND',
-        message: 'Keine Rechnungspositionen gefunden',
-        severity: 'error',
-      });
-    }
-
-    logService.info(`${lines.length} Positionen extrahiert`, { runId, step: 'Position' });
-    return { lines, warnings };
-  }
-
-  private buildParsedLine(
-    positionIndex: number,
-    article: string,
-    ean: string,
-    descriptionIT: string,
-    priceData: PriceData,
-    rawPositionText: string
-  ): ParsedInvoiceLine {
-    const orderCandidates = this.orderTracker.getOrdersForPosition();
-    const orderStatus: 'YES' | 'NO' | 'check' =
-      orderCandidates.length === 1 ? 'YES' : orderCandidates.length === 0 ? 'NO' : 'check';
-
-    return {
-      positionIndex,
-      manufacturerArticleNo: article,
-      ean,
-      descriptionIT,
-      quantityDelivered: priceData.qty,
-      unitPrice: priceData.unitPrice,
-      totalPrice: priceData.totalPrice,
-      orderCandidates,
-      orderCandidatesText: orderCandidates.join('|'),
-      orderStatus,
-      rawPositionText,
-    };
-  }
-
-  private appendParsedPosition(
-    lines: ParsedInvoiceLine[],
-    warnings: ParserWarning[],
-    currentPositionIndex: number,
-    article: string,
-    ean: string,
-    descriptionIT: string,
-    priceData: PriceData,
-    rawText: string,
-    runId: string
-  ): number {
-    const nextPositionIndex = currentPositionIndex + 1;
-    const parsedLine = this.buildParsedLine(
-      nextPositionIndex,
-      article,
-      ean,
-      descriptionIT,
-      priceData,
-      rawText
-    );
-    lines.push(parsedLine);
-
-    if (!parsedLine.manufacturerArticleNo && !parsedLine.ean) {
-      warnings.push({
-        code: 'POSITION_MISSING_IDENTIFIER',
-        message: `Position ${nextPositionIndex}: Keine Artikelnummer oder EAN erkannt`,
-        severity: 'warning',
-        positionIndex: nextPositionIndex,
-      });
-    }
-
-    logService.debug(
-      `Position ${nextPositionIndex}: ${parsedLine.manufacturerArticleNo || 'N/A'}, EAN=${parsedLine.ean || 'N/A'}, Menge=${priceData.qty}, Bestellungen=[${parsedLine.orderCandidates.join(',')}]`,
-      { runId, step: 'Position' }
-    );
-
-    return nextPositionIndex;
-  }
-
-  private extractArticleNumber(text: string): string | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-
-    const ean = this.extractEAN(trimmed);
-    const candidates = [trimmed];
-    if (ean) {
-      const withoutEan = trimmed.replace(ean, '').trim();
-      if (withoutEan) {
-        candidates.push(withoutEan);
-      }
-    }
-
-    for (const candidate of candidates) {
-      for (const { regex } of ARTICLE_PATTERNS) {
-        const match = candidate.match(regex);
-        if (match && this.isLikelyArticle(match[1])) {
-          return match[1];
+        if (!articleNo && !ean) {
+          allWarnings.push({
+            code: 'POSITION_MISSING_IDENTIFIER',
+            message: `Position ${positionIndex}: Keine Artikelnummer oder EAN erkannt`,
+            severity: 'warning',
+            positionIndex,
+          });
         }
+
+        logService.debug(
+          `[v2] Pos ${positionIndex}: art=${articleNo || 'N/A'}, ean=${ean || 'N/A'}, qty=${qty}, unit=${unitPrice}, total=${totalPrice}, orders=[${orderCandidates.join(',')}]`,
+          { runId, step: 'Position' }
+        );
       }
     }
 
-    return null;
+    const { enrichedLines, warnings: enrichWarnings } = enrichOrderCandidates(
+      allLines, allBodyItems, allOrderRefs,
+    );
+    allWarnings.push(...enrichWarnings);
+
+    logService.info(`[v2] ${enrichedLines.length} Positionen extrahiert`, { runId, step: 'Position' });
+    return { lines: enrichedLines, warnings: allWarnings };
   }
 
-  private extractArticleFromText(text: string): string {
-    const direct = this.extractArticleNumber(text);
-    if (direct) {
-      return direct;
-    }
+  // ═══════════════════════════════════════════════════════════════════
+  // ROW GROUPING & PRICE EXTRACTION
+  // ═══════════════════════════════════════════════════════════════════
 
-    const tokens = text
-      .split(/\s+/)
-      .map((token) => token.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.#-]+$/g, ''))
-      .filter(Boolean);
+  private groupItemsIntoRows(
+    items: ExtractedTextItem[]
+  ): { y: number; items: ExtractedTextItem[] }[] {
+    if (items.length === 0) return [];
 
-    for (const token of tokens) {
-      const article = this.extractArticleNumber(token);
-      if (article) {
-        return article;
+    const sorted = [...items].sort((a, b) => b.y - a.y);
+    const rows: { y: number; items: ExtractedTextItem[] }[] = [];
+    let currentY = sorted[0].y;
+    let currentItems: ExtractedTextItem[] = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const item = sorted[i];
+      if (Math.abs(item.y - currentY) <= Y_TOLERANCE) {
+        currentItems.push(item);
+      } else {
+        rows.push({
+          y: currentItems.reduce((sum, it) => sum + it.y, 0) / currentItems.length,
+          items: currentItems.sort((a, b) => a.x - b.x),
+        });
+        currentY = item.y;
+        currentItems = [item];
       }
     }
 
-    return '';
-  }
-
-  private isLikelyArticle(article: string): boolean {
-    if (/^\d{9}$/.test(article) || /^\d{8}F#\d{2}$/i.test(article)) {
-      return true;
-    }
-
-    if (/^K[A-Z]{3,4}\.\d+$/i.test(article) || /^C[A-Z]{2,3}\d{2}\./i.test(article)) {
-      return true;
-    }
-
-    if (!article.includes('#')) {
-      return false;
-    }
-
-    const prefix = article.split('#')[0] ?? '';
-    if (prefix.includes('.')) {
-      return true;
-    }
-
-    return prefix.length >= 5;
-  }
-
-  private extractEAN(text: string): string | null {
-    const strictMatch = text.match(EAN_PATTERN);
-    if (strictMatch) {
-      return strictMatch[1];
-    }
-
-    const inlineMatch = text.match(/\b(803\d{10})\b/);
-    return inlineMatch ? inlineMatch[1] : null;
-  }
-
-  private extractFullPriceMatches(currentLine: string): FullPriceMatch[] {
-    const pattern = new RegExp(PRICE_LINE_PATTERN.source, 'g');
-    const matches: FullPriceMatch[] = [];
-
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(currentLine)) !== null) {
-      matches.push({
-        qty: parseIntSafe(match[1]),
-        unitPrice: parsePrice(match[2]),
-        totalPrice: parsePrice(match[3]),
-        startIndex: match.index,
-        endIndex: match.index + match[0].length,
+    if (currentItems.length > 0) {
+      rows.push({
+        y: currentItems.reduce((sum, it) => sum + it.y, 0) / currentItems.length,
+        items: currentItems.sort((a, b) => a.x - b.x),
       });
     }
 
-    return matches;
+    return rows;
   }
 
-  private extractPartialPriceData(
-    currentLine: string,
-    allLines: GroupedLine[],
-    currentIndex: number
-  ): PriceData | null {
-    const partialMatch = currentLine.match(PARTIAL_PZ_PATTERN);
-    if (!partialMatch) return null;
-
-    const qty = parseIntSafe(partialMatch[1]);
+  private extractPricesFromText(text: string): number[] {
     const prices: number[] = [];
+    const pattern = new RegExp(PRICE_VALUE_PATTERN.source, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(text)) !== null) {
+      const val = parsePrice(m[1]);
+      if (val > 0) prices.push(val);
+    }
+    return prices;
+  }
 
-    const directPrices = currentLine.match(new RegExp(PRICE_VALUE_PATTERN.source, 'g')) ?? [];
-    for (const price of directPrices) {
-      const parsed = parsePrice(price);
-      if (parsed > 0) prices.push(parsed);
+  // ═══════════════════════════════════════════════════════════════════
+  // ARTICLE / EAN EXTRACTION — Column 1 splitting logic
+  // ═══════════════════════════════════════════════════════════════════
+
+  private extractArticleEanFromBlock(
+    text: string
+  ): { articleNo: string; ean: string; description: string } {
+    const trimmed = text.trim();
+    if (!trimmed) return { articleNo: '', ean: '', description: '' };
+
+    // DIE NEUE, SAUBERE LOGIK:
+    const eanMatch = trimmed.match(EAN_INLINE);
+
+    if (eanMatch) {
+      const ean = eanMatch[1];
+      const eanIndex = trimmed.indexOf(ean);
+      // Alles VOR der EAN ist die Artikelnummer
+      const articleNo = trimmed.substring(0, eanIndex).trim();
+      // Alles NACH der EAN ist die Beschreibung
+      const description = trimmed.substring(eanIndex + ean.length).trim();
+      return { articleNo, ean, description };
+    } else {
+      // Keine EAN gefunden? Alles ist die Artikelnummer!
+      return { articleNo: trimmed, ean: '', description: trimmed };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // FOOTER EXTRACTION (last page only)
+  // ═══════════════════════════════════════════════════════════════════
+
+  private parsePackagesCountFromItems(page: ExtractedPage, runId: string): number {
+    const items = page.items;
+
+    const label = items.find(it => /Number\s+of\s+packages/i.test(it.text));
+    if (!label) return 0;
+
+    const candidates = items.filter(
+      it =>
+        it.y < label.y &&
+        label.y - it.y < 30 &&
+        Math.abs(it.x - label.x) < 100 &&
+        /^\d{1,4}$/.test(it.text.trim())
+    );
+
+    candidates.sort((a, b) => (label.y - a.y) - (label.y - b.y));
+    if (candidates.length > 0) {
+      const count = parseIntSafe(candidates[0].text.trim());
+      if (count > 0) {
+        logService.info(`[v2] Paketzahl: ${count}`, { runId, step: 'Footer' });
+        return count;
+      }
     }
 
-    if (prices.length < 2) {
-      for (let offset = 1; offset <= 3 && currentIndex + offset < allLines.length; offset++) {
-        const nextLine = allLines[currentIndex + offset].text.trim();
-        if (shouldSkipLine(nextLine) || isOrderReferenceLine(nextLine) || PARTIAL_PZ_PATTERN.test(nextLine)) {
-          break;
-        }
+    const inlineMatch = label.text.match(/packages\s*[\n\s]*(\d{1,4})/i);
+    if (inlineMatch) {
+      const count = parseIntSafe(inlineMatch[1]);
+      logService.info(`[v2] Paketzahl (inline): ${count}`, { runId, step: 'Footer' });
+      return count;
+    }
 
-        const lookaheadPrices = extractTwoPrices(nextLine);
-        if (lookaheadPrices) {
-          prices.push(lookaheadPrices[0], lookaheadPrices[1]);
-        } else {
-          const candidates = nextLine.match(new RegExp(PRICE_VALUE_PATTERN.source, 'g')) ?? [];
-          for (const candidate of candidates) {
-            const parsed = parsePrice(candidate);
-            if (parsed > 0) prices.push(parsed);
+    const groupedLines = page.groupedLines;
+    for (let i = 0; i < groupedLines.length; i++) {
+      if (/Number\s+of\s+packages/i.test(groupedLines[i].text)) {
+        for (let j = i + 1; j < Math.min(i + 3, groupedLines.length); j++) {
+          const numMatch = groupedLines[j].text.match(/(\d{1,4})/);
+          if (numMatch) {
+            const count = parseIntSafe(numMatch[1]);
+            logService.info(`[v2] Paketzahl (grouped fallback): ${count}`, { runId, step: 'Footer' });
+            return count;
           }
         }
-
-        if (prices.length >= 2) break;
+        break;
       }
     }
 
-    if (prices.length === 0) return null;
-
-    return {
-      qty,
-      unitPrice: prices.length >= 2 ? prices[prices.length - 2] : prices[0],
-      totalPrice: prices[prices.length - 1],
-    };
+    return 0;
   }
 
-  private extractDescription(text: string): string {
-    const match = text.match(/^(.+?)\s+PZ\s+\d+/i);
-    return match ? match[1].trim() : '';
-  }
-
-  private parsePositionsFallback(pages: ExtractedPage[], runId: string): ParsedInvoiceLine[] {
-    const fullText = pages
-      .map((page) => `${page.items.map((item) => item.text).join(' ')}\n${page.fullText}`)
-      .join('\n');
-
-    const pattern =
-      /([A-Z]{2,}[A-Z0-9.]+#[A-Z0-9]+)\s*(803\d{10})[\s\S]{0,120}?PZ\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)/gi;
-
-    const lines: ParsedInvoiceLine[] = [];
-    let positionIndex = 0;
-
-    for (const match of fullText.matchAll(pattern)) {
-      positionIndex += 1;
-      lines.push({
-        positionIndex,
-        manufacturerArticleNo: match[1] || '',
-        ean: match[2] || '',
-        descriptionIT: '',
-        quantityDelivered: parseIntSafe(match[3]),
-        unitPrice: parsePrice(match[4]),
-        totalPrice: parsePrice(match[5]),
-        orderCandidates: [],
-        orderCandidatesText: '',
-        orderStatus: 'NO',
-        rawPositionText: match[0],
-      });
-    }
-
-    if (lines.length > 0) {
-      logService.info(`Fallback-Scan erfolgreich: ${lines.length} Positionen`, {
-        runId,
-        step: 'Position',
-      });
-    }
-
-    return lines;
-  }
-
-  private parseInvoiceTotal(lastPage: ExtractedPage, runId: string): number {
-    const groupedLines = lastPage.groupedLines;
-    let total = 0;
+  private parseInvoiceTotalFromItems(page: ExtractedPage, runId: string): number {
+    const items = page.items;
+    const groupedLines = page.groupedLines;
 
     for (let i = 0; i < groupedLines.length; i++) {
-      const line = groupedLines[i].text;
-      if (CONTRIBUTO_MARKER.test(line) && i > 0) {
+      if (CONTRIBUTO_MARKER.test(groupedLines[i].text) && i > 0) {
         const prevLine = groupedLines[i - 1].text;
         const priceMatch = prevLine.match(PRICE_VALUE_PATTERN);
         if (priceMatch) {
-          total = parsePrice(priceMatch[0]);
-          logService.info(`Rechnungssumme gefunden (bei CONTRIBUTO): ${total}`, {
-            runId,
-            step: 'Total',
-          });
+          const total = parsePrice(priceMatch[0]);
+          logService.info(`[v2] Rechnungssumme (CONTRIBUTO): ${total}`, { runId, step: 'Footer' });
           return total;
         }
       }
     }
 
     for (let i = 0; i < groupedLines.length; i++) {
-      const line = groupedLines[i].text;
-      if (AMOUNT_TO_PAY_MARKER.test(line)) {
+      if (AMOUNT_TO_PAY_MARKER.test(groupedLines[i].text)) {
         for (let j = i + 1; j < Math.min(i + 3, groupedLines.length); j++) {
-          const nextLine = groupedLines[j].text;
-          const priceMatch = nextLine.match(PRICE_VALUE_PATTERN);
+          const priceMatch = groupedLines[j].text.match(PRICE_VALUE_PATTERN);
           if (priceMatch) {
-            total = parsePrice(priceMatch[0]);
-            logService.info(`Rechnungssumme gefunden (bei AMOUNT TO PAY): ${total}`, {
-              runId,
-              step: 'Total',
-            });
+            const total = parsePrice(priceMatch[0]);
+            logService.info(`[v2] Rechnungssumme (AMOUNT TO PAY): ${total}`, { runId, step: 'Footer' });
             return total;
           }
         }
       }
     }
 
-    if (total === 0) {
-      logService.warn('Rechnungssumme nicht gefunden', { runId, step: 'Total' });
-    }
-
-    return total;
-  }
-
-  private parsePackagesCount(page: ExtractedPage, runId: string): number {
-    const fullText = page.fullText;
-    const groupedLines = page.groupedLines;
-
-    let packagesCount = 0;
-    let packMatch = fullText.match(PACKAGES_COUNT);
-    if (packMatch) {
-      packagesCount = parseIntSafe(packMatch[1]);
-    }
-
-    if (packagesCount === 0) {
-      for (let i = 0; i < groupedLines.length; i++) {
-        const line = groupedLines[i].text;
-        if (/Number\s+of\s+packages/i.test(line)) {
-          for (let j = i + 1; j < Math.min(i + 3, groupedLines.length); j++) {
-            const numMatch = groupedLines[j].text.match(/(\d{1,3})/);
-            if (numMatch) {
-              packagesCount = parseIntSafe(numMatch[1]);
-              break;
-            }
-          }
-          break;
-        }
-      }
-    }
-
-    if (packagesCount === 0) {
-      packMatch = fullText.match(PACKAGES_COUNT_ALT);
-      if (packMatch) {
-        packagesCount = parseIntSafe(packMatch[1]);
-      }
-    }
-
-    if (packagesCount > 0) {
-      logService.info(`Paketzahl (letzte Seite) gefunden: ${packagesCount}`, {
-        runId,
-        step: 'Header',
-      });
-    }
-
-    return packagesCount;
+    logService.warn('[v2] Rechnungssumme nicht gefunden', { runId, step: 'Footer' });
+    return 0;
   }
 }

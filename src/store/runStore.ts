@@ -9,6 +9,9 @@ import {
   StepStatus,
   ParsedInvoiceLineExtended,
   InvoiceParserWarning,
+  ArticleMaster,
+  OpenWEPosition,
+  RunStats,
 } from '@/types';
 import {
   mockRuns,
@@ -21,12 +24,15 @@ import { fileStorageService } from '@/services/fileStorageService';
 import {
   parseInvoicePDF,
   convertToInvoiceLines,
+  expandInvoiceLines,
   convertToInvoiceHeader,
   generateRunId,
   type ParsedInvoiceResult,
 } from '@/services/invoiceParserService';
 import { getParsingTimeoutMs } from '@/services/parsers/config';
 import type { ParserWarning } from '@/services/parsers/types';
+import { matchAllArticles } from '@/services/matching/ArticleMatcher';
+import { matchAllOrders } from '@/services/matching/OrderMatcher';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -92,6 +98,7 @@ function loadParsedInvoice(): ParsedInvoiceResult | null {
 
 function mapParserWarningToIssueType(code: string): Issue['type'] {
   const normalized = code.toUpperCase();
+  if (normalized.includes('ORDER_TYPE_B')) return 'order-assignment';
   if (normalized.includes('EAN')) return 'missing-ean';
   if (normalized.includes('IDENTIFIER')) return 'missing-ean';
   if (normalized.includes('PRICE')) return 'price-mismatch';
@@ -99,11 +106,12 @@ function mapParserWarningToIssueType(code: string): Issue['type'] {
 }
 
 function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue[] {
+  // ── Blocking issues from parser errors ──
   const parserErrors = warnings.filter((warning) => warning.severity === 'error');
-  return parserErrors.map((warning, index) => ({
+  const blockingIssues: Issue[] = parserErrors.map((warning, index) => ({
     id: `issue-${runId}-step1-${warning.code || 'unknown'}-${index}-${Date.now()}`,
     runId,
-    severity: 'blocking',
+    severity: 'blocking' as const,
     stepNo: 1,
     type: mapParserWarningToIssueType(warning.code),
     message: warning.message || 'Parserfehler ohne Meldung',
@@ -111,11 +119,92 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
       warning.positionIndex ? `, Position: ${warning.positionIndex}` : ''
     }`,
     relatedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
-    status: 'open',
+    status: 'open' as const,
     createdAt: new Date().toISOString(),
     resolvedAt: null,
     resolutionNote: null,
   }));
+
+  // ── Soft-fail issues from Typ-B order warnings ──
+  const typeBWarnings = warnings.filter(
+    (w) => w.severity === 'warning' && w.code === 'ORDER_TYPE_B_DETECTED',
+  );
+  const softFailIssues: Issue[] = typeBWarnings.map((warning, index) => ({
+    id: `issue-${runId}-step1-${warning.code}-${index}-${Date.now()}`,
+    runId,
+    severity: 'soft-fail' as const,
+    stepNo: 1,
+    type: mapParserWarningToIssueType(warning.code),
+    message: warning.message || 'Sonderbuchungs-Bestellnummer erkannt',
+    details: `Code: ${warning.code}${
+      warning.positionIndex ? `, Position: ${warning.positionIndex}` : ''
+    }`,
+    relatedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
+    status: 'open' as const,
+    createdAt: new Date().toISOString(),
+    resolvedAt: null,
+    resolutionNote: null,
+  }));
+
+  return [...blockingIssues, ...softFailIssues];
+}
+
+/**
+ * Compute match/price stats from invoice lines (after Step 2 article matching).
+ */
+function computeMatchStats(lines: InvoiceLine[]): Partial<RunStats> {
+  return {
+    expandedLineCount: lines.length,
+    fullMatchCount: lines.filter(l => l.matchStatus === 'full-match').length,
+    codeItOnlyCount: lines.filter(l => l.matchStatus === 'code-it-only').length,
+    eanOnlyCount: lines.filter(l => l.matchStatus === 'ean-only').length,
+    noMatchCount: lines.filter(l => l.matchStatus === 'no-match').length,
+    articleMatchedCount: lines.filter(
+      l => l.matchStatus !== 'pending' && l.matchStatus !== 'no-match'
+    ).length,
+    serialRequiredCount: lines.filter(l => l.serialRequired).length,
+    inactiveArticlesCount: lines.filter(l => !l.activeFlag).length,
+    priceOkCount: lines.filter(l => l.priceCheckStatus === 'ok').length,
+    priceMismatchCount: lines.filter(l => l.priceCheckStatus === 'mismatch').length,
+    priceMissingCount: lines.filter(l => l.priceCheckStatus === 'missing').length,
+    priceCustomCount: lines.filter(l => l.priceCheckStatus === 'custom').length,
+  };
+}
+
+/**
+ * Compute order stats from invoice lines (after Step 4 order matching).
+ */
+function computeOrderStats(lines: InvoiceLine[]): Partial<RunStats> {
+  return {
+    matchedOrders: lines.filter(
+      l => l.orderAssignmentReason !== 'pending' && l.orderAssignmentReason !== 'not-ordered'
+    ).length,
+    notOrderedCount: lines.filter(l => l.orderAssignmentReason === 'not-ordered').length,
+    manualOkOrderCount: lines.filter(l => l.orderAssignmentReason === 'manual-ok').length,
+  };
+}
+
+/**
+ * Build blocking issues for no-match articles (Step 2).
+ */
+function buildArticleMatchIssues(runId: string, lines: InvoiceLine[]): Issue[] {
+  const noMatchLines = lines.filter(l => l.matchStatus === 'no-match');
+  if (noMatchLines.length === 0) return [];
+
+  return [{
+    id: `issue-${runId}-step2-no-match-${Date.now()}`,
+    runId,
+    severity: 'blocking',
+    stepNo: 2,
+    type: 'no-article-match',
+    message: `${noMatchLines.length} Artikel ohne Match in Stammdaten`,
+    details: noMatchLines.map(l => l.manufacturerArticleNo || l.ean || l.lineId).join(', '),
+    relatedLineIds: noMatchLines.map(l => l.lineId),
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    resolvedAt: null,
+    resolutionNote: null,
+  }];
 }
 
 interface RunState {
@@ -168,6 +257,15 @@ interface RunState {
 
   // Run update with parsed data
   updateRunWithParsedData: (runId: string, result: ParsedInvoiceResult) => void;
+
+  // PROJ-11 Phase B: Article matching (Step 2)
+  executeArticleMatching: (articles: ArticleMaster[]) => void;
+  setManualPrice: (lineId: string, price: number) => void;
+
+  // PROJ-11 Phase C: Order matching (Step 4)
+  executeOrderMatching: (openPositions: OpenWEPosition[]) => void;
+  setManualOrder: (lineId: string, orderYear: number, orderCode: string) => void;
+  confirmNoOrder: (lineId: string) => void;
 }
 
 export const useRunStore = create<RunState>((set, get) => ({
@@ -419,51 +517,37 @@ export const useRunStore = create<RunState>((set, get) => ({
       details: `Config: ${JSON.stringify(globalConfig)}`,
     });
 
-    // Parse invoice if file is available
-    if (invoiceFile?.file) {
-      set({ parsingProgress: 'Lese PDF...' });
+    // ── try/finally guarantees isProcessing is ALWAYS reset ──
+    try {
+      // Parse invoice if file is available
+      if (invoiceFile?.file) {
+        set({ parsingProgress: 'Lese PDF...' });
 
-      const parseSuccess = await parseInvoice(runId);
-      const { parsedInvoiceResult } = get();
+        const parseSuccess = await parseInvoice(runId);
+        const { parsedInvoiceResult } = get();
 
-      if (parseSuccess && parsedInvoiceResult) {
-        // Update run with parsed data
-        updateRunWithParsedData(runId, parsedInvoiceResult);
+        if (parseSuccess && parsedInvoiceResult) {
+          // Update run with parsed data
+          updateRunWithParsedData(runId, parsedInvoiceResult);
 
-        // Generate proper run ID with fattura number
-        const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
-
-        // Update run ID
-        set((state) => {
-          const updatedRun = state.runs.find(r => r.id === runId);
-          if (updatedRun) {
-            const finalRun = { ...updatedRun, id: newRunId };
-            return {
-              runs: state.runs.map(r => r.id === runId ? finalRun : r),
-              currentRun: finalRun,
-              issues: state.issues.map(issue =>
-                issue.runId === runId ? { ...issue, runId: newRunId } : issue
-              ),
-            };
-          }
-          return state;
-        });
-
-        runId = newRunId;
-      } else if (parsedInvoiceResult) {
-        // Parsing had errors but we got some data - update run with partial data
-        updateRunWithParsedData(runId, parsedInvoiceResult);
-
-        // If we have a fattura number, use it for the run ID
-        if (parsedInvoiceResult.header.fatturaNumber) {
+          // Generate proper run ID with fattura number
           const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
+
+          // Update run ID + rename invoiceLine lineIds to match new runId
           set((state) => {
             const updatedRun = state.runs.find(r => r.id === runId);
             if (updatedRun) {
               const finalRun = { ...updatedRun, id: newRunId };
+              const oldPrefix = `${runId}-line-`;
+              const newPrefix = `${newRunId}-line-`;
               return {
                 runs: state.runs.map(r => r.id === runId ? finalRun : r),
                 currentRun: finalRun,
+                invoiceLines: state.invoiceLines.map(l =>
+                  l.lineId.startsWith(oldPrefix)
+                    ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) }
+                    : l
+                ),
                 issues: state.issues.map(issue =>
                   issue.runId === runId ? { ...issue, runId: newRunId } : issue
                 ),
@@ -471,10 +555,69 @@ export const useRunStore = create<RunState>((set, get) => ({
             }
             return state;
           });
+
           runId = newRunId;
+        } else if (parsedInvoiceResult) {
+          // Parsing had errors but we got some data - update run with partial data
+          updateRunWithParsedData(runId, parsedInvoiceResult);
+
+          // If we have a fattura number, use it for the run ID
+          if (parsedInvoiceResult.header.fatturaNumber) {
+            const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
+            set((state) => {
+              const updatedRun = state.runs.find(r => r.id === runId);
+              if (updatedRun) {
+                const finalRun = { ...updatedRun, id: newRunId };
+                const oldPrefix = `${runId}-line-`;
+                const newPrefix = `${newRunId}-line-`;
+                return {
+                  runs: state.runs.map(r => r.id === runId ? finalRun : r),
+                  currentRun: finalRun,
+                  invoiceLines: state.invoiceLines.map(l =>
+                    l.lineId.startsWith(oldPrefix)
+                      ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) }
+                      : l
+                  ),
+                  issues: state.issues.map(issue =>
+                    issue.runId === runId ? { ...issue, runId: newRunId } : issue
+                  ),
+                };
+              }
+              return state;
+            });
+            runId = newRunId;
+          }
+        } else {
+          // Complete failure - update run with error status
+          set((state) => {
+            const updatedRun = state.runs.find(r => r.id === runId);
+            if (updatedRun) {
+              const failedRun: Run = {
+                ...updatedRun,
+                status: 'failed',
+                invoice: {
+                  ...updatedRun.invoice,
+                  fattura: 'FEHLER: Parsing fehlgeschlagen',
+                },
+                steps: updatedRun.steps.map(step =>
+                  step.stepNo === 1 ? { ...step, status: 'failed' as const, issuesCount: 1 } : step
+                ),
+              };
+              return {
+                runs: state.runs.map(r => r.id === runId ? failedRun : r),
+                currentRun: failedRun,
+              };
+            }
+            return state;
+          });
+
+          logService.error('PDF-Parsing vollständig fehlgeschlagen', {
+            runId,
+            step: 'Rechnung auslesen',
+          });
         }
       } else {
-        // Complete failure - update run with error status
+        // No invoice file - update run with error status
         set((state) => {
           const updatedRun = state.runs.find(r => r.id === runId);
           if (updatedRun) {
@@ -483,7 +626,7 @@ export const useRunStore = create<RunState>((set, get) => ({
               status: 'failed',
               invoice: {
                 ...updatedRun.invoice,
-                fattura: 'FEHLER: Parsing fehlgeschlagen',
+                fattura: 'FEHLER: Keine PDF-Datei',
               },
               steps: updatedRun.steps.map(step =>
                 step.stepNo === 1 ? { ...step, status: 'failed' as const, issuesCount: 1 } : step
@@ -497,61 +640,62 @@ export const useRunStore = create<RunState>((set, get) => ({
           return state;
         });
 
-        logService.error('PDF-Parsing vollständig fehlgeschlagen', {
+        logService.warn('Keine Invoice-Datei für Parsing verfügbar', {
           runId,
           step: 'Rechnung auslesen',
         });
       }
-    } else {
-      // No invoice file - update run with error status
+
+      // Create archive entry
+      const finalRun = get().currentRun;
+      if (finalRun) {
+        try {
+          archiveService.createArchiveEntry(
+            finalRun.id,
+            finalRun.invoice.fattura,
+            globalConfig,
+            uploadedFiles
+          );
+        } catch (error) {
+          console.warn('[RunStore] Failed to create archive entry:', error);
+          logService.warn('Archiv-Eintrag konnte nicht erstellt werden', {
+            runId: finalRun.id,
+            step: 'Archiv',
+          });
+        }
+      }
+    } catch (error) {
+      // Catch-all: any uncaught error in the entire parsing workflow
+      console.error('CRITICAL PARSER ERROR in createNewRunWithParsing:', error);
+      logService.error(`CRITICAL: createNewRunWithParsing crashed: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'System',
+      });
+
+      // Mark run as failed so the UI shows the error
       set((state) => {
         const updatedRun = state.runs.find(r => r.id === runId);
         if (updatedRun) {
           const failedRun: Run = {
             ...updatedRun,
             status: 'failed',
-            invoice: {
-              ...updatedRun.invoice,
-              fattura: 'FEHLER: Keine PDF-Datei',
-            },
             steps: updatedRun.steps.map(step =>
-              step.stepNo === 1 ? { ...step, status: 'failed' as const, issuesCount: 1 } : step
+              step.stepNo === 1 && step.status === 'running'
+                ? { ...step, status: 'failed' as const, issuesCount: 1 }
+                : step
             ),
           };
           return {
             runs: state.runs.map(r => r.id === runId ? failedRun : r),
-            currentRun: failedRun,
+            currentRun: state.currentRun?.id === runId ? failedRun : state.currentRun,
           };
         }
         return state;
       });
-
-      logService.warn('Keine Invoice-Datei für Parsing verfügbar', {
-        runId,
-        step: 'Rechnung auslesen',
-      });
+    } finally {
+      // GUARANTEED: Always reset isProcessing, even on crash
+      set({ isProcessing: false, parsingProgress: '' });
     }
-
-    // Create archive entry
-    const finalRun = get().currentRun;
-    if (finalRun) {
-      try {
-        archiveService.createArchiveEntry(
-          finalRun.id,
-          finalRun.invoice.fattura,
-          globalConfig,
-          uploadedFiles
-        );
-      } catch (error) {
-        console.warn('[RunStore] Failed to create archive entry:', error);
-        logService.warn('Archiv-Eintrag konnte nicht erstellt werden', {
-          runId: finalRun.id,
-          step: 'Archiv',
-        });
-      }
-    }
-
-    set({ isProcessing: false, parsingProgress: '' });
 
     return get().currentRun || newRun;
   },
@@ -717,69 +861,108 @@ export const useRunStore = create<RunState>((set, get) => ({
   // Set parsing progress message
   setParsingProgress: (progress) => set({ parsingProgress: progress }),
 
-  // Update run with parsed data
+  // Update run with parsed data (uses expansion: qty>1 → N individual lines)
   updateRunWithParsedData: (runId, result) => {
-    const invoiceHeader = convertToInvoiceHeader(result);
-    const invoiceLines = convertToInvoiceLines(result.lines, runId);
-    const step1Issues = buildStep1ParserIssues(runId, result.warnings);
+    try {
+      // ── DEBUG: Raw parser output BEFORE expansion ──
+      console.log('[RunStore] Raw Parser Output:', JSON.stringify({
+        linesCount: result.lines.length,
+        header: result.header,
+        warningsCount: result.warnings.length,
+        lines: result.lines.map((l, i) => ({
+          idx: i,
+          pos: l.positionIndex,
+          art: l.manufacturerArticleNo,
+          ean: l.ean,
+          qty: l.quantityDelivered,
+          unit: l.unitPrice,
+          total: l.totalPrice,
+        })),
+      }, null, 2));
 
-    // Determine step status based on parse result
-    const hasErrors = step1Issues.length > 0;
-    const stepStatus: StepStatus = result.success
-      ? (hasErrors ? 'soft-fail' : 'ok')
-      : 'failed';
+      const invoiceHeader = convertToInvoiceHeader(result);
+      const invoiceLines = expandInvoiceLines(result.lines, runId);
 
-    set((state) => {
-      const updatedRun = state.runs.find(r => r.id === runId);
-      if (!updatedRun) return state;
+      console.log(`[RunStore] Expansion complete: ${result.lines.length} positions → ${invoiceLines.length} lines`);
 
-      const newRun: Run = {
-        ...updatedRun,
-        invoice: {
-          ...invoiceHeader,
-          packagesCount: result.header.packagesCount,
-          totalQty: result.header.totalQty,
-        },
-        stats: {
-          ...updatedRun.stats,
-          parsedInvoiceLines: result.lines.length,
-        },
-        steps: updatedRun.steps.map(step =>
-          step.stepNo === 1
-            ? {
-                ...step,
-                status: stepStatus,
-                issuesCount: step1Issues.length,
-              }
-            : step
-        ),
-        status: stepStatus === 'failed' ? 'soft-fail' : 'running',
-      };
+      const step1Issues = buildStep1ParserIssues(runId, result.warnings);
 
-      return {
-        runs: state.runs.map(r => r.id === runId ? newRun : r),
-        currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
-        invoiceLines: [...invoiceLines, ...state.invoiceLines.filter(l => !l.lineId.startsWith(runId))],
-        issues: [
-          ...state.issues.filter(issue => !(issue.runId === runId && issue.stepNo === 1)),
-          ...step1Issues,
-        ],
-      };
-    });
+      // Determine step status based on parse result
+      const hasErrors = step1Issues.length > 0;
+      const stepStatus: StepStatus = result.success
+        ? (hasErrors ? 'soft-fail' : 'ok')
+        : 'failed';
 
-    // Log completion
-    logService.info(`Schritt 1 abgeschlossen: ${result.lines.length} Positionen extrahiert`, {
-      runId,
-      step: 'Rechnung auslesen',
-      details: `Status: ${stepStatus}, Fattura: ${result.header.fatturaNumber}`,
-    });
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
 
-    // Auto-advance to next step if parsing was successful
-    if (stepStatus === 'ok' || stepStatus === 'soft-fail') {
-      setTimeout(() => {
-        const currentState = get();
-        currentState.advanceToNextStep(runId);
-      }, 500);
+        const newRun: Run = {
+          ...updatedRun,
+          invoice: {
+            ...invoiceHeader,
+            packagesCount: result.header.packagesCount,
+            totalQty: result.header.totalQty,
+          },
+          stats: {
+            ...updatedRun.stats,
+            parsedInvoiceLines: result.lines.length,
+            expandedLineCount: invoiceLines.length,
+          },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 1
+              ? {
+                  ...step,
+                  status: stepStatus,
+                  issuesCount: step1Issues.length,
+                }
+              : step
+          ),
+          status: stepStatus === 'failed' ? 'soft-fail' : 'running',
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...invoiceLines, ...state.invoiceLines.filter(l => !l.lineId.startsWith(runId))],
+          issues: [
+            ...state.issues.filter(issue => !(issue.runId === runId && issue.stepNo === 1)),
+            ...step1Issues,
+          ],
+        };
+      });
+
+      // Log completion
+      logService.info(`Schritt 1 abgeschlossen: ${result.lines.length} Positionen extrahiert`, {
+        runId,
+        step: 'Rechnung auslesen',
+        details: `Status: ${stepStatus}, Fattura: ${result.header.fatturaNumber}`,
+      });
+
+      // Auto-advance to next step if parsing was successful
+      // NOTE: Use currentRun.id (not the closure's runId) because
+      // createNewRunWithParsing may rename the run before this timer fires.
+      if (stepStatus === 'ok' || stepStatus === 'soft-fail') {
+        setTimeout(() => {
+          const currentState = get();
+          const activeRunId = currentState.currentRun?.id;
+          if (activeRunId) {
+            console.log('[RunStore] advanceToNextStep with activeRunId:', activeRunId);
+            currentState.advanceToNextStep(activeRunId);
+          } else {
+            console.warn('[RunStore] advanceToNextStep: no currentRun found');
+          }
+        }, 500);
+      }
+    } catch (error) {
+      console.error('CRITICAL PARSER ERROR:', error);
+      logService.error(`CRITICAL: updateRunWithParsedData crashed: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Rechnung auslesen',
+      });
+
+      // Set step 1 to failed so the UI doesn't hang
+      get().updateStepStatus(runId, 1, 'failed');
     }
   },
 
@@ -860,4 +1043,245 @@ export const useRunStore = create<RunState>((set, get) => ({
       ...state.auditLog,
     ],
   })),
+
+  // ─── PROJ-11 Phase B: Article Matching (Step 2) ───────────────────
+
+  executeArticleMatching: (articles) => {
+    const { invoiceLines, runs, currentRun } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] executeArticleMatching: no currentRun');
+      return;
+    }
+
+    const runId = currentRun.id;
+    const run = runs.find(r => r.id === runId);
+    if (!run) {
+      console.warn('[RunStore] executeArticleMatching: run not found for id', runId);
+      return;
+    }
+
+    try {
+      // Run article matching on all lines for this run
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      console.log(`[RunStore] executeArticleMatching: ${runLines.length} lines for run ${runId}, ${articles.length} articles`);
+
+      if (runLines.length === 0) {
+        console.warn('[RunStore] executeArticleMatching: no invoiceLines found for run. LineId prefix:', linePrefix);
+        return;
+      }
+
+      const updatedLines = matchAllArticles(runLines, articles, run.config.tolerance);
+
+      // Compute stats
+      const matchStats = computeMatchStats(updatedLines);
+
+      // Build issues for no-match articles
+      const newIssues = buildArticleMatchIssues(runId, updatedLines);
+
+      // Determine step 2 status
+      const noMatchCount = matchStats.noMatchCount ?? 0;
+      const step2Status: StepStatus = noMatchCount > 0 ? 'soft-fail' : 'ok';
+
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
+
+        const newRun: Run = {
+          ...updatedRun,
+          stats: { ...updatedRun.stats, ...matchStats },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 2
+              ? { ...step, status: step2Status, issuesCount: newIssues.length }
+              : step
+          ),
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...updatedLines, ...otherLines],
+          issues: [
+            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 2)),
+            ...newIssues,
+          ],
+        };
+      });
+
+      logService.info(
+        `Artikel-Matching abgeschlossen: ${matchStats.articleMatchedCount} von ${updatedLines.length} gematcht`,
+        { runId, step: 'Artikel extrahieren' }
+      );
+    } catch (error) {
+      console.error('[RunStore] executeArticleMatching error:', error);
+      logService.error(`Artikel-Matching fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Artikel extrahieren',
+      });
+
+      // Set step 2 to failed so the UI doesn't hang
+      get().updateStepStatus(runId, 2, 'failed');
+    }
+  },
+
+  setManualPrice: (lineId, price) => {
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId === lineId
+          ? {
+              ...line,
+              unitPriceFinal: price,
+              priceCheckStatus: 'custom' as const,
+            }
+          : line
+      ),
+    }));
+
+    // Update price stats for the current run
+    const { invoiceLines, currentRun, runs } = get();
+    if (!currentRun) return;
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
+    const priceStats = {
+      priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
+      priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
+      priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
+      priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
+    };
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...priceStats } } : r
+      ),
+      currentRun: state.currentRun?.id === currentRun.id
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
+        : state.currentRun,
+    }));
+  },
+
+  // ─── PROJ-11 Phase C: Order Matching (Step 4) ─────────────────────
+
+  executeOrderMatching: (openPositions) => {
+    const { invoiceLines, currentRun } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] executeOrderMatching: no currentRun');
+      return;
+    }
+
+    const runId = currentRun.id;
+
+    try {
+      // Run order matching on all lines for this run
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      console.log(`[RunStore] executeOrderMatching: ${runLines.length} lines, ${openPositions.length} positions`);
+
+      if (runLines.length === 0) {
+        console.warn('[RunStore] executeOrderMatching: no invoiceLines found for run. LineId prefix:', linePrefix);
+        return;
+      }
+
+      const updatedLines = matchAllOrders(runLines, openPositions);
+
+      // Compute order stats
+      const orderStats = computeOrderStats(updatedLines);
+
+      // Determine step 4 status
+      const step4Status: StepStatus = (orderStats.notOrderedCount ?? 0) > 0 ? 'soft-fail' : 'ok';
+
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
+
+        const newRun: Run = {
+          ...updatedRun,
+          stats: { ...updatedRun.stats, ...orderStats },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 4
+              ? { ...step, status: step4Status }
+              : step
+          ),
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...updatedLines, ...otherLines],
+        };
+      });
+
+      logService.info(
+        `Bestellzuordnung abgeschlossen: ${orderStats.matchedOrders} von ${updatedLines.length} zugeordnet`,
+        { runId, step: 'Bestellungen mappen' }
+      );
+    } catch (error) {
+      console.error('[RunStore] executeOrderMatching error:', error);
+      logService.error(`Bestell-Matching fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Bestellungen mappen',
+      });
+
+      // Set step 4 to failed so the UI doesn't hang
+      get().updateStepStatus(runId, 4, 'failed');
+    }
+  },
+
+  setManualOrder: (lineId, orderYear, orderCode) => {
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId === lineId
+          ? {
+              ...line,
+              orderNumberAssigned: `${orderYear}-${orderCode}`,
+              orderYear,
+              orderCode,
+              orderAssignmentReason: 'manual' as const,
+            }
+          : line
+      ),
+    }));
+
+    // Update order stats
+    const { invoiceLines, currentRun } = get();
+    if (!currentRun) return;
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
+    const orderStats = computeOrderStats(runLines);
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...orderStats } } : r
+      ),
+      currentRun: state.currentRun?.id === currentRun.id
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
+        : state.currentRun,
+    }));
+  },
+
+  confirmNoOrder: (lineId) => {
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId === lineId
+          ? {
+              ...line,
+              orderAssignmentReason: 'manual-ok' as const,
+            }
+          : line
+      ),
+    }));
+
+    // Update order stats
+    const { invoiceLines, currentRun } = get();
+    if (!currentRun) return;
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
+    const orderStats = computeOrderStats(runLines);
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...orderStats } } : r
+      ),
+      currentRun: state.currentRun?.id === currentRun.id
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
+        : state.currentRun,
+    }));
+  },
 }));

@@ -242,7 +242,7 @@ Bereitschaft aktuell:
 
 	Wichtig:
 	- `invoiceLines` sind global im Store, nicht strikt run-gekapselt.
-	- erster offner Reiter
+	- erster offener Reiter
 
 	#### Tab 'Fehler' ALT `Issues`
 	Zeigt:

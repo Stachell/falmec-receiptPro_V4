@@ -110,42 +110,95 @@ export async function parseInvoicePDF(
 }
 
 /**
- * Convert parsed invoice lines to application InvoiceLine format
+ * Convert parsed invoice lines to application InvoiceLine format (legacy, no expansion)
  */
 export function convertToInvoiceLines(
   parsedLines: ParsedInvoiceLine[],
   runId: string
 ): InvoiceLine[] {
-  return parsedLines.map((parsed) => ({
-    lineId: `${runId}-line-${parsed.positionIndex}`,
-    manufacturerArticleNo: parsed.manufacturerArticleNo,
-    ean: parsed.ean,
-    descriptionIT: parsed.descriptionIT,
-    qty: parsed.quantityDelivered,
-    unitPriceInvoice: parsed.unitPrice,
-    totalLineAmount: parsed.totalPrice,
-    orderNumberAssigned: parsed.orderCandidates.length === 1 ? parsed.orderCandidates[0] : null,
-    orderAssignmentReason: parsed.orderStatus === 'YES' ? 'direct-match' : 'pending',
-    serialNumber: null,
-    serialSource: 'none',
-    falmecArticleNo: null,
-    descriptionDE: null,
-    storageLocation: null,
-    unitPriceSage: null,
-    activeFlag: true,
-    priceCheckStatus: 'pending',
-    // PROJ-11 new fields
-    positionIndex: parsed.positionIndex,
-    expansionIndex: 0,
-    matchStatus: 'pending',
-    serialRequired: false,
-    unitPriceFinal: null,
-    orderYear: null,
-    orderCode: null,
-    orderVorgang: null,
-    orderOpenQty: null,
-    supplierId: null,
-  }));
+  return expandInvoiceLines(parsedLines, runId);
+}
+
+/**
+ * Expand parsed invoice lines: each position with qty=N becomes N individual lines with qty=1.
+ * This is the PROJ-11 expansion logic that replaces the old 1:1 mapping.
+ *
+ * LineId schema: {runId}-line-{positionIndex}-{expansionIndex}
+ */
+export function expandInvoiceLines(
+  parsedLines: ParsedInvoiceLine[],
+  runId: string
+): InvoiceLine[] {
+  if (!Array.isArray(parsedLines)) {
+    console.error('[expandInvoiceLines] parsedLines is not an array:', typeof parsedLines);
+    return [];
+  }
+
+  const expanded: InvoiceLine[] = [];
+
+  for (let idx = 0; idx < parsedLines.length; idx++) {
+    const parsed = parsedLines[idx];
+    if (!parsed) {
+      console.warn(`[expandInvoiceLines] Skipping null/undefined entry at index ${idx}`);
+      continue;
+    }
+
+    try {
+      // Defensive: coerce all fields to safe types
+      const positionIndex = parsed.positionIndex ?? idx;
+      const rawQty = parsed.quantityDelivered;
+      const qty = Number.isFinite(rawQty) ? Math.round(rawQty) : 0;
+      const articleNo = parsed.manufacturerArticleNo ?? '';
+      const ean = parsed.ean ?? '';
+      const descriptionIT = parsed.descriptionIT ?? '';
+      const unitPrice = Number.isFinite(parsed.unitPrice) ? parsed.unitPrice : 0;
+      const totalPrice = Number.isFinite(parsed.totalPrice) ? parsed.totalPrice : 0;
+
+      // Edge case: qty <= 0 → skip with console warning
+      if (qty <= 0) {
+        console.warn(`[expandInvoiceLines] Skipping position ${positionIndex} with qty=${qty} (raw: ${rawQty})`);
+        continue;
+      }
+
+      for (let i = 0; i < qty; i++) {
+        expanded.push({
+          lineId: `${runId}-line-${positionIndex}-${i}`,
+          positionIndex,
+          expansionIndex: i,
+          manufacturerArticleNo: articleNo,
+          ean,
+          descriptionIT,
+          qty: 1,
+          unitPriceInvoice: unitPrice,
+          totalLineAmount: unitPrice, // qty=1 → total = unit
+          orderNumberAssigned: null,
+          orderAssignmentReason: 'pending',
+          serialNumber: null,
+          serialSource: 'none',
+          falmecArticleNo: null,
+          descriptionDE: null,
+          storageLocation: null,
+          unitPriceSage: null,
+          unitPriceFinal: null,
+          activeFlag: true,
+          priceCheckStatus: 'pending',
+          matchStatus: 'pending',
+          serialRequired: false,
+          orderYear: null,
+          orderCode: null,
+          orderVorgang: null,
+          orderOpenQty: null,
+          supplierId: null,
+        });
+      }
+    } catch (error) {
+      console.error(`[expandInvoiceLines] CRITICAL: Error expanding position ${idx}:`, error, parsed);
+      // Skip this position but continue with the rest
+    }
+  }
+
+  console.log(`[expandInvoiceLines] Expanded ${parsedLines.length} positions → ${expanded.length} lines`);
+  return expanded;
 }
 
 /**

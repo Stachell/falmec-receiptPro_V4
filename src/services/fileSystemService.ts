@@ -143,8 +143,10 @@ class FileSystemService {
         return true;
       }
 
-      // Need to re-request permission
-      return false;
+      // Path is configured in localStorage but handle was lost (e.g. page reload).
+      // Don't block the workflow — archiving will fail gracefully elsewhere.
+      logService.info('Datenverzeichnis konfiguriert, aber Zugriff muss neu angefordert werden', { step: 'System' });
+      return true;
     }
 
     // Verify and create if needed

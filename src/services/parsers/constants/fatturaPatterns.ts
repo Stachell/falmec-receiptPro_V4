@@ -81,7 +81,8 @@ export const ARTICLE_PATTERNS: Pattern[] = [
   {
     name: 'general_hash',
     // General alphanumeric with hash (must contain hash or dot, at least 6 chars)
-    regex: /^([A-Z][A-Z0-9.#\-]{4,}[A-Z0-9])$/i,
+    // Lookahead enforces at least one '.' or '#' to avoid matching plain words
+    regex: /^([A-Z](?=[A-Z0-9.#\-]*[.#])[A-Z0-9.#\-]{4,}[A-Z0-9])$/i,
   },
 ];
 

@@ -1,7 +1,7 @@
 /**
  * Invoice Parser Module Registry
  *
- * Supports both local TypeScript parsing and the devlogic API parser.
+ * Modular setup: New parsers can simply be added to the LOCAL_PARSERS array.
  */
 
 // Types
@@ -16,65 +16,58 @@ export type {
   WarningSeverity,
 } from './types';
 
-// Parser
+// Parser Imports
 export { FatturaParserService } from './FatturaParserService';
-export { DevlogicParser } from './DevlogicParserService';
 
 import { FatturaParserService } from './FatturaParserService';
-import { devlogicParser, isDevlogicServerReachable } from './DevlogicParserService';
 import type { InvoiceParser } from './types';
-import { getParserModeFromEnv, type ParserMode } from './config';
+import { logService } from '../logService';
 
-// Create singleton instance
+// 1. Initialisierung der Singleton-Instanzen
 const fatturaParser = new FatturaParserService();
+// HIER können später weitere Parser (z.B. DeliveryNoteParser) instanziiert werden.
 
-/** Registry with the active parser. */
+// 2. MODULARE REGISTRIERUNG: Alle lokalen TypeScript-Parser hier eintragen
+const LOCAL_PARSERS: InvoiceParser[] = [
+  fatturaParser,
+];
+
+/** Registry for direct ID lookups */
 export const parserRegistry: Map<string, InvoiceParser> = new Map([
-  ['fattura', fatturaParser],
-  ['fattura_v1', fatturaParser], // Alias for compatibility
-  ['InvoiceParser_Fattura', fatturaParser], // Legacy alias
-  [devlogicParser.moduleId, devlogicParser],
-  ['devlogic', devlogicParser], // Alias for compatibility
+  [fatturaParser.moduleId, fatturaParser],
+  ['typescript', fatturaParser], 
+  ['auto', fatturaParser], 
 ]);
 
-/** Get parser by module ID. */
 export function getParser(moduleId: string): InvoiceParser | undefined {
   return parserRegistry.get(moduleId);
 }
 
-/** Get all available parsers. */
 export function getAllParsers(): InvoiceParser[] {
-  return [devlogicParser, fatturaParser];
+  return [...LOCAL_PARSERS];
 }
 
-/** Returns configured parser mode from Vite env. */
-export function getConfiguredParserMode(): ParserMode {
-  return getParserModeFromEnv();
-}
-
-/** Find parser for a file based on parser mode and availability. */
+/** * THE ROUTER: Findet den passenden Parser modular und transparent.
+ */
 export async function findParserForFile(pdfFile: File): Promise<InvoiceParser> {
-  const mode = getConfiguredParserMode();
+  logService.info(`[Router] Suche passenden lokalen Parser für: ${pdfFile.name}`);
 
-  if (mode === 'devlogic') {
-    return devlogicParser;
+  // Wir iterieren durch alle angemeldeten lokalen Parser
+  for (const parser of LOCAL_PARSERS) {
+    if (parser.canHandle) {
+      const canHandle = await parser.canHandle(pdfFile);
+      if (canHandle) {
+        logService.info(`[Router] Zuschlag: Lokaler Parser '${parser.moduleName}' hat das PDF akzeptiert.`);
+        return parser;
+      }
+    } else {
+      // Wenn der Parser keine canHandle-Prüfung hat, nimmt er die Datei standardmäßig
+      logService.info(`[Router] Zuschlag: Lokaler Parser '${parser.moduleName}' übernimmt (Standard).`);
+      return parser;
+    }
   }
 
-  if (mode === 'typescript') {
-    return fatturaParser;
-  }
-
-  // auto: prefer local TypeScript parser, use devlogic as backup
-  const tsCanHandle = await fatturaParser.canHandle?.(pdfFile);
-  if (tsCanHandle !== false) {
-    return fatturaParser;
-  }
-
-  const devlogicAvailable = await isDevlogicServerReachable();
-  if (devlogicAvailable) {
-    const devlogicCanHandle = await devlogicParser.canHandle?.(pdfFile);
-    if (devlogicCanHandle !== false) return devlogicParser;
-  }
-
+  // ABSOLUTER NOTFALL-FALLBACK
+  logService.error('[Router] Keine spezifische Zuordnung gefunden! Erzwinge Fattura-Parser als Notlösung.');
   return fatturaParser;
 }
