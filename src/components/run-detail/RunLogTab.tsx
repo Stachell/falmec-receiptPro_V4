@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { Terminal, ChevronDown, ChevronRight, ArrowDownToLine } from 'lucide-react';
+import { Terminal, ChevronDown, ChevronRight, Copy, ArrowDownToLine, Circle } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -118,6 +118,45 @@ export function RunLogTab({ runId, mode, compact = false }: RunLogTabProps) {
 
   const scrollHeight = compact ? 'h-[250px]' : 'h-[420px]';
 
+  /** Build plain-text from filtered entries, including expanded details */
+  const buildLogText = useCallback(() => {
+    return filteredEntries.map(entry => {
+      const time = formatTime(entry.timestamp);
+      const level = entry.level.padEnd(5);
+      const step = entry.step ? ` [${entry.step}]` : '';
+      const line = `${time} ${level}${step} ${entry.message}`;
+      if (entry.details && expandedEntries.has(entry.id)) {
+        return `${line}\n${entry.details}`;
+      }
+      return line;
+    }).join('\n');
+  }, [filteredEntries, expandedEntries, formatTime]);
+
+  const handleCopy = useCallback(async () => {
+    const text = buildLogText();
+    await navigator.clipboard.writeText(text);
+  }, [buildLogText]);
+
+  const handleDownload = useCallback(() => {
+    const text = buildLogText();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `run-log-${runId}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [buildLogText, runId]);
+
+  const toolbarBtnStyle = {
+    backgroundColor: '#c9c3b6',
+    color: '#666666',
+  };
+  const toolbarBtnHoverStyle = {
+    backgroundColor: '#008C99',
+    color: '#E3E0CF',
+  };
+
   return (
     <div className="enterprise-card">
       {/* Header */}
@@ -155,17 +194,48 @@ export function RunLogTab({ runId, mode, compact = false }: RunLogTabProps) {
             ))}
           </div>
 
+          {/* Copy */}
+          <button
+            onClick={handleCopy}
+            title="Log kopieren"
+            className="h-6 px-2 rounded text-xs font-medium flex items-center gap-1 transition-colors"
+            style={toolbarBtnStyle}
+            onMouseEnter={e => Object.assign(e.currentTarget.style, toolbarBtnHoverStyle)}
+            onMouseLeave={e => Object.assign(e.currentTarget.style, toolbarBtnStyle)}
+          >
+            <Copy className="w-3 h-3" />
+            Kopieren
+          </button>
+
+          {/* Download */}
+          <button
+            onClick={handleDownload}
+            title="Log herunterladen"
+            className="h-6 px-2 rounded text-xs font-medium flex items-center gap-1 transition-colors"
+            style={toolbarBtnStyle}
+            onMouseEnter={e => Object.assign(e.currentTarget.style, toolbarBtnHoverStyle)}
+            onMouseLeave={e => Object.assign(e.currentTarget.style, toolbarBtnStyle)}
+          >
+            <ArrowDownToLine className="w-3 h-3" />
+            Download
+          </button>
+
           {/* Follow mode toggle (only in live mode) */}
           {mode === 'live' && (
-            <Button
-              variant={followMode ? 'default' : 'outline'}
-              size="sm"
-              className="h-6 px-2 text-xs gap-1"
+            <button
               onClick={() => setFollowMode(f => !f)}
+              title="Auto-Scroll"
+              className="h-6 px-2 rounded text-xs font-medium flex items-center gap-1 transition-colors"
+              style={followMode ? { ...toolbarBtnStyle, color: undefined } as React.CSSProperties : toolbarBtnStyle}
+              onMouseEnter={e => { if (!followMode) Object.assign(e.currentTarget.style, toolbarBtnHoverStyle); }}
+              onMouseLeave={e => { if (!followMode) Object.assign(e.currentTarget.style, toolbarBtnStyle); }}
             >
-              <ArrowDownToLine className="w-3 h-3" />
+              <Circle
+                className={`w-3 h-3 ${followMode ? 'animate-pulse' : ''}`}
+                style={followMode ? { color: '#ef4444' } : {}}
+              />
               Follow
-            </Button>
+            </button>
           )}
         </div>
       </div>
