@@ -1,6 +1,9 @@
 // Archive Service - Manages virtual folder structure and file storage for runs
 
 import { logService } from './logService';
+import { fileSystemService } from './fileSystemService';
+import { fileStorageService } from './fileStorageService';
+import type { Run, InvoiceLine, ArchiveMetadata } from '../types';
 
 export interface ArchiveFile {
   id: string;
@@ -301,6 +304,204 @@ class ArchiveService {
       available: maxSize - totalSize,
       percentage: (totalSize / maxSize) * 100,
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PROJ-12: Disk-based archive package orchestration
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Generate unique archive folder name with duplicate detection
+  private async generateArchiveFolderName(fattura: string, invoiceDate: string): Promise<string> {
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const date = new Date(invoiceDate);
+    const datePart = isNaN(date.getTime())
+      ? new Date().toISOString().slice(0, 10)
+      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+    const baseName = `Fattura-${fattura.trim()}_${datePart}`;
+
+    // Check for duplicate folders in .Archiv/
+    const archiveHandle = await fileSystemService.getArchiveFolderHandle();
+    if (!archiveHandle) return baseName;
+
+    let candidateName = baseName;
+    let suffix = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        await archiveHandle.getDirectoryHandle(candidateName, { create: false });
+        // Folder exists → try next suffix
+        suffix++;
+        candidateName = `${baseName}_v${suffix}`;
+      } catch {
+        // Folder does not exist → use this name
+        return candidateName;
+      }
+    }
+  }
+
+  // Map StepStatus to ArchiveMetadata status
+  private mapRunStatus(status: string): 'completed' | 'aborted' | 'failed' {
+    if (status === 'ok' || status === 'soft-fail') return 'completed';
+    return 'failed';
+  }
+
+  // Write complete archive package to disk
+  async writeArchivePackage(
+    run: Run,
+    lines: InvoiceLine[],
+    options?: { exportXml?: string; exportCsv?: string }
+  ): Promise<{ success: boolean; cleanedUp: boolean; folderName: string; failedFiles: string[] }> {
+    const runId = run.id;
+    const failedFiles: string[] = [];
+
+    // 1. Generate folder name with duplicate detection
+    const folderName = await this.generateArchiveFolderName(
+      run.invoice.fattura,
+      run.invoice.invoiceDate
+    );
+
+    logService.info(`Archiv-Paket wird erstellt: ${folderName}`, { runId, step: 'Archiv' });
+
+    // 2. Write run-log.json (from in-memory buffer or localStorage)
+    const logEntries = logService.getRunBuffer(runId);
+    const entries = logEntries.length > 0 ? logEntries : logService.getRunLog(runId);
+    if (entries.length > 0) {
+      const ok = await fileSystemService.saveToArchive(
+        folderName, 'run-log.json', JSON.stringify(entries, null, 2)
+      );
+      if (!ok) failedFiles.push('run-log.json');
+    }
+
+    // 3. Write invoice-lines.json
+    const linesOk = await fileSystemService.saveToArchive(
+      folderName, 'invoice-lines.json', JSON.stringify(lines, null, 2)
+    );
+    if (!linesOk) failedFiles.push('invoice-lines.json');
+
+    // 4. Write invoice PDF from IndexedDB
+    let invoiceFileInfo: { name: string; size: number } | null = null;
+    try {
+      const invoiceFile = await fileStorageService.loadFile('invoice');
+      if (invoiceFile?.file) {
+        const ok = await fileSystemService.saveToArchive(folderName, invoiceFile.name, invoiceFile.file);
+        if (ok) {
+          invoiceFileInfo = { name: invoiceFile.name, size: invoiceFile.size };
+        } else {
+          failedFiles.push(invoiceFile.name);
+        }
+      }
+    } catch {
+      logService.warn('Invoice-PDF konnte nicht aus IndexedDB geladen werden', { runId, step: 'Archiv' });
+    }
+
+    // 5. Write export.xml if provided
+    let exportXmlInfo: { name: string; size: number } | null = null;
+    if (options?.exportXml) {
+      const ok = await fileSystemService.saveToArchive(folderName, 'export.xml', options.exportXml);
+      if (ok) {
+        exportXmlInfo = { name: 'export.xml', size: options.exportXml.length };
+      } else {
+        failedFiles.push('export.xml');
+      }
+    }
+
+    // 6. Write export.csv if provided
+    let exportCsvInfo: { name: string; size: number } | null = null;
+    if (options?.exportCsv) {
+      const ok = await fileSystemService.saveToArchive(folderName, 'export.csv', options.exportCsv);
+      if (ok) {
+        exportCsvInfo = { name: 'export.csv', size: options.exportCsv.length };
+      } else {
+        failedFiles.push('export.csv');
+      }
+    }
+
+    // 7. Build and write metadata.json
+    const metadata: ArchiveMetadata = {
+      version: 1,
+      runId,
+      fattura: run.invoice.fattura,
+      invoiceDate: run.invoice.invoiceDate,
+      createdAt: run.createdAt,
+      archivedAt: new Date().toISOString(),
+      status: this.mapRunStatus(run.status),
+      config: {
+        eingangsart: run.config.eingangsart,
+        tolerance: run.config.tolerance,
+        currency: 'EUR',
+        preisbasis: run.config.priceBasis,
+      },
+      stats: {
+        parsedPositions: run.stats.parsedInvoiceLines,
+        expandedLines: run.stats.expandedLineCount,
+        fullMatchCount: run.stats.fullMatchCount,
+        noMatchCount: run.stats.noMatchCount,
+        exportedLines: lines.length,
+      },
+      files: {
+        invoice: invoiceFileInfo,
+        warenbegleitschein: null,
+        exportXml: exportXmlInfo,
+        exportCsv: exportCsvInfo,
+        artikelstamm: null,
+        offeneBestellungen: null,
+      },
+    };
+
+    const metaOk = await fileSystemService.saveToArchive(
+      folderName, 'metadata.json', JSON.stringify(metadata, null, 2)
+    );
+    if (!metaOk) failedFiles.push('metadata.json');
+
+    // 8. Cleanup ONLY if required files succeeded
+    const requiredOk = !failedFiles.includes('invoice-lines.json') && !failedFiles.includes('metadata.json');
+
+    let cleanedUp = false;
+    if (requiredOk) {
+      await this.cleanupBrowserData(runId);
+      cleanedUp = true;
+    } else {
+      logService.warn(`Archiv-Paket unvollständig: ${failedFiles.join(', ')}`, { runId, step: 'Archiv' });
+    }
+
+    logService.info(
+      `Archiv-Paket ${cleanedUp ? 'erfolgreich' : 'mit Fehlern'}: ${folderName}`,
+      { runId, step: 'Archiv', details: `${lines.length} Positionen, ${failedFiles.length} Fehler` }
+    );
+
+    return { success: requiredOk, cleanedUp, folderName, failedFiles };
+  }
+
+  // Cleanup browser storage after successful archive write
+  async cleanupBrowserData(runId: string): Promise<void> {
+    // 1. Run log from localStorage
+    localStorage.removeItem(`falmec-run-log-${runId}`);
+
+    // 2. Archive run entry + associated archive files from localStorage
+    const runs = this.getArchivedRuns();
+    const run = runs.find(r => r.runId === runId);
+    if (run) {
+      for (const folder of run.folders) {
+        for (const file of folder.files) {
+          localStorage.removeItem(`${ARCHIVE_FILES_PREFIX}${file.id}`);
+        }
+      }
+      const filtered = runs.filter(r => r.runId !== runId);
+      this.saveArchivedRuns(filtered);
+    }
+
+    // 3. Parsed invoice cache
+    localStorage.removeItem('falmec-parsed-invoice');
+
+    // 4. IndexedDB uploaded files
+    try {
+      await fileStorageService.clearAllFiles();
+    } catch {
+      logService.warn('IndexedDB-Cleanup fehlgeschlagen', { runId, step: 'Archiv' });
+    }
+
+    logService.info('Browser-Daten bereinigt', { runId, step: 'Archiv' });
   }
 }
 

@@ -253,3 +253,38 @@ export const EINGANGSART_OPTIONS = [
   'Muster',
   'Sondereingang',
 ] as const;
+
+// PROJ-12: Archive package metadata written to metadata.json on disk
+export interface ArchiveMetadata {
+  version: 1;
+  runId: string;
+  fattura: string;
+  invoiceDate: string;
+  createdAt: string;
+  archivedAt: string;
+  status: 'completed' | 'aborted' | 'failed';
+
+  config: {
+    eingangsart: string;
+    tolerance: number;
+    currency: string;
+    preisbasis: string;
+  };
+
+  stats: {
+    parsedPositions: number;
+    expandedLines: number;
+    fullMatchCount: number;
+    noMatchCount: number;
+    exportedLines: number;
+  };
+
+  files: {
+    invoice: { name: string; size: number } | null;
+    warenbegleitschein: { name: string; size: number } | null;
+    exportXml: { name: string; size: number } | null;
+    exportCsv: { name: string; size: number } | null;
+    artikelstamm: { name: string; size: number } | null;
+    offeneBestellungen: { name: string; size: number } | null;
+  };
+}
