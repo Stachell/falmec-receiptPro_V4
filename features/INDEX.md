@@ -12,3 +12,4 @@
 | PROJ-9 | Local Persistence & Filesystem Integration | In Progress | localStorage + IndexedDB persistence and File System Access API integration for local folder workflow. |
 | PROJ-10 | QA Baseline (Unit Tests) | In Progress | Vitest baseline with parser/config/order-tracker tests and jsdom test setup for pdfjs. |
 | PROJ-11 | Data-Matching-Update | Open | Neue Feldstruktur (Umbenennung, Checkbox 5-Zustaende, Preis-Konsolidierung), Bestellparser mit Matching-/Fallback-Logik, Invoiceline-Expansion, Export-Mapping 10 Spalten. |
+| PROJ-12 | Advanced Logging & File-System Brain | In Progress | Hybride Logging-Architektur: Run-Logfile (tiefes Parser-Tracking), Home-Logfile (globales System-Log mit Rotation), Archivierungs-Paket (gebuendelter Run-Export auf Festplatte), localStorage-Cleanup. Baut auf PROJ-8/PROJ-9 auf. |
