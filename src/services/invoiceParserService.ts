@@ -40,7 +40,7 @@ export async function parseInvoicePDF(
       step: 'Rechnung auslesen',
     });
 
-    const result = await parser.parseInvoice(pdfFile);
+    const result = await parser.parseInvoice(pdfFile, runId);
 
     if (result.success) {
       const totalEur = result.header.invoiceTotal != null

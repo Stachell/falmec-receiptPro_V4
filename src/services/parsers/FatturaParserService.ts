@@ -71,12 +71,12 @@ export class FatturaParserService implements InvoiceParser {
 
   private orderTracker = new OrderBlockTracker();
 
-  async parseInvoice(pdfFile: File): Promise<ParsedInvoiceResult> {
-    const runId = `run_${Date.now()}`;
+  async parseInvoice(pdfFile: File, runId?: string): Promise<ParsedInvoiceResult> {
+    const activeRunId = runId || `fallback_${Date.now()}`;
     const startTime = Date.now();
 
     logService.info(`[v2] PDF-Parsing gestartet: ${pdfFile.name}`, {
-      runId,
+      runId: activeRunId,
       step: 'Rechnung auslesen',
       details: `Dateigroesse: ${(pdfFile.size / 1024).toFixed(2)} KB`,
     });
@@ -84,22 +84,22 @@ export class FatturaParserService implements InvoiceParser {
     try {
       // Extract at y_tolerance=5 — we do our own Y-matching
       const pages = await extractTextFromPDF(pdfFile, Y_TOLERANCE);
-      logService.info(`${pages.length} Seiten extrahiert`, { runId });
+      logService.info(`${pages.length} Seiten extrahiert`, { runId: activeRunId });
 
       // 1. Header (page 1 only)
-      const header = this.parseHeaderFromItems(pages[0], runId);
+      const header = this.parseHeaderFromItems(pages[0], activeRunId);
 
       // 2. Packages count (last page)
-      const packagesCount = this.parsePackagesCountFromItems(pages[pages.length - 1], runId);
+      const packagesCount = this.parsePackagesCountFromItems(pages[pages.length - 1], activeRunId);
       if (packagesCount > 0) {
         header.packagesCount = packagesCount;
       }
 
       // 3. Parse positions from ALL pages using bounding-box model
-      const { lines, warnings } = this.parsePositionsBoundingBox(pages, runId);
+      const { lines, warnings } = this.parsePositionsBoundingBox(pages, activeRunId);
 
       // 4. Invoice total (last page)
-      const invoiceTotal = this.parseInvoiceTotalFromItems(pages[pages.length - 1], runId);
+      const invoiceTotal = this.parseInvoiceTotalFromItems(pages[pages.length - 1], activeRunId);
       if (invoiceTotal > 0) {
         header.invoiceTotal = invoiceTotal;
       }
@@ -157,7 +157,7 @@ export class FatturaParserService implements InvoiceParser {
       const duration = Date.now() - startTime;
       logService.info(
         `[v2] PDF-Parsing abgeschlossen (${duration}ms): ${lines.length} Positionen, ${header.totalQty} Gesamtmenge`,
-        { runId, details: `RgNr: ${header.fatturaNumber || 'N/A'}, Datum: ${header.fatturaDate || 'N/A'}` }
+        { runId: activeRunId, details: `RgNr: ${header.fatturaNumber || 'N/A'}, Datum: ${header.fatturaDate || 'N/A'}` }
       );
 
       return {
@@ -172,7 +172,7 @@ export class FatturaParserService implements InvoiceParser {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logService.error(`[v2] PDF-Parsing fehlgeschlagen: ${errorMsg}`, {
-        runId,
+        runId: activeRunId,
         details: error instanceof Error ? error.stack : undefined,
       });
       throw new Error(`PDF-Parsing fehlgeschlagen: ${errorMsg}`);

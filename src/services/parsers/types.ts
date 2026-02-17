@@ -169,9 +169,10 @@ export interface InvoiceParser {
   /**
    * Parse invoice PDF and extract structured data
    * @param pdfFile - PDF file to parse
+   * @param runId - Optional run ID for log correlation (passed from RunStore)
    * @returns Parsed invoice result
    */
-  parseInvoice(pdfFile: File): Promise<ParsedInvoiceResult>;
+  parseInvoice(pdfFile: File, runId?: string): Promise<ParsedInvoiceResult>;
 
   /**
    * Check if this parser can handle the given PDF
