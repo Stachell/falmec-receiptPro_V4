@@ -86,6 +86,15 @@ export class FatturaParserService implements InvoiceParser {
       const pages = await extractTextFromPDF(pdfFile, Y_TOLERANCE);
       logService.info(`${pages.length} Seiten extrahiert`, { runId: activeRunId });
 
+      // Raw text dump: log full text of each page for run-log.json
+      for (const page of pages) {
+        logService.debug(`[v2] Rohtext Seite ${page.pageNumber}`, {
+          runId: activeRunId,
+          step: 'RawText',
+          details: page.fullText,
+        });
+      }
+
       // 1. Header (page 1 only)
       const header = this.parseHeaderFromItems(pages[0], activeRunId);
 

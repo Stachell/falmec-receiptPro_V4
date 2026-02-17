@@ -23,6 +23,9 @@ const LOG_SNAPSHOTS_KEY = 'falmec-log-snapshots';
 const MAX_SYSTEM_LOG_ENTRIES = 10000;
 
 class LogService {
+  // In-memory run buffers: collects log entries per active run for later JSON export
+  private runBuffers: Map<string, LogEntry[]> = new Map();
+
   private safeSetItem(key: string, value: string): boolean {
     try {
       localStorage.setItem(key, value);
@@ -67,6 +70,12 @@ class LogService {
     // Add to run-specific log if runId provided
     if (options?.runId) {
       this.addToRunLog(options.runId, entry);
+
+      // Also push to in-memory run buffer (if active)
+      const buffer = this.runBuffers.get(options.runId);
+      if (buffer) {
+        buffer.push(entry);
+      }
     }
 
     return entry;
@@ -250,6 +259,53 @@ class LogService {
     const snapshot = this.createLogSnapshot();
     this.openLogInNewTab(snapshot.logs, `falmec ReceiptPro - ${snapshot.name}`);
     return snapshot;
+  }
+
+  // Initialize in-memory buffer for a new run
+  startRunLogging(runId: string): void {
+    this.runBuffers.set(runId, []);
+    this.info('Run-Logging gestartet', { runId, step: 'System' });
+  }
+
+  // Get the in-memory run buffer (or empty array if not active)
+  getRunBuffer(runId: string): LogEntry[] {
+    return this.runBuffers.get(runId) || [];
+  }
+
+  // Export run log to disk via fileSystemService, then clean up on success
+  async exportRunLog(runId: string): Promise<boolean> {
+    // Collect entries: prefer buffer, fall back to localStorage
+    const bufferEntries = this.runBuffers.get(runId);
+    const entries = bufferEntries && bufferEntries.length > 0
+      ? bufferEntries
+      : this.getRunLog(runId);
+
+    if (entries.length === 0) {
+      this.warn('exportRunLog: Keine Log-Einträge für Run', { runId, step: 'System' });
+      return false;
+    }
+
+    try {
+      // Dynamic import to avoid circular dependency (fileSystemService imports logService)
+      const { fileSystemService } = await import('./fileSystemService');
+      const jsonContent = JSON.stringify(entries, null, 2);
+      const success = await fileSystemService.saveRunLog(runId, jsonContent);
+
+      if (success) {
+        // Cleanup: delete buffer + localStorage ONLY after confirmed write
+        this.runBuffers.delete(runId);
+        localStorage.removeItem(`${RUN_LOG_PREFIX}${runId}`);
+        this.info('Run-Log exportiert und localStorage bereinigt', { runId, step: 'System' });
+        return true;
+      }
+
+      this.warn('exportRunLog: Speicherung fehlgeschlagen – Daten bleiben erhalten', { runId, step: 'System' });
+      return false;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.error(`exportRunLog fehlgeschlagen: ${msg}`, { runId, step: 'System' });
+      return false;
+    }
   }
 
   // Clear all logs (for testing/development)

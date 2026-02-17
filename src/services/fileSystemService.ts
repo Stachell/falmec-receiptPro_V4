@@ -185,6 +185,11 @@ class FileSystemService {
     fileName: string,
     content: string | Blob
   ): Promise<boolean> {
+    if (!(await this.checkPermission())) {
+      logService.warn('Keine Schreibberechtigung für Archiv – saveToArchive übersprungen', { step: 'System' });
+      return false;
+    }
+
     const archiveHandle = await this.getArchiveFolderHandle();
     if (!archiveHandle) {
       logService.warn('Archiv-Ordner nicht verfügbar', { step: 'System' });
@@ -222,6 +227,11 @@ class FileSystemService {
 
   // Save a log file
   async saveLogFile(fileName: string, content: string): Promise<boolean> {
+    if (!(await this.checkPermission())) {
+      logService.warn('Keine Schreibberechtigung für Logs – saveLogFile übersprungen', { step: 'System' });
+      return false;
+    }
+
     const logsHandle = await this.getLogsFolderHandle();
     if (!logsHandle) {
       logService.warn('Logs-Ordner nicht verfügbar', { step: 'System' });
@@ -279,6 +289,79 @@ class FileSystemService {
   // Check if we have write access (need to re-request if page was reloaded)
   hasWriteAccess(): boolean {
     return !!this.directoryHandle;
+  }
+
+  // Check if directory handle still has valid read-write permission
+  async checkPermission(): Promise<boolean> {
+    if (!this.directoryHandle) {
+      return false;
+    }
+    try {
+      const perm = await this.directoryHandle.queryPermission({ mode: 'readwrite' });
+      return perm === 'granted';
+    } catch {
+      return false;
+    }
+  }
+
+  // Save run log JSON to the run's archive subfolder
+  async saveRunLog(runId: string, jsonContent: string): Promise<boolean> {
+    return this.saveToArchive(runId, 'run-log.json', jsonContent);
+  }
+
+  // Delete log files in /.logs/ older than maxDays. Returns count of deleted files.
+  async rotateHomeLogs(maxDays: number = 30): Promise<number> {
+    const logsHandle = await this.getLogsFolderHandle();
+    if (!logsHandle) {
+      return 0;
+    }
+
+    const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
+    const datePattern = /^system-(\d{4})-(\d{2})-(\d{2})\.log\.json$/;
+    let deletedCount = 0;
+
+    try {
+      const entriesToDelete: string[] = [];
+      for await (const [name, handle] of logsHandle.entries()) {
+        if (handle.kind !== 'file') continue;
+        try {
+          const match = name.match(datePattern);
+          if (!match) continue; // Skip files that don't match the naming scheme
+          const fileDate = new Date(
+            parseInt(match[1]),
+            parseInt(match[2]) - 1,
+            parseInt(match[3])
+          );
+          if (isNaN(fileDate.getTime())) continue; // Skip invalid dates
+          if (fileDate.getTime() < cutoff) {
+            entriesToDelete.push(name);
+          }
+        } catch {
+          // Robust: skip this file on any parsing error, don't break the loop
+          continue;
+        }
+      }
+
+      for (const name of entriesToDelete) {
+        try {
+          await logsHandle.removeEntry(name);
+          deletedCount++;
+        } catch {
+          logService.warn(`Log-Rotation: Konnte ${name} nicht löschen`, { step: 'System' });
+        }
+      }
+
+      if (deletedCount > 0) {
+        logService.info(`Log-Rotation: ${deletedCount} alte Log-Dateien gelöscht`, { step: 'System' });
+      }
+    } catch (error: any) {
+      logService.error('Log-Rotation fehlgeschlagen', {
+        step: 'System',
+        details: error.message,
+      });
+    }
+
+    return deletedCount;
   }
 
   // Request permission again (after page reload)
