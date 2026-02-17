@@ -19,6 +19,7 @@ import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
 import { ExportPanel } from '@/components/run-detail/ExportPanel';
 import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
+import { RunLogTab } from '@/components/run-detail/RunLogTab';
 
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
@@ -355,6 +356,7 @@ export default function RunDetail() {
               <TabsTrigger value="warehouse">Lagerorte</TabsTrigger>
               <TabsTrigger value="overview">Details</TabsTrigger>
               <TabsTrigger value="export">Export</TabsTrigger>
+              <TabsTrigger value="log">Log</TabsTrigger>
             </TabsList>
 
             {/* Ereignisfeld â€“ rechtsbÃ¼ndig, auto-dismiss nach 4 s */}
@@ -438,6 +440,10 @@ export default function RunDetail() {
 
           <TabsContent value="export">
             <ExportPanel run={currentRun} />
+          </TabsContent>
+
+          <TabsContent value="log">
+            <RunLogTab runId={currentRun.id} mode="live" />
           </TabsContent>
         </Tabs>
       </div>

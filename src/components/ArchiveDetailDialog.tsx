@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArchiveRun, ArchiveFolder, ArchiveFile, archiveService } from '@/services/archiveService';
-import { logService } from '@/services/logService';
+import { RunLogTab } from '@/components/run-detail/RunLogTab';
 
 interface ArchiveDetailDialogProps {
   run: ArchiveRun | null;
@@ -31,6 +31,7 @@ function formatDate(isoString: string): string {
 
 export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDialogProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['00_Uploads']));
+  const [showLog, setShowLog] = useState(false);
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
@@ -46,22 +47,6 @@ export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDi
 
   const handleDownloadFile = (file: ArchiveFile) => {
     archiveService.downloadFile(file);
-  };
-
-  const handleViewRunLog = () => {
-    if (!run) return;
-    const logs = logService.getRunLog(run.runId);
-    if (logs.length > 0) {
-      logService.openLogInNewTab(logs, `falmec ReceiptPro - Run Log: ${run.fattura}`);
-    } else {
-      const tempLogs = [{
-        id: 'temp',
-        timestamp: new Date().toISOString(),
-        level: 'INFO' as const,
-        message: 'Keine Log-Einträge für diesen Durchlauf vorhanden.',
-      }];
-      logService.openLogInNewTab(tempLogs, `falmec ReceiptPro - Run Log: ${run.fattura}`);
-    }
   };
 
   return (
@@ -96,16 +81,21 @@ export function ArchiveDetailDialog({ run, open, onOpenChange }: ArchiveDetailDi
               </div>
               <div>
                 <Button
-                  variant="outline"
+                  variant={showLog ? 'default' : 'outline'}
                   size="sm"
-                  onClick={handleViewRunLog}
+                  onClick={() => setShowLog(v => !v)}
                   className="gap-1.5"
                 >
                   <FileText className="w-4 h-4" />
-                  Run-Logfile anzeigen
+                  {showLog ? 'Log ausblenden' : 'Run-Log anzeigen'}
                 </Button>
               </div>
             </div>
+
+            {/* Inline Run Log (collapsible) */}
+            {showLog && (
+              <RunLogTab runId={run.runId} mode="archive" compact />
+            )}
 
             {/* Folder Structure */}
             <div className="border rounded-lg bg-background/50">
