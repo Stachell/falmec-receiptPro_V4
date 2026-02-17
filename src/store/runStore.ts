@@ -255,6 +255,10 @@ interface RunState {
   advanceToNextStep: (runId: string) => void;
   deleteRun: (runId: string) => void;
 
+  // PROJ-12: Archive & abort actions
+  archiveRun: (runId: string) => Promise<{ success: boolean; folderName: string }>;
+  abortRun: (runId: string) => void;
+
   // Run update with parsed data
   updateRunWithParsedData: (runId: string, result: ParsedInvoiceResult) => void;
 
@@ -510,7 +514,8 @@ export const useRunStore = create<RunState>((set, get) => ({
       parsingProgress: 'Initialisiere...',
     }));
 
-    // Log workflow start
+    // Log workflow start + initialize run buffer
+    logService.startRunLogging(runId);
     logService.info('Neuer Verarbeitungslauf mit PDF-Parsing gestartet', {
       runId,
       step: 'System',
@@ -556,6 +561,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             return state;
           });
 
+          // Rename log buffer to match new runId
+          logService.renameRunBuffer(runId, newRunId);
           runId = newRunId;
         } else if (parsedInvoiceResult) {
           // Parsing had errors but we got some data - update run with partial data
@@ -585,6 +592,8 @@ export const useRunStore = create<RunState>((set, get) => ({
               }
               return state;
             });
+            // Rename log buffer to match new runId
+            logService.renameRunBuffer(runId, newRunId);
             runId = newRunId;
           }
         } else {
@@ -1006,6 +1015,15 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (nextStep) {
       // Set next step to 'running'
       get().updateStepStatus(runId, nextStep.stepNo, 'running');
+    } else {
+      // All steps completed → mark run as finished and auto-archive
+      get().updateRunStatus(runId, 'ok');
+      logService.info('Run abgeschlossen – alle Schritte fertig', { runId, step: 'System' });
+
+      // Fire-and-forget archive
+      get().archiveRun(runId).catch(err =>
+        logService.error(`Auto-Archivierung fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Archiv' })
+      );
     }
   },
 
@@ -1028,10 +1046,68 @@ export const useRunStore = create<RunState>((set, get) => ({
     ),
   })),
 
-  deleteRun: (runId) => set((state) => ({
-    runs: state.runs.filter((r) => r.id !== runId),
-    currentRun: state.currentRun?.id === runId ? null : state.currentRun,
-  })),
+  deleteRun: (runId) => {
+    logService.info('Run gelöscht', { runId, step: 'System' });
+    archiveService.deleteArchivedRun(runId);
+    set((state) => ({
+      runs: state.runs.filter((r) => r.id !== runId),
+      currentRun: state.currentRun?.id === runId ? null : state.currentRun,
+      invoiceLines: state.invoiceLines.filter(l => !l.lineId.startsWith(runId)),
+      issues: state.issues.filter(i => i.runId !== runId),
+    }));
+  },
+
+  // PROJ-12: Write archive package to disk
+  archiveRun: async (runId) => {
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) {
+      logService.warn('archiveRun: Run nicht gefunden', { runId, step: 'Archiv' });
+      return { success: false, folderName: '' };
+    }
+
+    const lines = state.invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const result = await archiveService.writeArchivePackage(run, lines);
+
+    return { success: result.success, folderName: result.folderName };
+  },
+
+  // PROJ-12: Abort run and create partial archive
+  abortRun: (runId) => {
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) return;
+
+    // Mark run + running step as failed
+    set((state) => ({
+      runs: state.runs.map(r => {
+        if (r.id !== runId) return r;
+        return {
+          ...r,
+          status: 'failed' as const,
+          steps: r.steps.map(s =>
+            s.status === 'running' ? { ...s, status: 'failed' as const } : s
+          ),
+        };
+      }),
+      currentRun: state.currentRun?.id === runId
+        ? {
+            ...state.currentRun,
+            status: 'failed' as const,
+            steps: state.currentRun.steps.map(s =>
+              s.status === 'running' ? { ...s, status: 'failed' as const } : s
+            ),
+          }
+        : state.currentRun,
+    }));
+
+    logService.info('Run abgebrochen', { runId, step: 'System' });
+
+    // Fire-and-forget partial archive
+    get().archiveRun(runId).catch(err =>
+      logService.error(`Teilarchivierung fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Archiv' })
+    );
+  },
 
   addAuditEntry: (entry) => set((state) => ({
     auditLog: [

@@ -272,6 +272,25 @@ class LogService {
     return this.runBuffers.get(runId) || [];
   }
 
+  // Rename run buffer + localStorage key when runId changes (e.g. run-123 → Fattura-Nr-date)
+  renameRunBuffer(oldRunId: string, newRunId: string): void {
+    // Move in-memory buffer
+    const buffer = this.runBuffers.get(oldRunId);
+    if (buffer) {
+      this.runBuffers.delete(oldRunId);
+      this.runBuffers.set(newRunId, buffer);
+    }
+
+    // Move localStorage key
+    const oldKey = `${RUN_LOG_PREFIX}${oldRunId}`;
+    const newKey = `${RUN_LOG_PREFIX}${newRunId}`;
+    const data = localStorage.getItem(oldKey);
+    if (data) {
+      this.safeSetItem(newKey, data);
+      localStorage.removeItem(oldKey);
+    }
+  }
+
   // Export run log to disk via fileSystemService, then clean up on success
   async exportRunLog(runId: string): Promise<boolean> {
     // Collect entries: prefer buffer, fall back to localStorage
