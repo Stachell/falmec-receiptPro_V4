@@ -59,6 +59,18 @@ class ParserRegistryService {
     };
   }
 
+  // ── Wipe ─────────────────────────────────────────────────────────────
+
+  /**
+   * Delete the registry JSON from disk and clear the in-memory cache.
+   * The next `initialize()` call will rebuild from LOCAL_PARSERS.
+   */
+  async wipeRegistry(): Promise<void> {
+    await fileSystemService.deleteFile(REGISTRY_FILE);
+    this.cached = null;
+    logService.info('Parser-Registry gewiped (wird beim naechsten Start neu generiert).', { step: 'System' });
+  }
+
   // ── Read / Write ───────────────────────────────────────────────────
 
   /** Read registry from disk. Falls back to default if unavailable. */
@@ -88,9 +100,39 @@ class ParserRegistryService {
    * Called once at app start. Reads the registry, validates
    * `selectedParserId`, applies auto-select rules, and persists
    * corrections back to disk if needed.
+   *
+   * Rebuild logic: compares registry modules with LOCAL_PARSERS.
+   * If the lists differ → wipe & rebuild, preserving selectedParserId.
    */
   async initialize(): Promise<ParserRegistry> {
-    const registry = await this.read();
+    let registry = await this.read();
+    const liveParsers = getAllParsers();
+
+    // ── Module-list comparison ──────────────────────────────────
+    const registryIds = registry.modules.map((m) => m.moduleId).sort().join(',');
+    const liveIds = liveParsers.map((p) => p.moduleId).sort().join(',');
+
+    if (registryIds !== liveIds) {
+      // Lists differ → wipe & rebuild, but remember selectedParserId
+      const previousSelectedId = registry.selectedParserId;
+      logService.info(
+        `Parser-Registry: Modulliste veraendert (registry=[${registryIds}] vs live=[${liveIds}]). Rebuild.`,
+        { step: 'System' },
+      );
+      await this.wipeRegistry();
+      registry = this.buildDefault();
+
+      // Restore selectedParserId if the parser still exists
+      const newIds = new Set(registry.modules.map((m) => m.moduleId));
+      if (previousSelectedId === 'auto' || newIds.has(previousSelectedId)) {
+        registry.selectedParserId = previousSelectedId;
+      } else {
+        registry.selectedParserId = 'auto';
+      }
+      await this.write(registry);
+    }
+
+    // ── Standard boot validation ────────────────────────────────
     const knownIds = new Set(registry.modules.map((m) => m.moduleId));
     let dirty = false;
 

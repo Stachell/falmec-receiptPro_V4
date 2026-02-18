@@ -1066,10 +1066,79 @@ Der "Parser importieren"-Button oeffnet den File-Picker und fuehrt Client-seitig
 
 ---
 
-### Noch offen (fuer Backend-Agent / spaetere Phasen):
-- Phase C: Parser-Modularisierung (Ordner, V1-Rename, V2-Erstellung, Registry-Discovery)
-- Phase D: Parser-Import Backend-Logik (Datei kopieren, parser-registry.json schreiben)
+### Phase C2: Parser-Verwaltung Automatisierung -- ERLEDIGT (2026-02-18)
+
+**Neue Methoden:**
+
+1. **`fileSystemService.deleteFile(fileName)`** — Loescht eine Datei aus dem Root-Data-Ordner via `rootFolderHandle.removeEntry()` (Pattern aus `rotateHomeLogs`)
+2. **`parserRegistryService.wipeRegistry()`** — Loescht `parser-registry.json` vom Disk + setzt In-Memory-Cache zurueck
+3. **`parserRegistryService.initialize()` — Rebuild-Logik erweitert:**
+   - Vergleicht `registry.modules[].moduleId` mit `getAllParsers()[].moduleId`
+   - Bei Unterschied: Wipe + Rebuild, `selectedParserId` wird beibehalten falls Parser noch existiert
+   - Fallback auf `'auto'` falls gespeicherter Parser nicht mehr vorhanden
+
+**Vite Dev Plugin (`vite.config.ts`):**
+- `POST /api/dev/delete-parser` — Loescht Parser-Datei + bereinigt `index.ts` (Import- und Registrierungszeilen)
+  - Safety: Nur `.ts`, kein `..`, Datei muss in `modules/` existieren
+- `GET /api/dev/open-folder` — Oeffnet `modules/` im Windows Explorer
+- Nur im `development`-Modus aktiv
+
+**Geaenderte Dateien:**
+- `src/services/fileSystemService.ts` — `deleteFile()` hinzugefuegt
+- `src/services/parserRegistryService.ts` — `wipeRegistry()` + Rebuild-Logik in `initialize()`
+- `vite.config.ts` — `parserDevPlugin()` hinzugefuegt
+
+### Phase D2: Parser-Management UI -- ERLEDIGT (2026-02-18)
+
+**Neue Sektion "Parser-Verwaltung" im SettingsPopup** (unterhalb "Parser importieren"):
+
+- Trennlinie + Sektions-Header "Parser-Verwaltung"
+- Dropdown: Alle Parser aus `getAllParsers()`, Placeholder "Parser waehlen..."
+- Button "Entfernen": Disabled wenn kein Parser gewaehlt oder nur 1 Parser verbleibt
+  - Bestaetigungs-AlertDialog: "Parser wirklich loeschen?" mit "Abbrechen" / "OK"
+  - Workflow: `/api/dev/delete-parser` → `wipeRegistry()` → `window.location.reload()`
+- Button "Ordner oeffnen": FolderOpen-Icon, ruft `/api/dev/open-folder` auf
+- Hinweistext: "Achtung – App wird nach Aenderung neu geladen, um die Registry zu aktualisieren."
+
+**Styling:** Identisch zu bestehenden Buttons (h-9 px-4, Hover #008C99/#FFFFFF/#D8E6E7)
+
+**Geaenderte Dateien:**
+- `src/components/SettingsPopup.tsx` — Parser-Verwaltung Sektion hinzugefuegt
+
+### Phase G: V3 Produktionsreife -- ERLEDIGT (2026-02-18)
+
+**Interface-Konformitaet (`FatturaParserService_V3.ts`):**
+
+| Korrektur | Vorher | Nachher |
+|---|---|---|
+| Klassen-Properties | `name`, `provider` | `moduleName`, `version` |
+| Header-Felder | `invoiceNumber`, `invoiceDate` | `fatturaNumber`, `fatturaDate` + `totalQty`, `parsedPositionsCount`, `qtyValidationStatus` |
+| Line-Felder | `articleNo`, `qty`, `orderReferences` | `manufacturerArticleNo`, `quantityDelivered`, `orderCandidates` + `orderCandidatesText` + `orderStatus` + `rawPositionText` |
+| Result-Felder | `{ header, lines, validation, warnings }` | `{ success, header, lines, warnings, validationResults, parserModule, parsedAt, sourceFileName }` |
+| Header-Parsing | `INVOICE_NUMBER_PATTERNS` als RegExp[] | Korrekt als `{ name, regex }[]` mit `FATTURA_NUMBER_FLEXIBLE`-Sonderbehandlung |
+| Validation | `runValidation(): ValidationResult` (single) | `runValidation(): ValidationResult[]` (array) |
+
+**Preis-Healing:** 3. Pass ergaenzt: `(\d)\s+,\s*(\d)` → `$1,$2` (Edge Case "digits SPACE , digits")
+
+**Verifizierte Features (keine Aenderung noetig):**
+- Digit-Enforcer (V3:88-97): `text.length >= 4 && /\d/.test(text)` filtert "E.P.CAP" korrekt
+- X-Zonen-Logik (V3:111-124): -5px Toleranz, 3-Zonen-Klassifikation korrekt
+- Anywhere-EANs: Ohne Word-Boundaries, fangen geklebte EANs
+
+**Registrierung in `index.ts`:**
+- V3 importiert und als erstes Element in `LOCAL_PARSERS` (hoechste Prioritaet)
+- In `parserRegistry` Map aufgenommen (inkl. `'typescript'` und `'auto'` Aliase)
+
+**Geaenderte Dateien:**
+- `src/services/parsers/modules/FatturaParserService_V3.ts` — Komplette Interface-Konformitaet
+- `src/services/parsers/index.ts` — V3 registriert
+
+**Build-Validierung:**
+- TypeScript (`tsc --noEmit`): 0 Fehler
+- Vite Build (`vite build`): Erfolgreich
+
+---
+
+### Noch offen (fuer spaetere Phasen):
 - Phase E: Logging & Issue-Center Integration
 - Phase F: Tests & QA
-- AC-DROPDOWN-02 bis 05, 07, 08: Abhaengig von echter Parser-Registry
-- AC-IMPORT-07 bis 12: Abhaengig von Backend-Logik

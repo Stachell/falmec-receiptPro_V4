@@ -20,29 +20,34 @@ export type {
 // Parser Imports
 export { FatturaParserService_V1 } from './modules/FatturaParserService_V1';
 export { FatturaParserService_V2 } from './modules/FatturaParserService_V2';
+export { FatturaParserService_V3 } from './modules/FatturaParserService_V3';
 
 import { FatturaParserService_V1 } from './modules/FatturaParserService_V1';
 import { FatturaParserService_V2 } from './modules/FatturaParserService_V2';
+import { FatturaParserService_V3 } from './modules/FatturaParserService_V3';
 import type { InvoiceParser } from './types';
 import { logService } from '../logService';
 
 // 1. Initialisierung der Singleton-Instanzen
+const fatturaParserV3 = new FatturaParserService_V3();
 const fatturaParserV2 = new FatturaParserService_V2();
 const fatturaParserV1 = new FatturaParserService_V1();
 
 // 2. MODULARE REGISTRIERUNG: Alle lokalen TypeScript-Parser hier eintragen
-//    V2 VOR V1 = hoehere Prioritaet (PROJ-14 Spec C.4)
+//    V3 VOR V2 VOR V1 = hoechste Prioritaet zuerst (PROJ-14 Spec C.4)
 const LOCAL_PARSERS: InvoiceParser[] = [
+  fatturaParserV3,
   fatturaParserV2,
   fatturaParserV1,
 ];
 
 /** Registry for direct ID lookups */
 export const parserRegistry: Map<string, InvoiceParser> = new Map([
+  [fatturaParserV3.moduleId, fatturaParserV3],
   [fatturaParserV2.moduleId, fatturaParserV2],
   [fatturaParserV1.moduleId, fatturaParserV1],
-  ['typescript', fatturaParserV2],
-  ['auto', fatturaParserV2],
+  ['typescript', fatturaParserV3],
+  ['auto', fatturaParserV3],
 ]);
 
 export function getParser(moduleId: string): InvoiceParser | undefined {

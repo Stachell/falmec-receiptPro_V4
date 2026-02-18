@@ -364,6 +364,19 @@ class FileSystemService {
     return deletedCount;
   }
 
+  // Delete a file from the root data folder (falmec receiptPro/)
+  async deleteFile(fileName: string): Promise<boolean> {
+    if (!this.rootFolderHandle) return false;
+    try {
+      await this.rootFolderHandle.removeEntry(fileName);
+      logService.info(`Datei geloescht: ${fileName}`, { step: 'System' });
+      return true;
+    } catch (error: any) {
+      logService.warn(`deleteFile fehlgeschlagen: ${fileName} – ${error.message}`, { step: 'System' });
+      return false;
+    }
+  }
+
   // Read a JSON file from the root data folder (falmec receiptPro/)
   async readJsonFile<T>(fileName: string): Promise<T | null> {
     if (!this.rootFolderHandle) return null;

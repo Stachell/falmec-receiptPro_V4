@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -25,8 +25,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Upload } from 'lucide-react';
+import { Upload, FolderOpen, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getAllParsers } from '@/services/parsers';
+import { parserRegistryService } from '@/services/parserRegistryService';
 
 interface SettingsPopupProps {
   open: boolean;
@@ -38,6 +40,18 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
   const [importSuccessOpen, setImportSuccessOpen] = useState(false);
   const [importedFileName, setImportedFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Parser-Verwaltung state
+  const [parserToDelete, setParserToDelete] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [parsers, setParsers] = useState<Array<{ moduleId: string; moduleName: string; version: string }>>([]);
+
+  useEffect(() => {
+    if (open) {
+      const all = getAllParsers();
+      setParsers(all.map(p => ({ moduleId: p.moduleId, moduleName: p.moduleName, version: p.version })));
+    }
+  }, [open]);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -81,6 +95,49 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
     };
     reader.readAsText(file);
   };
+
+  const handleDeleteParser = async () => {
+    if (!parserToDelete) return;
+
+    const parser = parsers.find(p => p.moduleId === parserToDelete);
+    if (!parser) return;
+
+    // Derive the file name from moduleId (convention: moduleId matches class name)
+    const fileName = `${parserToDelete}.ts`;
+
+    try {
+      // 1. Delete file + clean index.ts via Vite dev endpoint
+      const res = await fetch('/api/dev/delete-parser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName }),
+      });
+      const result = await res.json();
+      if (!result.success) {
+        toast.error(`Fehler: ${result.error}`);
+        return;
+      }
+
+      // 2. Wipe registry JSON
+      await parserRegistryService.wipeRegistry();
+
+      // 3. Reload app
+      window.location.reload();
+    } catch (err: any) {
+      toast.error(`Loeschen fehlgeschlagen: ${err.message}`);
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    try {
+      await fetch('/api/dev/open-folder');
+    } catch {
+      toast.error('Ordner konnte nicht geoeffnet werden');
+    }
+  };
+
+  // Selected parser display name for confirmation dialog
+  const selectedParserName = parsers.find(p => p.moduleId === parserToDelete)?.moduleName || parserToDelete;
 
   return (
     <>
@@ -215,6 +272,90 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
                 onChange={handleFileSelected}
               />
             </div>
+
+            {/* Separator */}
+            <div className="border-t border-border my-1" />
+
+            {/* Parser-Verwaltung */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-sm font-semibold">Parser-Verwaltung</Label>
+
+              {/* Parser-Dropdown */}
+              <Select
+                value={parserToDelete}
+                onValueChange={setParserToDelete}
+              >
+                <SelectTrigger
+                  className="h-9 text-sm bg-white"
+                  style={{ borderColor: '#666666' }}
+                >
+                  <SelectValue placeholder="Parser waehlen..." />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {parsers.map((p) => (
+                    <SelectItem key={p.moduleId} value={p.moduleId}>
+                      {p.moduleName} v{p.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Button row: Entfernen + Ordner oeffnen */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={!parserToDelete || parsers.length <= 1}
+                  className="h-9 px-4 text-sm rounded-md flex items-center justify-center gap-2 transition-colors border disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{
+                    backgroundColor: '#c9c3b6',
+                    borderColor: '#666666',
+                    color: '#666666',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!e.currentTarget.disabled) {
+                      e.currentTarget.style.backgroundColor = '#008C99';
+                      e.currentTarget.style.color = '#FFFFFF';
+                      e.currentTarget.style.borderColor = '#D8E6E7';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#c9c3b6';
+                    e.currentTarget.style.color = '#666666';
+                    e.currentTarget.style.borderColor = '#666666';
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Entfernen
+                </button>
+
+                <button
+                  onClick={handleOpenFolder}
+                  className="h-9 px-4 text-sm rounded-md flex items-center justify-center gap-2 transition-colors border"
+                  style={{
+                    backgroundColor: '#c9c3b6',
+                    borderColor: '#666666',
+                    color: '#666666',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#008C99';
+                    e.currentTarget.style.color = '#FFFFFF';
+                    e.currentTarget.style.borderColor = '#D8E6E7';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#c9c3b6';
+                    e.currentTarget.style.color = '#666666';
+                    e.currentTarget.style.borderColor = '#666666';
+                  }}
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Ordner oeffnen
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Achtung – App wird nach Aenderung neu geladen, um die Registry zu aktualisieren.
+              </p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -240,6 +381,24 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => window.location.reload()}>
               Refresh
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation AlertDialog */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Parser wirklich loeschen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Der Parser '{selectedParserName}' wird unwiderruflich entfernt. Die App wird anschliessend neu geladen.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteParser}>
+              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
