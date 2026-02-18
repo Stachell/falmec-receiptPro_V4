@@ -92,10 +92,7 @@ function isBlockStarter(items: ExtractedTextItem[]): { articleNo: string; ean: s
     const text = item.text.trim();
     // Nur prüfen, wenn Text eine Zahl enthält und lang genug ist
     if (text.length >= 4 && /\d/.test(text)) {
-      // Sicherheits-Check: Sicherstellen, dass pat eine valide Regex ist
-      const match = ARTICLE_PATTERNS.some(pat => {
-        return (pat instanceof RegExp) ? pat.test(text) : new RegExp(String(pat)).test(text);
-      });
+      const match = ARTICLE_PATTERNS.some(pat => pat.regex.test(text));
       
       if (match) {
         articleNo = text;

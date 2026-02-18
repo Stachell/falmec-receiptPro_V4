@@ -25,17 +25,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Upload, FolderOpen, Trash2 } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAllParsers } from '@/services/parsers';
-import { parserRegistryService } from '@/services/parserRegistryService';
+import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
 
 interface SettingsPopupProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  activeParser?: {
+    parserId: string;
+    modules: ParserRegistryModule[];
+    ready: boolean;
+  };
 }
 
-export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
+export function SettingsPopup({ open, onOpenChange, activeParser }: SettingsPopupProps) {
   const { globalConfig, setGlobalConfig } = useRunStore();
   const [importSuccessOpen, setImportSuccessOpen] = useState(false);
   const [importedFileName, setImportedFileName] = useState('');
@@ -138,6 +143,12 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
 
   // Selected parser display name for confirmation dialog
   const selectedParserName = parsers.find(p => p.moduleId === parserToDelete)?.moduleName || parserToDelete;
+
+  // Active parser display name (from footer props)
+  const activeParserDisplayName = activeParser?.parserId === 'auto'
+    ? 'Auto'
+    : activeParser?.modules.find(m => m.moduleId === activeParser.parserId)?.moduleName
+      || activeParser?.parserId || '–';
 
   return (
     <>
@@ -272,6 +283,17 @@ export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
                 onChange={handleFileSelected}
               />
             </div>
+
+            {/* Aktiver Parser (read-only) */}
+            {activeParser?.ready && (
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm whitespace-nowrap">Aktiver Parser</Label>
+                <div className="flex items-center gap-1.5 text-sm">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                  <span>{activeParserDisplayName}</span>
+                </div>
+              </div>
+            )}
 
             {/* Separator */}
             <div className="border-t border-border my-1" />

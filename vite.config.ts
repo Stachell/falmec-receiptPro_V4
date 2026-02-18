@@ -87,6 +87,19 @@ function parserDevPlugin(): Plugin {
 
         next();
       });
+
+      // Watch index.ts → auto-reload on parser registration changes
+      const indexPath = path.resolve(__dirname, "src/services/parsers/index.ts");
+      server.watcher.on("change", (changedPath) => {
+        if (path.resolve(changedPath) === indexPath) {
+          const registryPath = path.join(MODULES_DIR, "parser-registry.json");
+          if (fs.existsSync(registryPath)) {
+            fs.unlinkSync(registryPath);
+            console.log("[parser-dev-plugin] parser-registry.json geloescht (index.ts geaendert)");
+          }
+          server.ws.send({ type: "full-reload" });
+        }
+      });
     },
   };
 }

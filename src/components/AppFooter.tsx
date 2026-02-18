@@ -36,6 +36,7 @@ export function AppFooter() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedParserId, setSelectedParserId] = useState('auto');
   const [registryModules, setRegistryModules] = useState<ParserRegistryModule[]>([]);
+  const [parserReady, setParserReady] = useState(false);
   const { globalConfig, setGlobalConfig } = useRunStore();
   const { wrap, isLocked } = useClickLock();
 
@@ -53,6 +54,7 @@ export function AppFooter() {
     parserRegistryService.initialize().then((registry) => {
       setSelectedParserId(registry.selectedParserId);
       setRegistryModules(registry.modules);
+      setParserReady(true);
     });
   }, []);
 
@@ -172,8 +174,11 @@ export function AppFooter() {
         <div className="h-full px-6 flex items-center justify-end gap-6">
           {/* [1] Parser-Dropdown (NEU - erstes Element) */}
           <div className="flex items-center gap-2">
-            <Label htmlFor="footer-parser" className="text-xs text-sidebar-foreground whitespace-nowrap">
+            <Label htmlFor="footer-parser" className="text-xs text-sidebar-foreground whitespace-nowrap flex items-center gap-1">
               Parser-Regex
+              {parserReady && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
             </Label>
             <Select
               value={selectedParserId}
@@ -276,7 +281,15 @@ export function AppFooter() {
       </footer>
 
       {/* Settings Popup */}
-      <SettingsPopup open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsPopup
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        activeParser={{
+          parserId: selectedParserId,
+          modules: registryModules,
+          ready: parserReady,
+        }}
+      />
     </>
   );
 }

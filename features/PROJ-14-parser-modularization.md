@@ -1139,6 +1139,42 @@ Der "Parser importieren"-Button oeffnet den File-Picker und fuehrt Client-seitig
 
 ---
 
+### V3-Sanierung & UI-Sync -- ERLEDIGT (2026-02-18)
+
+**Bug-Fix: `isBlockStarter()` (KRITISCH):**
+- `ARTICLE_PATTERNS.some(pat => ...)` rief `pat.test(text)` auf Pattern-Objekt statt `pat.regex.test(text)`
+- `pat instanceof RegExp` war IMMER false (pat ist `{name, regex}`, kein RegExp)
+- Fallback `new RegExp(String(pat))` erzeugte `new RegExp("[object Object]")` → nie Match
+- **Ergebnis: V3 konnte KEINE Artikelnummern erkennen**
+- Fix: `ARTICLE_PATTERNS.some(pat => pat.regex.test(text))`
+
+**Verifizierte Features (keine Aenderung noetig):**
+- Digit-Enforcer: `text.length >= 4 && /\d/.test(text)` — korrekt
+- X-Zonen-Logik: -5px Toleranz, 3-Zonen-Klassifikation — korrekt
+- Interface-Konformitaet: Alle Felder (manufacturerArticleNo, quantityDelivered, etc.) — korrekt
+
+**UI-Sync:**
+- Footer → SettingsPopup: `activeParser` Props (parserId, modules, ready)
+- SettingsPopup zeigt aktiven Parser read-only mit gruenem Haken
+- Keine redundanten States — zentraler Service fuer Synchronisation
+
+**Aktiv-Haken:**
+- Footer: CheckCircle (text-green-500) neben "Parser-Regex" Label
+- Popup: CheckCircle neben aktivem Parser-Namen
+- Trigger: `parserRegistryService.initialize()` erfolgreich abgeschlossen
+
+**Registry-Wipe Automatisierung:**
+- Vite-Watcher auf `index.ts` → loescht `parser-registry.json` + erzwingt Full-Reload
+- `initialize()` erkennt Modullisten-Aenderung und rebuilt automatisch
+
+**Geaenderte Dateien:**
+- `src/services/parsers/modules/FatturaParserService_V3.ts` — isBlockStarter Fix
+- `src/components/AppFooter.tsx` — parserReady State, CheckCircle, Props an SettingsPopup
+- `src/components/SettingsPopup.tsx` — activeParser Props, Read-only Anzeige
+- `vite.config.ts` — index.ts Watcher
+
+---
+
 ### Noch offen (fuer spaetere Phasen):
 - Phase E: Logging & Issue-Center Integration
 - Phase F: Tests & QA
