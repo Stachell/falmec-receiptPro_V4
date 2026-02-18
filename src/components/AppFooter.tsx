@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useClickLock } from '@/hooks/useClickLock';
-import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, FileText, CheckCircle } from 'lucide-react';
+import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, FileText, CheckCircle, Settings } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -14,8 +13,10 @@ import {
 } from '@/components/ui/select';
 import { logService } from '@/services/logService';
 import { fileSystemService } from '@/services/fileSystemService';
+import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
+import { SettingsPopup } from '@/components/SettingsPopup';
 
-const DEFAULT_DATA_PATH = 'nicht gewählt';
+const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 
 // Hover style constants
 const HOVER_BG = '#008C99';
@@ -31,6 +32,10 @@ export function AppFooter() {
   const [isToggleHovered, setIsToggleHovered] = useState(false);
   const [isLogfileHovered, setIsLogfileHovered] = useState(false);
   const [isDirHovered, setIsDirHovered] = useState(false);
+  const [isSettingsHovered, setIsSettingsHovered] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedParserId, setSelectedParserId] = useState('auto');
+  const [registryModules, setRegistryModules] = useState<ParserRegistryModule[]>([]);
   const { globalConfig, setGlobalConfig } = useRunStore();
   const { wrap, isLocked } = useClickLock();
 
@@ -41,6 +46,14 @@ export function AppFooter() {
       setDataPath(savedPath);
       setIsConfigured(true);
     }
+  }, []);
+
+  // Initialize parser registry (boot validation + auto-select)
+  useEffect(() => {
+    parserRegistryService.initialize().then((registry) => {
+      setSelectedParserId(registry.selectedParserId);
+      setRegistryModules(registry.modules);
+    });
   }, []);
 
   const handleDataPathChange = async () => {
@@ -65,13 +78,28 @@ export function AppFooter() {
     logService.viewLogWithSnapshot();
   };
 
+  const handleParserChange = (parserId: string) => {
+    const prev = selectedParserId;
+    setSelectedParserId(parserId);
+
+    // Persist to parser-registry.json (fire-and-forget)
+    parserRegistryService.setSelectedParserId(parserId);
+
+    // Log parser change
+    if (prev !== parserId) {
+      const prevName = prev === 'auto' ? 'Auto' : registryModules.find(p => p.moduleId === prev)?.moduleName || prev;
+      const newName = parserId === 'auto' ? 'Auto' : registryModules.find(p => p.moduleId === parserId)?.moduleName || parserId;
+      logService.info(`Parser gewechselt: ${prevName} → ${newName}`, { step: 'System' });
+    }
+  };
+
   const closeFooter = useCallback(() => {
     setIsOpen(false);
   }, []);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    
+
     if (isOpen) {
       // Auto-close after 3 minutes (180000ms)
       timer = setTimeout(() => {
@@ -85,6 +113,9 @@ export function AppFooter() {
       }
     };
   }, [isOpen, closeFooter]);
+
+  // Determine dropdown display: if only 1 parser, hide "Auto" option
+  const showAutoOption = registryModules.length > 1;
 
   return (
     <>
@@ -139,64 +170,49 @@ export function AppFooter() {
         )}
       >
         <div className="h-full px-6 flex items-center justify-end gap-6">
-          {/* Price Basis */}
+          {/* [1] Parser-Dropdown (NEU - erstes Element) */}
           <div className="flex items-center gap-2">
-            <Label htmlFor="footer-priceBasis" className="text-xs text-sidebar-foreground whitespace-nowrap">
-              Preisbasis
+            <Label htmlFor="footer-parser" className="text-xs text-sidebar-foreground whitespace-nowrap">
+              Parser-Regex
             </Label>
             <Select
-              value={globalConfig.priceBasis}
-              onValueChange={(value: 'Net' | 'Gross') => 
-                setGlobalConfig({ priceBasis: value })
-              }
+              value={selectedParserId}
+              onValueChange={handleParserChange}
             >
-              <SelectTrigger id="footer-priceBasis" className="h-7 w-24 text-xs bg-surface-elevated">
-                <SelectValue />
+              <SelectTrigger
+                id="footer-parser"
+                className="h-7 w-56 text-xs border rounded-md transition-colors"
+                style={{
+                  backgroundColor: 'var(--sidebar)',
+                  borderColor: 'var(--input)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#c9c3b6';
+                  e.currentTarget.style.borderColor = '#666666';
+                  e.currentTarget.style.color = '#666666';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--sidebar)';
+                  e.currentTarget.style.borderColor = 'var(--input)';
+                  e.currentTarget.style.color = '';
+                }}
+              >
+                <SelectValue placeholder="Parser waehlen..." />
               </SelectTrigger>
               <SelectContent className="bg-popover">
-                <SelectItem value="Net">Netto</SelectItem>
-                <SelectItem value="Gross">Brutto</SelectItem>
+                {showAutoOption && (
+                  <SelectItem value="auto">Auto</SelectItem>
+                )}
+                {registryModules.map((parser) => (
+                  <SelectItem key={parser.moduleId} value={parser.moduleId}>
+                    {parser.moduleName} v{parser.version}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Currency */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="footer-currency" className="text-xs text-sidebar-foreground whitespace-nowrap">
-              Währung
-            </Label>
-            <Select
-              value="EUR"
-              onValueChange={() => {}}
-            >
-              <SelectTrigger id="footer-currency" className="h-7 w-24 text-xs bg-surface-elevated">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="EUR">Euro</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Tolerance */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="footer-tolerance" className="text-xs text-sidebar-foreground whitespace-nowrap">
-              Toleranz (EUR)
-            </Label>
-            <Input
-              id="footer-tolerance"
-              type="number"
-              step="0.01"
-              min="0"
-              value={globalConfig.tolerance}
-              onChange={(e) =>
-                setGlobalConfig({ tolerance: parseFloat(e.target.value) || 0 })
-              }
-              className="h-7 w-20 text-xs bg-surface-elevated"
-            />
-          </div>
-
-          {/* Data Directory */}
+          {/* [2] Data Directory (bestehend) */}
           <div className="flex items-center gap-2">
             <Label htmlFor="footer-datapath" className="text-xs text-sidebar-foreground whitespace-nowrap">
               Datenverzeichnis
@@ -211,11 +227,11 @@ export function AppFooter() {
                 borderColor: isSelectingFolder ? '#666666' : 'var(--input)',
                 color: (isSelectingFolder || isDirHovered) ? '#666666' : undefined,
               }}
-              title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwählen'}
+              title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwaehlen'}
             >
               <FolderOpen className="w-3.5 h-3.5" />
               <span className="truncate max-w-[180px]">
-                {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner wählen...'}
+                {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner waehlen...'}
               </span>
               {isConfigured && (
                 <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
@@ -223,33 +239,7 @@ export function AppFooter() {
             </button>
           </div>
 
-          {/* Maussperre */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="footer-clickLock" className="text-xs text-sidebar-foreground whitespace-nowrap">
-              Maussperre
-            </Label>
-            <Select
-              value={(globalConfig.clickLockSeconds ?? 0).toFixed(1)}
-              onValueChange={(v) => setGlobalConfig({ clickLockSeconds: parseFloat(v) })}
-            >
-              <SelectTrigger id="footer-clickLock" className="h-7 w-16 text-xs bg-surface-elevated">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover">
-                {Array.from({ length: 31 }, (_, i) => {
-                  const val = (i * 0.1).toFixed(1);
-                  return (
-                    <SelectItem key={val} value={val}>
-                      {val.replace('.', ',')}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-sidebar-foreground whitespace-nowrap">Sekunden</span>
-          </div>
-
-          {/* Logfile Button */}
+          {/* [3] Logfile Button (bestehend) */}
           <button
             onClick={handleShowLogfile}
             onMouseEnter={() => setIsLogfileHovered(true)}
@@ -265,8 +255,28 @@ export function AppFooter() {
             <FileText className="w-3.5 h-3.5" />
             <span>Logfile</span>
           </button>
+
+          {/* [4] Einstellungen Button (NEU) */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            onMouseEnter={() => setIsSettingsHovered(true)}
+            onMouseLeave={() => setIsSettingsHovered(false)}
+            className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
+            style={{
+              backgroundColor: isSettingsHovered ? HOVER_BG : '#c9c3b6',
+              color: isSettingsHovered ? HOVER_TEXT : '#666666',
+              borderColor: isSettingsHovered ? HOVER_BORDER : '#666666',
+            }}
+            title="Einstellungen"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Einstellungen</span>
+          </button>
         </div>
       </footer>
+
+      {/* Settings Popup */}
+      <SettingsPopup open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }

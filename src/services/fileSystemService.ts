@@ -364,6 +364,37 @@ class FileSystemService {
     return deletedCount;
   }
 
+  // Read a JSON file from the root data folder (falmec receiptPro/)
+  async readJsonFile<T>(fileName: string): Promise<T | null> {
+    if (!this.rootFolderHandle) return null;
+    try {
+      const fileHandle = await this.rootFolderHandle.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      return JSON.parse(text) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  // Write a JSON file to the root data folder (falmec receiptPro/)
+  async writeJsonFile(fileName: string, data: unknown): Promise<boolean> {
+    if (!this.rootFolderHandle) return false;
+    try {
+      const fileHandle = await this.rootFolderHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(data, null, 2));
+      await writable.close();
+      return true;
+    } catch (error: any) {
+      logService.warn(`JSON-Datei konnte nicht geschrieben werden: ${fileName}`, {
+        step: 'System',
+        details: error.message,
+      });
+      return false;
+    }
+  }
+
   // Request permission again (after page reload)
   async requestPermission(): Promise<boolean> {
     if (!this.isFileSystemAccessSupported()) {

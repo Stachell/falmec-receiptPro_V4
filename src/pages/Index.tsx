@@ -85,7 +85,7 @@ const Index = () => {
           id: 'temp',
           timestamp: new Date().toISOString(),
           level: 'INFO' as const,
-          message: 'Keine Log-EintrÃ¤ge fÃ¼r diesen Durchlauf vorhanden.',
+          message: 'Keine Log-Eintraege fuer diesen Durchlauf vorhanden.',
         }],
         `falmec ReceiptPro - Run Log: ${run.invoice.fattura}`
       );
@@ -115,7 +115,7 @@ const Index = () => {
         {/* Header */}
         <div className="mb-8 text-center">
           <p className="mb-6 text-xs" style={{ color: '#D9D4C7' }}>
-            Konsolidierung | Eingangskontrolle | Bestellnummer Routing | Serienummern Parsing | Lagerplatzzuordnung | RechnungsprÃ¼fung | Exporterstellung fÃ¼r Sage100 Belegimport | Archiv | Logs | Datenanpassung
+            Konsolidierung | Eingangskontrolle | Bestellnummer Routing | Serienummern Parsing | Lagerplatzzuordnung | Rechnungspruefung | Exporterstellung fuer Sage100 Belegimport | Archiv | Logs | Datenanpassung
           </p>
           <h1 className="text-2xl font-bold flex items-center justify-center gap-3" style={{ color: '#D8E6E7' }}>
             <PackageOpen className="w-7 h-7" />
@@ -139,7 +139,7 @@ const Index = () => {
                 <TableHead>FEHLER</TableHead>
                 <TableHead>Downloads</TableHead>
                 <TableHead>Aktionen</TableHead>
-                <TableHead>Ã¶ffnen</TableHead>
+                <TableHead>oeffnen</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -163,7 +163,7 @@ const Index = () => {
                           {totalIssues}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">â€”</span>
+                        <span className="text-muted-foreground">–</span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -205,7 +205,7 @@ const Index = () => {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleOpenDetails(run)}
-                          title="Dateien Ã¶ffnen"
+                          title="Dateien oeffnen"
                           className="h-8 w-8"
                         >
                           <FolderOpen className="w-4 h-4" />
@@ -214,7 +214,7 @@ const Index = () => {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleViewRunLog(run)}
-                          title="Logfile Ã¶ffnen"
+                          title="Logfile oeffnen"
                           className="h-8 w-8"
                         >
                           <FileText className="w-4 h-4" />
@@ -243,7 +243,7 @@ const Index = () => {
               {runs.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                    Keine VerarbeitungslÃ¤ufe vorhanden. Starten Sie einen neuen Lauf.
+                    Keine Verarbeitungslaeufe vorhanden. Starten Sie einen neuen Lauf.
                   </TableCell>
                 </TableRow>
               )}
@@ -265,7 +265,7 @@ const Index = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Aus Dashboard entfernen?</AlertDialogTitle>
             <AlertDialogDescription>
-              Soll der Lauf â€ž{runToDelete?.invoice.fattura}" aus dem Dashboard entfernt werden?
+              Soll der Lauf „{runToDelete?.invoice.fattura}" aus dem Dashboard entfernt werden?
               Die Daten werden im Ordner Temp/.del gesichert.
             </AlertDialogDescription>
           </AlertDialogHeader>

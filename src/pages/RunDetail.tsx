@@ -114,7 +114,7 @@ export default function RunDetail() {
                 className="border"
                 style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
               >
-                ZurÃ¼ck zur Ãœbersicht
+                Zurueck zur Uebersicht
               </Button>
             </Link>
           </div>
@@ -165,7 +165,7 @@ export default function RunDetail() {
               <p className="mb-1" style={{ color: '#D8E6E7' }}>
                 {format(new Date(currentRun.createdAt), "dd. MMMM yyyy, HH:mm 'Uhr'", { locale: de })}
                 {currentRun.invoice.deliveryDate && (
-                  <span> â€¢ Lieferung: {format(new Date(currentRun.invoice.deliveryDate), 'dd.MM.yyyy', { locale: de })}</span>
+                  <span> • Lieferung: {format(new Date(currentRun.invoice.deliveryDate), 'dd.MM.yyyy', { locale: de })}</span>
                 )}
               </p>
               <div className="flex items-center gap-3">
@@ -359,7 +359,7 @@ export default function RunDetail() {
               <TabsTrigger value="log">Log</TabsTrigger>
             </TabsList>
 
-            {/* Ereignisfeld â€“ rechtsbÃ¼ndig, auto-dismiss nach 4 s */}
+            {/* Ereignisfeld – rechtsbuendig, auto-dismiss nach 4 s */}
             {parsedInvoiceResult && showEvent && (
               <div className="flex-none w-1/3 ml-auto">
                 {parsedInvoiceResult.success && parseErrorCount === 0 ? (
@@ -386,7 +386,7 @@ export default function RunDetail() {
                       Parsing fehlgeschlagen
                     </AlertTitle>
                     <AlertDescription className="text-xs leading-tight">
-                      Bitte Warnungen prÃ¼fen
+                      Bitte Warnungen pruefen
                     </AlertDescription>
                   </Alert>
                 )}
@@ -417,10 +417,10 @@ export default function RunDetail() {
               <div className="enterprise-card p-8 text-center">
                 <FileWarning className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="font-semibold text-foreground mb-2">
-                  Keine Parsing-Daten verfÃ¼gbar
+                  Keine Parsing-Daten verfuegbar
                 </h3>
                 <p className="text-muted-foreground">
-                  Die Rechnungsdaten wurden noch nicht geparst oder sind nicht mehr verfÃ¼gbar.
+                  Die Rechnungsdaten wurden noch nicht geparst oder sind nicht mehr verfuegbar.
                 </p>
               </div>
             )}

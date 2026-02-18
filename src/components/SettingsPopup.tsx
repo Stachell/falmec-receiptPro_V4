@@ -1,0 +1,249 @@
+import { useState, useRef } from 'react';
+import { useRunStore } from '@/store/runStore';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Upload } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface SettingsPopupProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function SettingsPopup({ open, onOpenChange }: SettingsPopupProps) {
+  const { globalConfig, setGlobalConfig } = useRunStore();
+  const [importSuccessOpen, setImportSuccessOpen] = useState(false);
+  const [importedFileName, setImportedFileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset file input so same file can be re-selected
+    e.target.value = '';
+
+    // Validation: file extension
+    if (!file.name.endsWith('.ts')) {
+      toast.error('Nur .ts-Dateien werden unterstuetzt');
+      return;
+    }
+
+    // Validation: file size (max 1 MB)
+    if (file.size > 1024 * 1024) {
+      toast.error('Parser-Datei zu gross (max. 1 MB)');
+      return;
+    }
+
+    // Validation: basic heuristic - read file and check for moduleId
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (!content.includes('moduleId')) {
+        toast.error('Ungueltige Parser-Datei: "moduleId" nicht gefunden');
+        return;
+      }
+
+      // --- MOCK: Actual file copy + registry update is backend work ---
+      // For now, just show the success dialog
+      setImportedFileName(file.name);
+      setImportSuccessOpen(true);
+    };
+    reader.onerror = () => {
+      toast.error('Datei konnte nicht gelesen werden');
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent
+          className="sm:max-w-[420px]"
+          style={{ backgroundColor: '#D8E6E7' }}
+        >
+          <DialogHeader>
+            <DialogTitle>Einstellungen</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            {/* Maussperre */}
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="settings-clickLock" className="text-sm whitespace-nowrap">
+                Maussperre (SEK.)
+              </Label>
+              <Select
+                value={(globalConfig.clickLockSeconds ?? 0).toFixed(1)}
+                onValueChange={(v) => setGlobalConfig({ clickLockSeconds: parseFloat(v) })}
+              >
+                <SelectTrigger id="settings-clickLock" className="h-8 w-28 text-sm bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {Array.from({ length: 31 }, (_, i) => {
+                    const val = (i * 0.1).toFixed(1);
+                    return (
+                      <SelectItem key={val} value={val}>
+                        {val.replace('.', ',')}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Preisbasis */}
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="settings-priceBasis" className="text-sm whitespace-nowrap">
+                Preisbasis
+              </Label>
+              <Select
+                value={globalConfig.priceBasis}
+                onValueChange={(value: 'Net' | 'Gross') =>
+                  setGlobalConfig({ priceBasis: value })
+                }
+              >
+                <SelectTrigger id="settings-priceBasis" className="h-8 w-28 text-sm bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="Net">Netto</SelectItem>
+                  <SelectItem value="Gross">Brutto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Waehrung */}
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="settings-currency" className="text-sm whitespace-nowrap">
+                Waehrung
+              </Label>
+              <Select
+                value="EUR"
+                onValueChange={() => {}}
+              >
+                <SelectTrigger id="settings-currency" className="h-8 w-28 text-sm bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="EUR">Euro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Toleranz */}
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="settings-tolerance" className="text-sm whitespace-nowrap">
+                Toleranz (EUR)
+              </Label>
+              <Input
+                id="settings-tolerance"
+                type="number"
+                step="0.01"
+                min="0"
+                value={globalConfig.tolerance}
+                onChange={(e) =>
+                  setGlobalConfig({ tolerance: Math.max(0, parseFloat(e.target.value) || 0) })
+                }
+                className="h-8 w-28 text-sm bg-white"
+              />
+            </div>
+
+            {/* Separator */}
+            <div className="border-t border-border my-1" />
+
+            {/* Parser importieren */}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleImportClick}
+                className="h-9 px-4 text-sm rounded-md flex items-center justify-center gap-2 transition-colors border"
+                style={{
+                  backgroundColor: '#c9c3b6',
+                  borderColor: '#666666',
+                  color: '#666666',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#008C99';
+                  e.currentTarget.style.color = '#FFFFFF';
+                  e.currentTarget.style.borderColor = '#D8E6E7';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#c9c3b6';
+                  e.currentTarget.style.color = '#666666';
+                  e.currentTarget.style.borderColor = '#666666';
+                }}
+              >
+                <Upload className="w-4 h-4" />
+                Parser importieren
+              </button>
+              <p className="text-xs text-muted-foreground">
+                Achtung – App muss neu geladen werden, um Aenderungen anzuzeigen.
+              </p>
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".ts"
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Success AlertDialog */}
+      <AlertDialog open={importSuccessOpen}>
+        <AlertDialogContent
+          style={{ backgroundColor: '#D8E6E7' }}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Parser erfolgreich importiert</AlertDialogTitle>
+            <AlertDialogDescription>
+              Die Datei „{importedFileName}" wurde importiert und in der Registry registriert.
+              <br /><br />
+              Die Seite muss aktualisiert werden, damit der neue Parser verfuegbar ist.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setImportSuccessOpen(false)}>
+              Verstanden
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => window.location.reload()}>
+              Refresh
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}

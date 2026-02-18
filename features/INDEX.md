@@ -13,3 +13,5 @@
 | PROJ-10 | QA Baseline (Unit Tests) | In Progress | Vitest baseline with parser/config/order-tracker tests and jsdom test setup for pdfjs. |
 | PROJ-11 | Data-Matching-Update | Open | Neue Feldstruktur (Umbenennung, Checkbox 5-Zustaende, Preis-Konsolidierung), Bestellparser mit Matching-/Fallback-Logik, Invoiceline-Expansion, Export-Mapping 10 Spalten. |
 | PROJ-12 | Advanced Logging & File-System Brain | In Progress | Hybride Logging-Architektur: Run-Logfile (tiefes Parser-Tracking), Home-Logfile (globales System-Log mit Rotation), Archivierungs-Paket (gebuendelter Run-Export auf Festplatte), localStorage-Cleanup. Baut auf PROJ-8/PROJ-9 auf. |
+| PROJ-13 | Log-Toolbar Export-Buttons & Follow-Redesign | Done | Export-Buttons und Follow-Mode-Redesign fuer die Log-Toolbar-Komponente. |
+| PROJ-14 | Parser-Modularisierung & UI-Bereinigung | In Progress | Modulare Parser-Architektur (Modul-Ordner, V1/V2, Import-Funktion), Settings-Popup (ausgelagerte Slider-Controls), Parser-Dropdown, Home-Log/Issue-Center fuer Parser-Events, systemweite Umlaut-Korrektur. Baut auf PROJ-4/PROJ-12 auf. **Phase A+B (UI) erledigt.** |

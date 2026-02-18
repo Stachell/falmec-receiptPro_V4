@@ -71,7 +71,7 @@ export default function NewRun() {
       }
     });
 
-    // Start parsing â€“ navigate immediately, parsing continues in background
+    // Start parsing – navigate immediately, parsing continues in background
     const parsingPromise = createNewRunWithParsing();
     const initialRun = useRunStore.getState().currentRun;
     if (initialRun) {
@@ -89,7 +89,7 @@ export default function NewRun() {
     if (result.success) {
       setIsDirectoryConfigured(true);
       setShowFolderDialog(false);
-      // Start parsing â€“ navigate immediately, parsing continues in background
+      // Start parsing – navigate immediately, parsing continues in background
       const parsingPromise = createNewRunWithParsing();
       const initialRun = useRunStore.getState().currentRun;
       if (initialRun) {
@@ -151,8 +151,8 @@ export default function NewRun() {
               required
             />
             <FileUploadZone
-              label="offene Bestellungen / offene WareneingÃ¤nge (CSV)"
-              description="Exportdatei aus Modul *offene WareneingÃ¤nge*"
+              label="offene Bestellungen / offene Wareneingaenge (CSV)"
+              description="Exportdatei aus Modul *offene Wareneingaenge*"
               accept={{ 'text/csv': ['.csv'], 'application/vnd.ms-excel': ['.csv'] }}
               fileType="openWE"
               onFileAccepted={(file) => addUploadedFile(file)}
@@ -200,7 +200,7 @@ export default function NewRun() {
               {allFilesUploaded && !isDirectoryConfigured && (
                 <p className="text-sm text-yellow-600 flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4" />
-                  Bitte wÃ¤hlen Sie ein Datenverzeichnis im Footer
+                  Bitte waehlen Sie ein Datenverzeichnis im Footer
                 </p>
               )}
             </div>
@@ -227,14 +227,14 @@ export default function NewRun() {
               Datenverzeichnis erforderlich
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Bevor die Verarbeitung gestartet werden kann, muss ein Datenverzeichnis ausgewÃ¤hlt werden.
+              Bevor die Verarbeitung gestartet werden kann, muss ein Datenverzeichnis ausgewaehlt werden.
               Dort werden die Archiv-Dateien und Logs gespeichert.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Abbruch</AlertDialogCancel>
             <AlertDialogAction onClick={handleSelectDirectory}>
-              Ordner auswÃ¤hlen
+              Ordner auswaehlen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
