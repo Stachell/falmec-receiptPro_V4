@@ -3,12 +3,17 @@
  *
  * Fixes over V1:
  * 1. Price Clipping: normalizeEuropeanPrices() merges split thousands ("3. 596,00" → "3.596,00")
+ *    + split decimal comma ("596 ,00" → "596,00"); smartJoinRowItems gap threshold 12px
  * 2. Greedy Extraction: Stateful accumulator replaces 80px bounding-box lookup
  * 3. Order-Block: Sequential top-to-bottom tracking instead of per-PZ-row backtracking
  * 4. Delayed Commit: A position block is only committed when the NEXT block-starter
  *    is detected. All lines (text, PZ, prices) between two block-starters belong to
  *    the same position. This correctly handles multi-line article descriptions that
  *    extend both above AND below the PZ line.
+ * 5. Implicit PZ block boundary: A second PZ on a block with pzQty>0 triggers
+ *    tryCommit() + new block, recovering positions lost when isBlockStarter() misses.
+ * 6. EAN extraction on every line (not just block-starters) + joined-text fallback
+ *    for split article numbers and inline EANs in isBlockStarter().
  *
  * Architecture:
  *   For each page → group items into rows → sort top-to-bottom → classify each row
@@ -85,7 +90,11 @@ interface PositionBlock {
  * and the space-join produces "3. 596,00" which breaks the price regex.
  */
 function normalizeEuropeanPrices(text: string): string {
-  return text.replace(/(\d)\.\s+(\d{3}[,.])/g, '$1.$2');
+  // Pass 1: Merge split thousands: "3. 596,00" → "3.596,00"
+  let result = text.replace(/(\d)\.\s+(\d{3}[,.])/g, '$1.$2');
+  // Pass 2: Merge split decimal comma: "596 ,00" → "596,00"
+  result = result.replace(/(\d)\s+,(\d{2})\b/g, '$1,$2');
+  return result;
 }
 
 /**
@@ -99,7 +108,7 @@ function smartJoinRowItems(items: ExtractedTextItem[]): string {
     const prev = items[i - 1];
     const curr = items[i];
     const gap = curr.x - (prev.x + prev.width);
-    if (gap < 3) {
+    if (gap < 12) {
       result += curr.text;
     } else {
       result += ' ' + curr.text;
@@ -159,6 +168,26 @@ function isBlockStarter(
           articleNo = m[1];
           break;
         }
+      }
+    }
+  }
+
+  // 2.5 Check joined text for inline EAN (word-boundary, not anchored)
+  if (!ean) {
+    const eanInline = joined.match(/\b(803\d{10})\b/);
+    if (eanInline) ean = eanInline[1];
+  }
+
+  // 2.6 Fallback: Check joined text against hash-containing patterns (non-anchored)
+  // Only standard_hash and general_hash — these require '#' which limits false positives
+  if (!articleNo) {
+    for (const pat of ARTICLE_PATTERNS) {
+      if (pat.name !== 'standard_hash' && pat.name !== 'general_hash') continue;
+      const src = pat.regex.source.replace(/^\^/, '').replace(/\$$/, '');
+      const m = joined.match(new RegExp(src, pat.regex.flags));
+      if (m) {
+        articleNo = m[1];
+        break;
       }
     }
   }
@@ -552,8 +581,24 @@ export class FatturaParserService_V2 implements InvoiceParser {
 
         // D) PZ match on this line?
         const pzMatch = normalizedText.match(/PZ\s+(\d+)/i);
-        if (pzMatch && currentBlock.pzQty === 0) {
-          currentBlock.pzQty = parseIntSafe(pzMatch[1]);
+        if (pzMatch) {
+          const pzQty = parseIntSafe(pzMatch[1]);
+          if (pzQty > 0 && currentBlock.pzQty > 0) {
+            // Implicit block boundary: second PZ without block-starter
+            tryCommit();
+            currentBlock = createEmptyBlock();
+          }
+          if (pzQty > 0 && currentBlock.pzQty === 0) {
+            currentBlock.pzQty = pzQty;
+          }
+        }
+
+        // D2) EAN extraction on this line (if block has no EAN yet)
+        if (!currentBlock.ean) {
+          const eanInline = normalizedText.match(/\b(803\d{10})\b/);
+          if (eanInline) {
+            currentBlock.ean = eanInline[1];
+          }
         }
 
         // E) Extract prices from this line

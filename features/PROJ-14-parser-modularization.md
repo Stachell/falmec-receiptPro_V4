@@ -1031,6 +1031,41 @@ Der "Parser importieren"-Button oeffnet den File-Picker und fuehrt Client-seitig
 - Vite Build (`vite build`): Erfolgreich
 - VS Code Diagnostics: 0 Fehler in SettingsPopup.tsx und AppFooter.tsx
 
+### V2 Parser Bugfixes: 3 Korrekturen (42/45, fehlende EANs, Preis-Clipping) -- ERLEDIGT (2026-02-18)
+
+**Betroffene Datei:** `src/services/parsers/modules/FatturaParserService_V2.ts`
+
+**Root Causes (aus Log-Analyse Fattura 20.007):**
+- 42 statt 45 Positionen (Mengensumme 285 statt 295): Delayed-Commit ignoriert zweiten PZ auf selber Block-Instanz
+- Fehlende EANs: EANs auf Nicht-Starter-Zeilen wurden nur in `descriptionParts` geschrieben, nie in `currentBlock.ean`
+- Preis-Clipping (Preissumme 95.209 statt 104.209): `smartJoinRowItems()` Gap-Schwelle zu klein, pdfjs-Splits bei Tausenderpreisen
+
+**Fix 1 — PZ als impliziter Block-Starter (42/45 Problem):**
+- Schritt D in `parsePositionsStateful()`: Wenn `currentBlock.pzQty > 0` und ein neuer PZ erkannt wird → `tryCommit()` + neuer Block
+- Stellt das V1-Verhalten (jeder PZ = Commit-Punkt) wieder her, ohne den Delayed-Commit-Vorteil zu verlieren
+
+**Fix 2 — EAN-Extraktion (fehlende EANs):**
+- Fix 2a: Neuer Schritt D2 — Inline-EAN-Check `/\b(803\d{10})\b/` auf jeder Zeile (nicht nur Starter)
+- Fix 2b: `isBlockStarter()` — Joined Text gegen inline-EAN-Regex pruefen (word-boundary, nicht anchored)
+- Fix 2c: `isBlockStarter()` — Joined Text gegen `standard_hash`/`general_hash` ohne Anker als Fallback (fuer pdfjs-Split-Artikelnummern wie "C LVI 20.E0P7#ZZZF461F")
+
+**Fix 3 — Preis-Clipping:**
+- Fix 3a: `smartJoinRowItems()` Gap-Schwelle von `< 3` auf `< 12` erhoeht (pdfjs Tausenderpunkt-Splits haben 4-8px Gap)
+- Fix 3b: `normalizeEuropeanPrices()` um zweiten Pass erweitert: `digits SPACE , digits` → `digits,digits`
+
+**Build-Validierung:**
+- TypeScript (`tsc --noEmit`): 0 Fehler
+- Vite Build (`vite build`): Erfolgreich
+
+**Erwartete Ergebnisse (Referenz-PDF Fattura 20.007):**
+- 45 Positionen (statt 42)
+- SUM(qty) = 295 (statt 285)
+- SUM(amount) ≈ 104.209,50 (statt 95.209)
+- Deutlich mehr Positionen mit EAN
+- Bestellnummern-Zuordnung: Keine Regression
+
+---
+
 ### Noch offen (fuer Backend-Agent / spaetere Phasen):
 - Phase C: Parser-Modularisierung (Ordner, V1-Rename, V2-Erstellung, Registry-Discovery)
 - Phase D: Parser-Import Backend-Logik (Datei kopieren, parser-registry.json schreiben)
