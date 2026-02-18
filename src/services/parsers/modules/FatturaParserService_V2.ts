@@ -1,54 +1,53 @@
 /**
- * Fattura PDF Parser Service — Bounding-Box & Column Model (v2)
+ * Fattura PDF Parser Service V2 — Delayed Commit / Block-Aggregation
+ *
+ * Fixes over V1:
+ * 1. Price Clipping: normalizeEuropeanPrices() merges split thousands ("3. 596,00" → "3.596,00")
+ * 2. Greedy Extraction: Stateful accumulator replaces 80px bounding-box lookup
+ * 3. Order-Block: Sequential top-to-bottom tracking instead of per-PZ-row backtracking
+ * 4. Delayed Commit: A position block is only committed when the NEXT block-starter
+ *    is detected. All lines (text, PZ, prices) between two block-starters belong to
+ *    the same position. This correctly handles multi-line article descriptions that
+ *    extend both above AND below the PZ line.
  *
  * Architecture:
- * 1. Zone Detection — header/body/footer boundaries per page via anchor lines
- * 2. Y-Axis Matching — PZ-anchored rows, cross-reference columns at same Y ±5px
- * 3. Column-Based Extraction — article/EAN from left, qty/prices from right
- * 4. Label-Based Header/Footer — search by label position, extract value below
- *
- * Replaces the previous state-machine approach that was unstable with variable
- * line spacing (positions 14, 15, 40).
+ *   For each page → group items into rows → sort top-to-bottom → classify each row
+ *   → on block-starter: commit previous block, open new → accumulate PZ/prices/text
+ *   → flush last block after all pages
  */
 
-import { logService } from '../logService';
+import { logService } from '../../logService';
 import type {
   InvoiceParser,
   ParsedInvoiceResult,
   ParsedInvoiceHeader,
   ParsedInvoiceLine,
   ParserWarning,
-} from './types';
+  ValidationResult,
+} from '../types';
 import {
   extractTextFromPDF,
   type ExtractedPage,
   type ExtractedTextItem,
-} from './utils/pdfTextExtractor';
-import { OrderBlockTracker, extractOrderReferences } from './utils/OrderBlockTracker';
-import { enrichOrderCandidates } from './utils/ExtendedOrderRecognition';
-import { parsePrice, parseIntSafe } from './utils/priceParser';
+} from '../utils/pdfTextExtractor';
+import { OrderBlockTracker, extractOrderReferences } from '../utils/OrderBlockTracker';
+import { enrichOrderCandidates } from '../utils/ExtendedOrderRecognition';
+import { parsePrice, parseIntSafe } from '../utils/priceParser';
 import {
   INVOICE_NUMBER_PATTERNS,
+  ARTICLE_PATTERNS,
+  EAN_PATTERN,
   PRICE_VALUE_PATTERN,
   FATTURA_DATE,
   CONTRIBUTO_MARKER,
   AMOUNT_TO_PAY_MARKER,
-} from './constants/fatturaPatterns';
+  shouldSkipLine,
+  isOrderReferenceLine,
+} from '../constants/fatturaPatterns';
 
 // ─── Constants ────────────────────────────────────────────────────────
-/** Y-coordinate tolerance for matching items on the same logical row */
 const Y_TOLERANCE = 5;
-
-/** EAN inline pattern (13 digits starting with 803) */
-const EAN_INLINE = /\b(803\d{10})\b/;
-
-/** PZ keyword pattern — anchors a position row */
-const PZ_ANCHOR = /\bPZ\b/i;
-
-/** Body start anchor: the column header row */
 const BODY_START_LABELS = ['DESCRIPTION', 'Q.TY', 'PRICE'];
-
-/** Body end anchors */
 const BODY_END_PATTERNS = [
   /Number\s+of\s+packages/i,
   /Volume\s+MC/i,
@@ -59,14 +58,166 @@ const BODY_END_PATTERNS = [
 
 // ─── Interfaces ───────────────────────────────────────────────────────
 interface ZoneBounds {
-  bodyStartY: number; // Y below which body content starts (pdfjs: lower Y = lower on page)
-  bodyEndY: number;   // Y above which body content ends
+  bodyStartY: number;
+  bodyEndY: number;
+}
+
+interface RowGroup {
+  y: number;
+  items: ExtractedTextItem[];
+}
+
+interface PositionBlock {
+  articleNo: string;
+  ean: string;
+  descriptionParts: string[];
+  pzQty: number;
+  priceValues: number[];
+  rawLines: string[];
+  rows: RowGroup[];
+}
+
+// ─── Utility: European Price Normalization ────────────────────────────
+
+/**
+ * Merge split European prices: "3. 596,00" → "3.596,00"
+ * pdfjs-dist may extract "3.596,00" as separate items ("3." + "596,00"),
+ * and the space-join produces "3. 596,00" which breaks the price regex.
+ */
+function normalizeEuropeanPrices(text: string): string {
+  return text.replace(/(\d)\.\s+(\d{3}[,.])/g, '$1.$2');
+}
+
+/**
+ * Join row items with smart spacing — items with tiny X-gap (<3px) are
+ * concatenated without space to preserve split European prices.
+ */
+function smartJoinRowItems(items: ExtractedTextItem[]): string {
+  if (items.length === 0) return '';
+  let result = items[0].text;
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1];
+    const curr = items[i];
+    const gap = curr.x - (prev.x + prev.width);
+    if (gap < 3) {
+      result += curr.text;
+    } else {
+      result += ' ' + curr.text;
+    }
+  }
+  return result;
+}
+
+// ─── Block helpers ────────────────────────────────────────────────────
+
+function createEmptyBlock(): PositionBlock {
+  return {
+    articleNo: '',
+    ean: '',
+    descriptionParts: [],
+    pzQty: 0,
+    priceValues: [],
+    rawLines: [],
+    rows: [],
+  };
+}
+
+/**
+ * Detect whether a row starts a new article block.
+ * Returns { articleNo, ean } when at least one identifier is found.
+ */
+function isBlockStarter(
+  items: ExtractedTextItem[]
+): { articleNo: string; ean: string } | null {
+  const joined = items.map(it => it.text).join(' ').trim();
+
+  // 1. "combined" pattern on the joined text (article + EAN together)
+  const combinedPat = ARTICLE_PATTERNS.find(p => p.name === 'combined');
+  if (combinedPat) {
+    const cm = joined.match(combinedPat.regex);
+    if (cm) return { articleNo: cm[1], ean: cm[2] };
+  }
+
+  // 2. Check each item individually against anchored article patterns
+  let articleNo = '';
+  let ean = '';
+
+  for (const item of items) {
+    const t = item.text.trim();
+    if (!t) continue;
+
+    if (!ean && EAN_PATTERN.test(t)) {
+      ean = t.match(EAN_PATTERN)![1];
+      continue;
+    }
+
+    if (!articleNo) {
+      for (const pat of ARTICLE_PATTERNS) {
+        if (pat.name === 'combined') continue; // already handled
+        const m = t.match(pat.regex);
+        if (m) {
+          articleNo = m[1];
+          break;
+        }
+      }
+    }
+  }
+
+  if (articleNo || ean) return { articleNo, ean };
+  return null;
+}
+
+/**
+ * Commit a completed PositionBlock to a ParsedInvoiceLine.
+ * Returns null if the block has no valid PZ quantity or no total price.
+ */
+function commitBlock(
+  block: PositionBlock,
+  posIndex: number,
+  orderTracker: OrderBlockTracker,
+): ParsedInvoiceLine | null {
+  if (block.pzQty <= 0) return null;
+
+  // Prices: last two values from accumulated priceValues
+  let unitPrice = 0;
+  let totalPrice = 0;
+  const pv = block.priceValues;
+  if (pv.length >= 2) {
+    unitPrice = pv[pv.length - 2];
+    totalPrice = pv[pv.length - 1];
+  } else if (pv.length === 1) {
+    unitPrice = pv[0];
+    totalPrice = pv[0];
+  }
+
+  if (totalPrice <= 0) return null;
+
+  const description = block.descriptionParts.join(' ').trim();
+
+  const orderCandidates = orderTracker.getOrdersForPosition();
+  const orderStatus: 'YES' | 'NO' | 'check' =
+    orderCandidates.length === 1 ? 'YES'
+    : orderCandidates.length === 0 ? 'NO' : 'check';
+
+  return {
+    positionIndex: posIndex,
+    manufacturerArticleNo: block.articleNo,
+    ean: block.ean,
+    descriptionIT: description,
+    quantityDelivered: block.pzQty,
+    unitPrice,
+    totalPrice,
+    orderCandidates,
+    orderCandidatesText: orderCandidates.join('|'),
+    orderStatus,
+    rawPositionText: block.rawLines.join(' | '),
+  };
 }
 
 // ─── Parser Class ─────────────────────────────────────────────────────
-export class FatturaParserService implements InvoiceParser {
-  readonly moduleId = 'logicdev_pdf_parser_integrated_v2';
-  readonly moduleName = 'logicdev_PDF-Parser';
+export class FatturaParserService_V2 implements InvoiceParser {
+  readonly moduleId = 'fattura_falmec_v2';
+  readonly moduleName = 'Fattura Falmec V2';
   readonly version = '2.0.0';
 
   private orderTracker = new OrderBlockTracker();
@@ -82,11 +233,9 @@ export class FatturaParserService implements InvoiceParser {
     });
 
     try {
-      // Extract at y_tolerance=5 — we do our own Y-matching
       const pages = await extractTextFromPDF(pdfFile, Y_TOLERANCE);
       logService.info(`${pages.length} Seiten extrahiert`, { runId: activeRunId });
 
-      // Raw text dump: log full text of each page for run-log.json
       for (const page of pages) {
         logService.debug(`[v2] Rohtext Seite ${page.pageNumber}`, {
           runId: activeRunId,
@@ -95,7 +244,7 @@ export class FatturaParserService implements InvoiceParser {
         });
       }
 
-      // 1. Header (page 1 only)
+      // 1. Header (page 1)
       const header = this.parseHeaderFromItems(pages[0], activeRunId);
 
       // 2. Packages count (last page)
@@ -104,8 +253,8 @@ export class FatturaParserService implements InvoiceParser {
         header.packagesCount = packagesCount;
       }
 
-      // 3. Parse positions from ALL pages using bounding-box model
-      const { lines, warnings } = this.parsePositionsBoundingBox(pages, activeRunId);
+      // 3. Parse positions — STATEFUL TOP-TO-BOTTOM (core V2 change)
+      const { lines, warnings } = this.parsePositionsStateful(pages, activeRunId);
 
       // 4. Invoice total (last page)
       const invoiceTotal = this.parseInvoiceTotalFromItems(pages[pages.length - 1], activeRunId);
@@ -113,11 +262,10 @@ export class FatturaParserService implements InvoiceParser {
         header.invoiceTotal = invoiceTotal;
       }
 
-      // 5. Totals & validation
+      // 5. Totals
       header.totalQty = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
       header.parsedPositionsCount = lines.length;
 
-      // Qty validation
       if (header.packagesCount && header.totalQty > 0) {
         header.qtyValidationStatus =
           header.totalQty === header.packagesCount ? 'ok' : 'mismatch';
@@ -125,9 +273,20 @@ export class FatturaParserService implements InvoiceParser {
         header.qtyValidationStatus = 'unknown';
       }
 
-      // Price validation (warning only)
+      // 6. Validation rules
+      const validationResults = this.runValidation(header, lines);
+
+      // 7. Standard warnings
+      if (header.qtyValidationStatus === 'mismatch') {
+        warnings.push({
+          code: 'QTY_SUM_MISMATCH',
+          message: `Mengensumme ${header.totalQty} != Paketzahl ${header.packagesCount}`,
+          severity: 'warning',
+        });
+      }
+
       if (header.invoiceTotal && header.invoiceTotal > 0) {
-        const sumAmount = lines.reduce((sum, l) => sum + l.totalPrice, 0);
+        const sumAmount = Math.round(lines.reduce((sum, l) => sum + l.totalPrice, 0) * 100) / 100;
         const priceDiff = Math.abs(sumAmount - header.invoiceTotal);
         if (priceDiff > 0.02) {
           warnings.push({
@@ -136,15 +295,6 @@ export class FatturaParserService implements InvoiceParser {
             severity: 'warning',
           });
         }
-      }
-
-      // Qty validation warning
-      if (header.qtyValidationStatus === 'mismatch') {
-        warnings.push({
-          code: 'QTY_SUM_MISMATCH',
-          message: `Mengensumme ${header.totalQty} != Paketzahl ${header.packagesCount}`,
-          severity: 'warning',
-        });
       }
 
       if (!header.fatturaNumber) {
@@ -174,6 +324,7 @@ export class FatturaParserService implements InvoiceParser {
         header,
         lines,
         warnings,
+        validationResults,
         parserModule: this.moduleId,
         parsedAt: new Date().toISOString(),
         sourceFileName: pdfFile.name,
@@ -189,7 +340,7 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // HEADER EXTRACTION (Page 1 only, label-based with search radius)
+  // HEADER EXTRACTION (identical to V1 — label-based with search radius)
   // ═══════════════════════════════════════════════════════════════════
 
   private parseHeaderFromItems(page: ExtractedPage, runId: string): ParsedInvoiceHeader {
@@ -242,7 +393,7 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // ZONE DETECTION — find body boundaries per page
+  // ZONE DETECTION
   // ═══════════════════════════════════════════════════════════════════
 
   private detectZone(page: ExtractedPage): ZoneBounds {
@@ -284,10 +435,10 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // POSITION EXTRACTION — Bounding Box & Y-Axis Matching
+  // POSITION EXTRACTION — Delayed Commit / Block-Aggregation (V2 CORE)
   // ═══════════════════════════════════════════════════════════════════
 
-  private parsePositionsBoundingBox(
+  private parsePositionsStateful(
     pages: ExtractedPage[],
     runId: string
   ): { lines: ParsedInvoiceLine[]; warnings: ParserWarning[] } {
@@ -297,6 +448,34 @@ export class FatturaParserService implements InvoiceParser {
     const allOrderRefs: Array<{ pageNumber: number; y: number; orders: string[] }> = [];
     this.orderTracker.reset();
     let positionIndex = 0;
+
+    // Delayed-commit block — only committed when NEXT block-starter is seen
+    let currentBlock: PositionBlock | null = null;
+
+    /** Try to commit the current block, push to allLines if valid */
+    const tryCommit = () => {
+      if (!currentBlock || currentBlock.pzQty <= 0) return;
+      positionIndex++;
+      const line = commitBlock(currentBlock, positionIndex, this.orderTracker);
+      if (line) {
+        allLines.push(line);
+        if (!line.manufacturerArticleNo && !line.ean) {
+          allWarnings.push({
+            code: 'POSITION_MISSING_IDENTIFIER',
+            message: `Position ${positionIndex}: Keine Artikelnummer oder EAN erkannt`,
+            severity: 'warning',
+            positionIndex,
+          });
+        }
+        logService.debug(
+          `[v2] Pos ${positionIndex}: art=${line.manufacturerArticleNo || 'N/A'}, ean=${line.ean || 'N/A'}, qty=${line.quantityDelivered}, unit=${line.unitPrice}, total=${line.totalPrice}, orders=[${line.orderCandidates.join(',')}]`,
+          { runId, step: 'Position' }
+        );
+      } else {
+        // commitBlock returned null (e.g. totalPrice<=0) — rollback index
+        positionIndex--;
+      }
+    };
 
     for (const page of pages) {
       const zone = this.detectZone(page);
@@ -312,134 +491,93 @@ export class FatturaParserService implements InvoiceParser {
       allBodyItems.push({ pageNumber: page.pageNumber, items: bodyItems });
 
       const rows = this.groupItemsIntoRows(bodyItems);
-
-      const pzRows: { rowY: number; rowText: string; rowItems: ExtractedTextItem[]; pzItem: ExtractedTextItem }[] = [];
-      const orderRefs: { y: number; orders: string[] }[] = [];
+      // TOP-TO-BOTTOM: pdfjs Y descending = top of page first
+      rows.sort((a, b) => b.y - a.y);
 
       for (const row of rows) {
-        const rowText = row.items.map(it => it.text).join(' ');
+        const rawText = row.items.map(it => it.text).join(' ');
+        const smartText = smartJoinRowItems(row.items);
+        const normalizedText = normalizeEuropeanPrices(smartText);
 
-        if (/Vs\.\s*ORDINE/i.test(rowText)) {
-          const orders = extractOrderReferences(rowText);
+        // 1. Skip header/footer lines
+        if (shouldSkipLine(rawText)) continue;
+
+        // A) Order reference → commit current block + start new order block
+        if (isOrderReferenceLine(rawText)) {
+          tryCommit();
+          currentBlock = null;
+          const orders = extractOrderReferences(rawText);
           if (orders.length > 0) {
-            orderRefs.push({ y: row.y, orders });
+            this.orderTracker.startNewBlock(orders);
+            allOrderRefs.push({ pageNumber: page.pageNumber, y: row.y, orders });
+            logService.debug(
+              `[v2] Order block: [${orders.join(',')}] at Y=${row.y.toFixed(0)}`,
+              { runId, step: 'Position' }
+            );
           }
-          continue; 
+          continue;
         }
 
-        const pzItem = row.items.find(it => PZ_ANCHOR.test(it.text));
-        if (pzItem && /PZ\s+\d+/i.test(rowText)) {
-          pzRows.push({ rowY: row.y, rowText, rowItems: row.items, pzItem });
-        }
-      }
-
-      orderRefs.sort((a, b) => b.y - a.y);
-
-      for (const ref of orderRefs) {
-        allOrderRefs.push({ pageNumber: page.pageNumber, ...ref });
-      }
-
-      if (pzRows.length === 0) {
-        logService.debug(`[v2] Page ${page.pageNumber}: no PZ rows found`, { runId, step: 'Position' });
-        continue;
-      }
-
-      pzRows.sort((a, b) => b.rowY - a.rowY);
-
-      for (const { rowY, rowText, rowItems, pzItem } of pzRows) {
-        const pzMatch = rowText.match(/PZ\s+(\d+)/i);
-        if (!pzMatch) continue;
-
-        const qty = parseIntSafe(pzMatch[1]);
-        if (qty <= 0) continue;
-
-        for (const ref of orderRefs) {
-          if (ref.y > rowY + Y_TOLERANCE) {
-            this.orderTracker.startNewBlock(ref.orders);
-            break;
+        // B) Block-Starter (article/EAN detected)?
+        const starter = isBlockStarter(row.items);
+        if (starter) {
+          if (currentBlock && currentBlock.pzQty > 0) {
+            // Previous block is complete (has PZ) → commit, then start new
+            tryCommit();
+            currentBlock = createEmptyBlock();
+            currentBlock.articleNo = starter.articleNo;
+            currentBlock.ean = starter.ean;
+          } else if (currentBlock) {
+            // MERGE: current block has no PZ yet → still in article header
+            // (e.g. article on line 1, EAN on line 2)
+            if (starter.articleNo && !currentBlock.articleNo) {
+              currentBlock.articleNo = starter.articleNo;
+            }
+            if (starter.ean && !currentBlock.ean) {
+              currentBlock.ean = starter.ean;
+            }
+          } else {
+            // No open block → start new
+            currentBlock = createEmptyBlock();
+            currentBlock.articleNo = starter.articleNo;
+            currentBlock.ean = starter.ean;
           }
+          // FALL-THROUGH: this line is also checked for PZ + prices below!
         }
 
-        const priceMatches = this.extractPricesFromText(rowText);
-
-        if (priceMatches.length < 2) {
-          for (const nextRow of rows) {
-            if (nextRow.y >= rowY - Y_TOLERANCE) continue; 
-            if (rowY - nextRow.y > 25) break; 
-
-            const nextRowText = nextRow.items.map(it => it.text).join(' ');
-            if (/Vs\.\s*ORDINE/i.test(nextRowText)) break;
-            if (/PZ\s+\d+/i.test(nextRowText)) break;
-
-            const nextPrices = this.extractPricesFromText(nextRowText);
-            priceMatches.push(...nextPrices);
-            if (priceMatches.length >= 2) break;
-          }
+        // C) No block open? Open an empty one
+        if (!currentBlock) {
+          currentBlock = createEmptyBlock();
         }
 
-        let unitPrice = 0;
-        let totalPrice = 0;
-        if (priceMatches.length >= 2) {
-          unitPrice = priceMatches[priceMatches.length - 2];
-          totalPrice = priceMatches[priceMatches.length - 1];
-        } else if (priceMatches.length === 1) {
-          unitPrice = priceMatches[0];
-          totalPrice = priceMatches[0];
+        // D) PZ match on this line?
+        const pzMatch = normalizedText.match(/PZ\s+(\d+)/i);
+        if (pzMatch && currentBlock.pzQty === 0) {
+          currentBlock.pzQty = parseIntSafe(pzMatch[1]);
         }
 
-        if (totalPrice <= 0) continue; 
+        // E) Extract prices from this line
+        const prices = this.extractPricesFromText(normalizedText);
+        currentBlock.priceValues.push(...prices);
 
-        const leftItems = rowItems.filter(it => it.x < pzItem.x);
-        const leftText = leftItems.map(it => it.text).join(' ');
-
-        const aboveItems = bodyItems
-          .filter(it =>
-            it.y > rowY + Y_TOLERANCE &&
-            it.y < rowY + 80 && // ERHÖHTER RADIUS, WIE BESPROCHEN
-            !orderRefs.some(ref => Math.abs(it.y - ref.y) <= Y_TOLERANCE) &&
-            !pzRows.some(pr => pr !== pzRows.find(p => p.rowY === rowY) && Math.abs(it.y - pr.rowY) <= Y_TOLERANCE)
-          )
-          .sort((a, b) => b.y - a.y);
-        const aboveText = aboveItems.map(it => it.text).join(' ');
-
-        const searchText = aboveText ? `${aboveText} ${leftText}` : leftText;
-        const { articleNo, ean, description } = this.extractArticleEanFromBlock(searchText);
-
-        positionIndex += 1;
-        const orderCandidates = this.orderTracker.getOrdersForPosition();
-        const orderStatus: 'YES' | 'NO' | 'check' =
-          orderCandidates.length === 1 ? 'YES' : orderCandidates.length === 0 ? 'NO' : 'check';
-
-        allLines.push({
-          positionIndex,
-          manufacturerArticleNo: articleNo,
-          ean,
-          descriptionIT: description,
-          quantityDelivered: qty,
-          unitPrice,
-          totalPrice,
-          orderCandidates,
-          orderCandidatesText: orderCandidates.join('|'),
-          orderStatus,
-          rawPositionText: rowText,
-        });
-
-        if (!articleNo && !ean) {
-          allWarnings.push({
-            code: 'POSITION_MISSING_IDENTIFIER',
-            message: `Position ${positionIndex}: Keine Artikelnummer oder EAN erkannt`,
-            severity: 'warning',
-            positionIndex,
-          });
+        // F) Accumulate description text (strip PZ pattern and price patterns)
+        let descText = normalizedText
+          .replace(/PZ\s+\d+/gi, '')
+          .replace(new RegExp(PRICE_VALUE_PATTERN.source, 'g'), '')
+          .trim();
+        if (descText) {
+          currentBlock.descriptionParts.push(descText);
         }
 
-        logService.debug(
-          `[v2] Pos ${positionIndex}: art=${articleNo || 'N/A'}, ean=${ean || 'N/A'}, qty=${qty}, unit=${unitPrice}, total=${totalPrice}, orders=[${orderCandidates.join(',')}]`,
-          { runId, step: 'Position' }
-        );
+        currentBlock.rawLines.push(rawText);
+        currentBlock.rows.push(row);
       }
     }
 
+    // FLUSH: commit last open block after all pages
+    tryCommit();
+
+    // Extended order recognition enrichment
     const { enrichedLines, warnings: enrichWarnings } = enrichOrderCandidates(
       allLines, allBodyItems, allOrderRefs,
     );
@@ -450,16 +588,14 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // ROW GROUPING & PRICE EXTRACTION
+  // ROW GROUPING
   // ═══════════════════════════════════════════════════════════════════
 
-  private groupItemsIntoRows(
-    items: ExtractedTextItem[]
-  ): { y: number; items: ExtractedTextItem[] }[] {
+  private groupItemsIntoRows(items: ExtractedTextItem[]): RowGroup[] {
     if (items.length === 0) return [];
 
     const sorted = [...items].sort((a, b) => b.y - a.y);
-    const rows: { y: number; items: ExtractedTextItem[] }[] = [];
+    const rows: RowGroup[] = [];
     let currentY = sorted[0].y;
     let currentItems: ExtractedTextItem[] = [sorted[0]];
 
@@ -487,6 +623,10 @@ export class FatturaParserService implements InvoiceParser {
     return rows;
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // PRICE EXTRACTION (with European price normalization)
+  // ═══════════════════════════════════════════════════════════════════
+
   private extractPricesFromText(text: string): number[] {
     const prices: number[] = [];
     const pattern = new RegExp(PRICE_VALUE_PATTERN.source, 'g');
@@ -499,7 +639,7 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // ARTICLE / EAN EXTRACTION — Column 1 splitting logic
+  // ARTICLE / EAN EXTRACTION
   // ═══════════════════════════════════════════════════════════════════
 
   private extractArticleEanFromBlock(
@@ -508,25 +648,21 @@ export class FatturaParserService implements InvoiceParser {
     const trimmed = text.trim();
     if (!trimmed) return { articleNo: '', ean: '', description: '' };
 
-    // DIE NEUE, SAUBERE LOGIK:
-    const eanMatch = trimmed.match(EAN_INLINE);
+    const eanMatch = trimmed.match(/\b(803\d{10})\b/);
 
     if (eanMatch) {
       const ean = eanMatch[1];
       const eanIndex = trimmed.indexOf(ean);
-      // Alles VOR der EAN ist die Artikelnummer
       const articleNo = trimmed.substring(0, eanIndex).trim();
-      // Alles NACH der EAN ist die Beschreibung
       const description = trimmed.substring(eanIndex + ean.length).trim();
       return { articleNo, ean, description };
     } else {
-      // Keine EAN gefunden? Alles ist die Artikelnummer!
       return { articleNo: trimmed, ean: '', description: trimmed };
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // FOOTER EXTRACTION (last page only)
+  // FOOTER EXTRACTION (identical to V1)
   // ═══════════════════════════════════════════════════════════════════
 
   private parsePackagesCountFromItems(page: ExtractedPage, runId: string): number {
@@ -578,7 +714,6 @@ export class FatturaParserService implements InvoiceParser {
   }
 
   private parseInvoiceTotalFromItems(page: ExtractedPage, runId: string): number {
-    const items = page.items;
     const groupedLines = page.groupedLines;
 
     for (let i = 0; i < groupedLines.length; i++) {
@@ -608,5 +743,81 @@ export class FatturaParserService implements InvoiceParser {
 
     logService.warn('[v2] Rechnungssumme nicht gefunden', { runId, step: 'Footer' });
     return 0;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VALIDATION RULES
+  // ═══════════════════════════════════════════════════════════════════
+
+  private runValidation(
+    header: ParsedInvoiceHeader,
+    lines: ParsedInvoiceLine[]
+  ): ValidationResult[] {
+    const results: ValidationResult[] = [];
+
+    // Rule 1: qty_vs_packages
+    const sumQty = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
+    if (header.packagesCount == null) {
+      results.push({
+        ruleId: 'qty_vs_packages',
+        ruleName: 'Quantity Sum vs Packages Count',
+        passed: true,
+        message: 'Paketzahl nicht verfuegbar — Pruefung uebersprungen',
+        severity: 'info',
+        details: { sumQty, packagesCount: null },
+      });
+    } else if (sumQty === header.packagesCount) {
+      results.push({
+        ruleId: 'qty_vs_packages',
+        ruleName: 'Quantity Sum vs Packages Count',
+        passed: true,
+        message: `Mengensumme ${sumQty} == Paketzahl ${header.packagesCount}`,
+        severity: 'info',
+        details: { sumQty, packagesCount: header.packagesCount, difference: 0 },
+      });
+    } else {
+      results.push({
+        ruleId: 'qty_vs_packages',
+        ruleName: 'Quantity Sum vs Packages Count',
+        passed: false,
+        message: `Mengensumme ${sumQty} != Paketzahl ${header.packagesCount} (Diff: ${Math.abs(sumQty - header.packagesCount)})`,
+        severity: 'warning',
+        details: { sumQty, packagesCount: header.packagesCount, difference: sumQty - header.packagesCount },
+      });
+    }
+
+    // Rule 2: amount_vs_total
+    const sumAmount = Math.round(lines.reduce((sum, l) => sum + l.totalPrice, 0) * 100) / 100;
+    const invoiceTotal = header.invoiceTotal ?? 0;
+    if (!invoiceTotal || invoiceTotal === 0) {
+      results.push({
+        ruleId: 'amount_vs_total',
+        ruleName: 'Amount Sum vs Invoice Total',
+        passed: true,
+        message: 'Rechnungstotal nicht verfuegbar — Pruefung uebersprungen',
+        severity: 'info',
+        details: { sumAmount, invoiceTotal: null },
+      });
+    } else if (Math.abs(sumAmount - invoiceTotal) < 0.02) {
+      results.push({
+        ruleId: 'amount_vs_total',
+        ruleName: 'Amount Sum vs Invoice Total',
+        passed: true,
+        message: `Preissumme ${sumAmount.toFixed(2)} == Rechnungstotal ${invoiceTotal.toFixed(2)}`,
+        severity: 'info',
+        details: { sumAmount, invoiceTotal, difference: 0 },
+      });
+    } else {
+      results.push({
+        ruleId: 'amount_vs_total',
+        ruleName: 'Amount Sum vs Invoice Total',
+        passed: false,
+        message: `Preissumme ${sumAmount.toFixed(2)} != Rechnungstotal ${invoiceTotal.toFixed(2)} (Diff: ${Math.abs(sumAmount - invoiceTotal).toFixed(2)})`,
+        severity: 'warning',
+        details: { sumAmount, invoiceTotal, difference: sumAmount - invoiceTotal },
+      });
+    }
+
+    return results;
   }
 }
