@@ -1175,6 +1175,52 @@ Der "Parser importieren"-Button oeffnet den File-Picker und fuehrt Client-seitig
 
 ---
 
+### V3 Y-Koordinaten-Inversion Fix -- ERLEDIGT (2026-02-18)
+
+**Root Cause:** pdfjs-dist verwendet bottom-up Y-Koordinaten (hohe Y = oben auf Seite), V3 implementierte Zone-Detection und Body-Filterung mit top-down Logik. Dadurch war `bodyStartY > bodyEndY` und der Body-Filter lieferte 0 Items.
+
+**4 Fixes in `FatturaParserService_V3.ts`:**
+1. **`detectZone()` Offsets invertiert:** `descItem.y + 10` → `descItem.y - 10` (unter Header), `footerItem.y - 10` → `footerItem.y + 10` (ueber Footer). Defaults getauscht (750/120).
+2. **Body-Filter Vergleichsrichtung:** `y >= bodyStartY && y <= bodyEndY` → `y <= bodyStartY && y >= bodyEndY` (bottom-up: Start hat hoeheren Y-Wert als Ende).
+3. **`detectColumnZones()` Header-Suche:** `bodyStartY - 10` → `bodyStartY + 10` (bodyStartY ist jetzt 10 unter Header, +10 bringt zurueck zum Header-Y).
+4. **`groupItemsIntoRows()` Sortierung:** `a.y - b.y` → `b.y - a.y` (absteigend = top-to-bottom fuer Delayed-Commit-Algorithmus).
+
+**Zusaetzlicher Fix: OrderBlockTracker-Aufruf:**
+- `this.orderTracker.getCurrentOrders()` → `this.orderTracker.getOrdersForPosition()` (Methode existierte nicht, Runtime-Error)
+
+**Erwartetes Ergebnis:** V3 erkennt nun Positionen (~45 Pos, ~295 Menge, ~104.209 EUR bei Referenz-PDF Fattura 20.019).
+
+---
+
+### V3 Coordinate-Based Rewrite — 2026-02-19
+
+**Kompletter Umbau** von `FatturaParserService_V3.ts` von heuristischem Zonen-Parsing zu **deterministischem Coordinate-Based Parsing** nach Vendor-Profile-Standard.
+
+**Kern-Aenderungen:**
+1. **PZ-Anker-Erkennung**: Jede Position wird ueber "PZ" im UM-Spaltenband (x: 400-425) identifiziert — kein Regex-Raten mehr
+2. **Spalten-Baender** (Column Bands): LEFT_COL (10-82), DESCRIPTION (82-400), UM (400-425), QTY (425-470), UNIT_PRICE (470-520), TOTAL_PRICE (515-560)
+3. **Single-Pass Top-Down Iteration**: Alle Items pro Seite nach topDownY sortiert, `Vs. ORDINE` und `PZ` in einem Durchlauf chronologisch verarbeitet
+4. **Koordinaten-basierte Header/Footer-Extraktion**: Invoice-Nr, Datum, Paketzahl, Totals ueber feste X/Y-Regionen
+5. **concatItemsText()**: Neue Hilfsfunktion zum Zusammenfuegen von Split-Items (pdfjs zerlegt z.B. "CPON90.E11P2#EUB490F" in 3 Teile)
+6. **"N r." → "Nr." Normalisierung**: pdfjs-Artefakt bei Order-Block-Headers behandelt
+
+**Self-Test Ergebnis (Fattura2026020007-SAMPLE-DL.pdf):**
+- Positionen: 45/45
+- Mengensumme: 295/295
+- Preissumme: 104.209,50/104.209,50
+- Spot-Checks: 8/8 bestanden (Pos 1, 8, 9, 14, 24, 31, 43, 45)
+- Validierung: POSITION_SUM pass, QUANTITY_SUM pass, PRICE_CHECK warn (Pos 43 — beabsichtigt)
+
+**Build-Validierung:**
+- TypeScript (`tsc --noEmit`): 0 Fehler
+- Vite Build (`vite build`): Erfolgreich
+
+**Geaenderte Dateien:**
+- `src/services/parsers/modules/FatturaParserService_V3.ts` — Kompletter Rewrite (Coordinate-Based)
+- `tests/v3-self-test.ts` — NEU: Standalone Node.js Self-Test
+
+---
+
 ### Noch offen (fuer spaetere Phasen):
 - Phase E: Logging & Issue-Center Integration
 - Phase F: Tests & QA

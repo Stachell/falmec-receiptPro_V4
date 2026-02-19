@@ -1,11 +1,16 @@
 /**
- * Fattura PDF Parser Service V3 — The Golden Anchor
+ * Fattura PDF Parser Service V3 — Coordinate-Based Parsing
  *
- * Final Fixes:
- * 1. Digit-Enforcer: isBlockStarter ONLY accepts article numbers containing at least one digit (kills "E.P.CAP").
- * 2. Aggressive Price Healing: normalizeEuropeanPrices removes ANY whitespace between digits and punctuation.
- * 3. Anywhere EANs: Removed word-boundaries to catch EANs glued to other text.
- * 4. Adjusted Zone Margins: -5px tolerance for X-anchors.
+ * Deterministic extraction using vendor profile column bands and PZ-anchor detection.
+ * Single top-down pass per page ensures correct order block → line item assignment.
+ *
+ * Column Bands (X-ranges in PDF points, page width = 595):
+ *   LEFT_COL:    10–82   (article numbers, EAN codes)
+ *   DESCRIPTION: 82–400  (product text, order headers)
+ *   UM:          400–425 ("PZ" anchor)
+ *   QTY:         425–470 (quantity)
+ *   UNIT_PRICE:  470–520 (unit price EUR)
+ *   TOTAL_PRICE: 520–560 (line total EUR)
  */
 
 import { logService } from '../../logService';
@@ -24,45 +29,135 @@ import {
   type ExtractedTextItem,
 } from '../utils/pdfTextExtractor';
 import { OrderBlockTracker, extractOrderReferences } from '../utils/OrderBlockTracker';
-import { enrichOrderCandidates } from '../utils/ExtendedOrderRecognition';
 import { parsePrice, parseIntSafe } from '../utils/priceParser';
-import {
-  INVOICE_NUMBER_PATTERNS,
-  ARTICLE_PATTERNS,
-  PRICE_VALUE_PATTERN,
-  FATTURA_DATE,
-  shouldSkipLine,
-  isOrderReferenceLine,
-} from '../constants/fatturaPatterns';
 
-const Y_TOLERANCE = 5;
+// ─── COORDINATE CONSTANTS (from vendor profile & coordinate-map) ─────────
 
-interface ZoneBounds { bodyStartY: number; bodyEndY: number; }
-interface ColumnZones { descriptionX: number; qtyX: number; valid: boolean; }
-interface ZonedItems { zone1: ExtractedTextItem[]; zone2: ExtractedTextItem[]; zone3: ExtractedTextItem[]; }
-interface RowGroup { y: number; items: ExtractedTextItem[]; text: string; }
-interface PositionBlock {
-  articleNo: string;
-  ean: string;
-  descriptionParts: string[];
-  pzQty: number;
-  priceValues: number[];
-  rawLines: string[];
-  rows: RowGroup[];
+const PAGE_HEIGHT = 841; // A4 height in points
+const Y_TOL = 5;         // ±5pt for "same line" matching
+const NUM_BLOCK_SCAN = 25; // scan 25pt below PZ for number block
+
+/** Column band X-ranges */
+const COL = {
+  LEFT_COL:    { xMin: 10,  xMax: 82  },
+  DESCRIPTION: { xMin: 82,  xMax: 400 },
+  UM:          { xMin: 400, xMax: 425 },
+  QTY:         { xMin: 425, xMax: 470 },
+  UNIT_PRICE:  { xMin: 470, xMax: 520 },
+  TOTAL_PRICE: { xMin: 515, xMax: 560 },  // widened from 520 for "31.000,00" at x=518
+} as const;
+
+/** Header coordinate regions (top-down Y) */
+const HEADER = {
+  invoiceNumber: { xMin: 420, xMax: 470, yMin: 235, yMax: 255 },
+  invoiceDate:   { xMin: 470, xMax: 535, yMin: 235, yMax: 255 },
+};
+
+/** Footer coordinate regions (top-down Y, last page only) */
+const FOOTER = {
+  packagesValue:    { xMin: 25,  xMax: 65,  yMin: 722, yMax: 745 },
+  totalGoodsValue:  { xMin: 315, xMax: 385, yMin: 722, yMax: 745 },
+  invoiceTotalValue:{ xMin: 485, xMax: 560, yMin: 722, yMax: 800 },
+  dueDate:          { xMin: 290, xMax: 350, yMin: 780, yMax: 800 },
+};
+
+/** Regex patterns */
+const PAT = {
+  invoiceNumber: /(\d{2}\.\d{3})/,
+  invoiceDate:   /(\d{2}\/\d{2}\/\d{4})/,
+  ean:           /\b(803\d{10})\b/,
+  eurPrice:      /([\d.]+,\d{2})/,
+  quantity:       /^(\d+)$/,
+  vsOrder:       /Vs\.\s+ORDINE/i,
+  nsOrder:       /Ns\.\s+ORDINE/i,
+  orderBlock:    /(?:Vs\.|Ns\.)\s+ORDINE\s+(?:ESTERO|WEB\s*\(?NET-PORTAL\)?|SOSTITUZ\.\/RICAMBI)\s+Nr\.?\s*(.+?)\s+del\s+(\d{2}\/\d{2}\/\d{4})/i,
+  articleNumber: /^([A-Z][A-Z0-9]+(?:[.#\/][A-Z0-9#]+)*)/,
+};
+
+// ─── HELPER TYPES ────────────────────────────────────────────────────────
+
+interface TopDownItem {
+  text: string;
+  x: number;       // original X from pdfjs
+  topY: number;    // converted top-down Y
+  width: number;
+  height: number;
 }
 
-// ─── 1. AGGRESSIVE PRICE HEALING ──────────────────────────────────────
-function normalizeEuropeanPrices(text: string): string {
-  // Pass 1: Fixes spaces around commas and dots (e.g., "3 . 596 , 00" -> "3.596,00")
-  let result = text.replace(/(\d)\s*([.,])\s*(\d)/g, '$1$2$3');
-  // Pass 2: Fixes space as thousand separator (e.g., "3 596,00" -> "3596,00")
-  result = result.replace(/(\d)\s+(\d{3}(?:[,.]\d{2})?\b)/g, '$1$2');
-  // Pass 3: Fixes "digits SPACE , digits" edge case
-  result = result.replace(/(\d)\s+,\s*(\d)/g, '$1,$2');
-  return result;
+interface Row {
+  y: number;        // representative topDownY
+  items: TopDownItem[];
 }
 
-function smartJoinRowItems(items: ExtractedTextItem[], gapThreshold = 25): string {
+// ─── PURE HELPERS ────────────────────────────────────────────────────────
+
+/** Convert pdfjs bottom-up Y to top-down Y */
+function toTopDown(pdfjsY: number): number {
+  return PAGE_HEIGHT - pdfjsY;
+}
+
+/** Check if item X falls within a column band */
+function inCol(x: number, col: { xMin: number; xMax: number }): boolean {
+  return x >= col.xMin && x <= col.xMax;
+}
+
+/** Check if item is within a coordinate region */
+function inRegion(item: TopDownItem, region: { xMin: number; xMax: number; yMin: number; yMax: number }): boolean {
+  return item.x >= region.xMin && item.x <= region.xMax && item.topY >= region.yMin && item.topY <= region.yMax;
+}
+
+/** Parse European price string: "1.758,00" → 1758.00 */
+function parseEurPrice(text: string): number | null {
+  const match = text.match(PAT.eurPrice);
+  if (!match) return null;
+  const normalized = match[1].replace(/\./g, '').replace(',', '.');
+  const value = parseFloat(normalized);
+  return isNaN(value) ? null : value;
+}
+
+/** Convert ExtractedTextItem[] to TopDownItem[] sorted by topY ascending */
+function convertAndSort(items: ExtractedTextItem[]): TopDownItem[] {
+  return items
+    .map(it => ({
+      text: it.text,
+      x: it.x,
+      topY: toTopDown(it.y),
+      width: it.width,
+      height: it.height,
+    }))
+    .sort((a, b) => a.topY - b.topY || a.x - b.x);
+}
+
+/** Group sorted TopDownItems into rows by Y-proximity (±Y_TOL) */
+function groupIntoRows(items: TopDownItem[]): Row[] {
+  const rows: Row[] = [];
+  for (const item of items) {
+    const last = rows[rows.length - 1];
+    if (last && Math.abs(item.topY - last.y) <= Y_TOL) {
+      last.items.push(item);
+    } else {
+      rows.push({ y: item.topY, items: [item] });
+    }
+  }
+  return rows;
+}
+
+/** Get full text of a row (items sorted by X, space-separated) */
+function rowText(row: Row): string {
+  return [...row.items].sort((a, b) => a.x - b.x).map(it => it.text).join(' ');
+}
+
+/** Get items in a specific column band from a row, sorted by X */
+function colItems(row: Row, col: { xMin: number; xMax: number }): TopDownItem[] {
+  return row.items.filter(it => inCol(it.x, col)).sort((a, b) => a.x - b.x);
+}
+
+/**
+ * Concatenate adjacent items into a single string.
+ * pdfjs often splits article numbers like "CPON90.E" + "11" + "P2#EUB490F"
+ * into separate text items. We join them (no space if gap < 3pt).
+ */
+function concatItemsText(items: TopDownItem[]): string {
   if (items.length === 0) return '';
   const sorted = [...items].sort((a, b) => a.x - b.x);
   let result = sorted[0].text;
@@ -70,63 +165,20 @@ function smartJoinRowItems(items: ExtractedTextItem[], gapThreshold = 25): strin
     const prev = sorted[i - 1];
     const curr = sorted[i];
     const gap = curr.x - (prev.x + prev.width);
-    result += (gap > gapThreshold) ? ' ' + curr.text : curr.text;
+    result += (gap > 3 ? ' ' : '') + curr.text;
   }
   return result;
 }
 
-// ─── 2. DIGIT-ENFORCER & ANYWHERE EAN ──────────────────────────────────
-function isBlockStarter(items: ExtractedTextItem[]): { articleNo: string; ean: string } | null {
-  if (!items || items.length === 0) return null;
-  const joined = items.map(it => it.text).join('');
-  const spaceJoined = items.map(it => it.text).join(' ');
-
-  // EAN Check
-  const eanMatch = joined.match(/(803\d{10})/) || spaceJoined.match(/(803\d{10})/);
-  const ean = eanMatch ? eanMatch[1] : '';
-
-  let articleNo = '';
-
-  // Korrigierter Digit-Enforcer & Regex-Check
-  for (const item of items) {
-    const text = item.text.trim();
-    // Nur prüfen, wenn Text eine Zahl enthält und lang genug ist
-    if (text.length >= 4 && /\d/.test(text)) {
-      const match = ARTICLE_PATTERNS.some(pat => pat.regex.test(text));
-      
-      if (match) {
-        articleNo = text;
-        break;
-      }
-    }
-  }
-
-  if (!articleNo && !ean) return null;
-  return { articleNo, ean };
-}
-
-function classifyItemsByZone(items: ExtractedTextItem[], zones: ColumnZones): ZonedItems {
-  if (!zones.valid) return { zone1: items, zone2: [], zone3: [] };
-  const zone1: ExtractedTextItem[] = [];
-  const zone2: ExtractedTextItem[] = [];
-  const zone3: ExtractedTextItem[] = [];
-
-  // -5px margin to prevent aggressive cutting
-  for (const item of items) {
-    if (item.x < zones.descriptionX - 5) zone1.push(item);
-    else if (item.x < zones.qtyX - 5) zone2.push(item);
-    else zone3.push(item);
-  }
-  return { zone1, zone2, zone3 };
-}
-
+/** Derive OrderStatus from candidate count */
 function deriveOrderStatus(candidates: string[]): OrderStatus {
   if (candidates.length === 0) return 'NO';
   if (candidates.length === 1) return 'YES';
   return 'check';
 }
 
-// ─── 3. PARSER CLASS ─────────────────────────────────────────────────────
+// ─── PARSER CLASS ────────────────────────────────────────────────────────
+
 export class FatturaParserService_V3 implements InvoiceParser {
   public readonly moduleId = 'FatturaParserService_V3';
   public readonly moduleName = 'Fattura Falmec V3';
@@ -147,27 +199,24 @@ export class FatturaParserService_V3 implements InvoiceParser {
       const pages = await extractTextFromPDF(pdfFile);
       logService.info(`${pages.length} Seiten extrahiert`, { runId: activeRunId });
 
+      // Reset order tracker for fresh parse
+      this.orderTracker.reset();
+
       // 1. Header (page 1)
-      const header = this.parseHeaderFromItems(pages[0]);
+      const header = this.extractHeader(pages[0]);
 
-      // 2. Packages count (last page)
-      const packagesCount = this.parsePackagesCountFromItems(pages[pages.length - 1].items);
-      if (packagesCount > 0) {
-        header.packagesCount = packagesCount;
-      }
+      // 2. Body: single-pass extraction across all pages
+      const { lines, warnings } = this.extractBody(pages, activeRunId);
 
-      // 3. Parse positions — STATEFUL TOP-TO-BOTTOM
-      const { lines, warnings } = this.parsePositionsStateful(pages, activeRunId);
+      // 3. Footer (last page)
+      const lastPage = pages[pages.length - 1];
+      const footer = this.extractFooter(lastPage);
 
-      // 4. Invoice total (last page)
-      const invoiceTotal = this.parseInvoiceTotalFromItems(pages[pages.length - 1].items);
-      if (invoiceTotal > 0) {
-        header.invoiceTotal = invoiceTotal;
-      }
-
-      // 5. Totals
+      // 4. Populate header summary fields
       header.totalQty = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
       header.parsedPositionsCount = lines.length;
+      header.packagesCount = footer.packages;
+      header.invoiceTotal = footer.invoiceTotal;
 
       if (header.packagesCount && header.totalQty > 0) {
         header.qtyValidationStatus =
@@ -176,10 +225,10 @@ export class FatturaParserService_V3 implements InvoiceParser {
         header.qtyValidationStatus = 'unknown';
       }
 
-      // 6. Validation rules
-      const validationResults = this.runValidation(header, lines);
+      // 5. Validation rules
+      const validationResults = this.runValidation(header, lines, footer);
 
-      // 7. Standard warnings
+      // 6. Standard warnings
       if (header.qtyValidationStatus === 'mismatch') {
         warnings.push({
           code: 'QTY_SUM_MISMATCH',
@@ -188,13 +237,13 @@ export class FatturaParserService_V3 implements InvoiceParser {
         });
       }
 
-      if (header.invoiceTotal && header.invoiceTotal > 0) {
+      if (footer.invoiceTotal > 0) {
         const sumAmount = Math.round(lines.reduce((sum, l) => sum + l.totalPrice, 0) * 100) / 100;
-        const priceDiff = Math.abs(sumAmount - header.invoiceTotal);
+        const priceDiff = Math.abs(sumAmount - footer.invoiceTotal);
         if (priceDiff > 0.02) {
           warnings.push({
             code: 'PRICE_SUM_MISMATCH',
-            message: `Preissumme ${sumAmount.toFixed(2)} != Rechnungstotal ${header.invoiceTotal.toFixed(2)} (Diff: ${priceDiff.toFixed(2)})`,
+            message: `Preissumme ${sumAmount.toFixed(2)} != Rechnungstotal ${footer.invoiceTotal.toFixed(2)} (Diff: ${priceDiff.toFixed(2)})`,
             severity: 'warning',
           });
         }
@@ -242,31 +291,35 @@ export class FatturaParserService_V3 implements InvoiceParser {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // HEADER EXTRACTION
-  // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // HEADER EXTRACTION (Page 1 only, coordinate-based)
+  // ═══════════════════════════════════════════════════════════════════════
 
-  private parseHeaderFromItems(page: ExtractedPage): ParsedInvoiceHeader {
-    const items = page.items;
-    const text = items.map(i => i.text).join(' ');
+  private extractHeader(page: ExtractedPage): ParsedInvoiceHeader {
+    const allItems = convertAndSort(page.items);
 
     let invoiceNumber = '';
-    for (const { name, regex } of INVOICE_NUMBER_PATTERNS) {
-      const m = text.match(regex);
-      if (m) {
-        invoiceNumber = name === 'FATTURA_NUMBER_FLEXIBLE'
-          ? `${m[1]}.${m[2]}`
-          : m[1];
-        break;
+    let invoiceDate = '';
+
+    // Find invoice number in coordinate region
+    for (const item of allItems) {
+      if (inRegion(item, HEADER.invoiceNumber)) {
+        const m = item.text.match(PAT.invoiceNumber);
+        if (m) { invoiceNumber = m[1]; break; }
       }
     }
 
-    const dateMatch = text.match(FATTURA_DATE);
-    const date = dateMatch ? dateMatch[1].replace(/\//g, '.') : '';
+    // Find invoice date in coordinate region
+    for (const item of allItems) {
+      if (inRegion(item, HEADER.invoiceDate)) {
+        const m = item.text.match(PAT.invoiceDate);
+        if (m) { invoiceDate = m[1].replace(/\//g, '.'); break; }
+      }
+    }
 
     return {
       fatturaNumber: invoiceNumber,
-      fatturaDate: date,
+      fatturaDate: invoiceDate,
       packagesCount: null,
       invoiceTotal: 0,
       totalQty: 0,
@@ -275,196 +328,398 @@ export class FatturaParserService_V3 implements InvoiceParser {
     };
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // ZONE DETECTION
-  // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // BODY EXTRACTION — Single top-down pass per page
+  // ═══════════════════════════════════════════════════════════════════════
 
-  private detectZone(page: ExtractedPage): ZoneBounds {
-    const descItem = page.items.find(it => it.text.toUpperCase().includes('DESCRIPTION'));
-    const bodyStartY = descItem ? descItem.y + 10 : 120;
+  private extractBody(pages: ExtractedPage[], runId: string): { lines: ParsedInvoiceLine[]; warnings: ParserWarning[] } {
+    const lines: ParsedInvoiceLine[] = [];
+    const warnings: ParserWarning[] = [];
+    let posIndex = 1;
 
-    const footerItem = page.items.find(it =>
-      it.text.toUpperCase().includes('TOTAL EUR') ||
-      it.text.toUpperCase().includes('INTRA') ||
-      it.text.toUpperCase().includes('NET WEIGHT')
-    );
-    const bodyEndY = footerItem ? footerItem.y - 10 : 750;
+    for (const page of pages) {
+      // Convert all items to top-down and sort
+      const allItems = convertAndSort(page.items);
+
+      // Detect body boundaries on this page
+      const { bodyStartY, bodyEndY } = this.detectBodyBounds(allItems);
+
+      // Filter to body area items only
+      const bodyItems = allItems.filter(it => it.topY > bodyStartY && it.topY < bodyEndY);
+
+      // Group into rows
+      const rows = groupIntoRows(bodyItems);
+
+      // Single top-down pass
+      for (let ri = 0; ri < rows.length; ri++) {
+        const row = rows[ri];
+        const text = rowText(row);
+
+        // Check for order block line (Vs. or Ns. ORDINE)
+        if (PAT.vsOrder.test(text)) {
+          // "Vs." line — update active order block
+          // Normalize "N r." → "Nr." (pdfjs text splitting artifact)
+          const normalizedText = text.replace(/N\s+r\./g, 'Nr.');
+          const refs = extractOrderReferences(normalizedText);
+          this.orderTracker.startNewBlock(refs);
+          continue;
+        }
+        if (PAT.nsOrder.test(text)) {
+          // "Ns." line — informational only, do NOT update tracker
+          continue;
+        }
+
+        // Check for PZ anchor in UM column band
+        const pzItems = colItems(row, COL.UM);
+        const hasPZ = pzItems.some(it => it.text.trim().toUpperCase() === 'PZ');
+
+        if (!hasPZ) continue; // Not a line item row
+
+        // ── This is a LINE ITEM row ──
+
+        // Extract quantity from QTY column (same row ±Y_TOL)
+        const qtyRaw = this.findValueInBand(rows, ri, COL.QTY);
+        const quantity = qtyRaw ? parseIntSafe(qtyRaw) : 0;
+
+        // Extract unit price from UNIT_PRICE column (same row ±Y_TOL)
+        const unitPriceRaw = this.findValueInBand(rows, ri, COL.UNIT_PRICE);
+        const unitPriceParsed = unitPriceRaw ? parseEurPrice(unitPriceRaw) : null;
+
+        // Extract total price from TOTAL_PRICE column (same row ±Y_TOL)
+        const totalPriceRaw = this.findValueInBand(rows, ri, COL.TOTAL_PRICE);
+        const totalPriceParsed = totalPriceRaw ? parseEurPrice(totalPriceRaw) : null;
+
+        // Handle missing unit price (Position 31 edge case)
+        let unitPrice = unitPriceParsed ?? 0;
+        let totalPrice = totalPriceParsed ?? 0;
+        const itemWarnings: string[] = [];
+
+        if (unitPrice === 0 && totalPrice > 0 && quantity > 0) {
+          unitPrice = Math.round((totalPrice / quantity) * 100) / 100;
+          itemWarnings.push(`Unit price calculated: ${totalPrice} / ${quantity} = ${unitPrice}`);
+        }
+
+        // Extract number block (article + EAN)
+        const numberBlock = this.extractNumberBlock(row, rows, ri, bodyItems);
+
+        // Extract description
+        const description = this.extractDescription(row, rows, ri);
+
+        // Get current order assignment
+        const orderCandidates = [...this.orderTracker.getOrdersForPosition()];
+        const orderStatus = deriveOrderStatus(orderCandidates);
+
+        lines.push({
+          positionIndex: posIndex++,
+          manufacturerArticleNo: numberBlock.articleNumber || 'N/A',
+          ean: numberBlock.ean || 'N/A',
+          descriptionIT: description,
+          quantityDelivered: quantity,
+          unitPrice,
+          totalPrice,
+          orderCandidates,
+          orderCandidatesText: orderCandidates.join('|'),
+          orderStatus,
+          rawPositionText: text,
+        });
+
+        if (itemWarnings.length > 0) {
+          for (const w of itemWarnings) {
+            warnings.push({
+              code: 'CALCULATED_UNIT_PRICE',
+              message: w,
+              severity: 'warning',
+              positionIndex: posIndex - 1,
+            });
+          }
+        }
+      }
+    }
+
+    return { lines, warnings };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BODY BOUNDS DETECTION
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private detectBodyBounds(allItems: TopDownItem[]): { bodyStartY: number; bodyEndY: number } {
+    // Body starts below "DESCRIPTION" header text
+    let bodyStartY = 289; // default from coordinate map
+    for (const item of allItems) {
+      if (item.text.toUpperCase() === 'DESCRIPTION' && item.topY > 280 && item.topY < 300) {
+        bodyStartY = item.topY;
+        break;
+      }
+    }
+
+    // Body ends above "Number of packages" or "Continues..."
+    let bodyEndY = 717; // default
+    for (const item of allItems) {
+      if (/^Number\s+of/i.test(item.text) && item.topY > 700) {
+        bodyEndY = item.topY;
+        break;
+      }
+    }
+    // Also check for "Continues..." as alternative end marker
+    for (const item of allItems) {
+      if (/^Continues/i.test(item.text) && item.topY > 780) {
+        if (bodyEndY === 717) bodyEndY = item.topY; // only if "Number of packages" not found
+        break;
+      }
+    }
 
     return { bodyStartY, bodyEndY };
   }
 
-  private detectColumnZones(page: ExtractedPage, bodyStartY: number): ColumnZones {
-    const headerItems = page.items.filter(it => Math.abs(it.y - (bodyStartY - 10)) <= Y_TOLERANCE * 3);
-    const descItem = headerItems.find(it => it.text.toUpperCase().includes('DESCRIPTION'));
-    const qtyItem = headerItems.find(it => it.text.toUpperCase().includes('Q.TY') || it.text.toUpperCase().includes('PZ'));
+  // ═══════════════════════════════════════════════════════════════════════
+  // VALUE EXTRACTION — find value in column band near PZ row
+  // ═══════════════════════════════════════════════════════════════════════
 
-    if (!descItem || !qtyItem) return { descriptionX: 0, qtyX: Infinity, valid: false };
-    return { descriptionX: descItem.x, qtyX: qtyItem.x, valid: true };
+  /** Find a value in a column band on the PZ row or within ±Y_TOL of adjacent rows */
+  private findValueInBand(rows: Row[], pzRowIdx: number, col: { xMin: number; xMax: number }): string | null {
+    const pzRow = rows[pzRowIdx];
+
+    // First: check items directly in the PZ row
+    const directItems = colItems(pzRow, col);
+    if (directItems.length > 0) {
+      return directItems[0].text.trim();
+    }
+
+    // Second: check the next row (split-line case, e.g., Position 7 where prices are 3.7pt below PZ)
+    if (pzRowIdx + 1 < rows.length) {
+      const nextRow = rows[pzRowIdx + 1];
+      if (Math.abs(nextRow.y - pzRow.y) <= Y_TOL) {
+        const nextItems = colItems(nextRow, col);
+        if (nextItems.length > 0) {
+          return nextItems[0].text.trim();
+        }
+      }
+    }
+
+    return null;
   }
 
-  private groupItemsIntoRows(items: ExtractedTextItem[]): RowGroup[] {
-    const rows: RowGroup[] = [];
-    const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
-    for (const item of sorted) {
-      const lastRow = rows[rows.length - 1];
-      if (!lastRow || Math.abs(item.y - lastRow.y) > Y_TOLERANCE) {
-        rows.push({ y: item.y, items: [item], text: '' });
+  // ═══════════════════════════════════════════════════════════════════════
+  // NUMBER BLOCK EXTRACTION (Article + EAN)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private extractNumberBlock(
+    pzRow: Row,
+    allRows: Row[],
+    pzRowIdx: number,
+    bodyItems: TopDownItem[]
+  ): { articleNumber: string | null; ean: string | null; status: string } {
+    let articleNumber: string | null = null;
+    let ean: string | null = null;
+
+    // 1. Check LEFT_COL items on PZ row — concatenate split pdfjs items
+    const leftOnPzLine = colItems(pzRow, COL.LEFT_COL);
+
+    if (leftOnPzLine.length > 0) {
+      const allLeftText = concatItemsText(leftOnPzLine);
+      const eanOnPzLine = allLeftText.match(PAT.ean);
+
+      if (eanOnPzLine) {
+        // Compound article+EAN (Pattern B: "KACL.943 8034122710938")
+        ean = eanOnPzLine[1];
+        const beforeEan = allLeftText.substring(0, allLeftText.indexOf(ean)).trim();
+        if (beforeEan) {
+          articleNumber = beforeEan;
+        }
       } else {
-        lastRow.items.push(item);
+        // No EAN on PZ line — entire LEFT_COL text is article number
+        if (allLeftText.length >= 4 && /\d/.test(allLeftText)) {
+          articleNumber = allLeftText;
+        }
       }
     }
-    rows.forEach(r => r.text = smartJoinRowItems(r.items));
-    return rows;
-  }
 
-  private extractPricesFromText(text: string): number[] {
-    const prices: number[] = [];
-    const matches = [...text.matchAll(new RegExp(PRICE_VALUE_PATTERN.source, 'g'))];
-    for (const match of matches) {
-      const p = parsePrice(match[0]);
-      if (p !== null && p > 0) prices.push(p);
-    }
-    return prices;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // POSITION PARSING — STATEFUL TOP-TO-BOTTOM
-  // ═══════════════════════════════════════════════════════════════════
-
-  private parsePositionsStateful(pages: ExtractedPage[], runId: string) {
-    const enrichedLines: ParsedInvoiceLine[] = [];
-    const allWarnings: ParserWarning[] = [];
-    let posIndex = 1;
-    let currentBlock: PositionBlock | null = null;
-    const orders: string[] = [];
-
-    const commitBlock = () => {
-      if (!currentBlock || currentBlock.pzQty <= 0) return;
-
-      const prices = currentBlock.priceValues;
-      if (prices.length < 2) return;
-      const unitPrice = prices.length >= 2 ? prices[prices.length - 2] : prices[0];
-      const totalPrice = prices[prices.length - 1];
-
-      const orderCandidates = [...orders];
-      const orderStatus = deriveOrderStatus(orderCandidates);
-
-      enrichedLines.push({
-        positionIndex: posIndex++,
-        manufacturerArticleNo: currentBlock.articleNo || 'N/A',
-        ean: currentBlock.ean || 'N/A',
-        descriptionIT: currentBlock.descriptionParts.join(' ').trim(),
-        quantityDelivered: currentBlock.pzQty,
-        unitPrice,
-        totalPrice,
-        orderCandidates,
-        orderCandidatesText: orderCandidates.join('|'),
-        orderStatus,
-        rawPositionText: currentBlock.rawLines.join(' | '),
-      });
-      currentBlock = null;
-    };
-
-    for (const page of pages) {
-      const zone = this.detectZone(page);
-      const cols = this.detectColumnZones(page, zone.bodyStartY);
-      const bodyItems = page.items.filter(it => it.y >= zone.bodyStartY && it.y <= zone.bodyEndY);
-      const rows = this.groupItemsIntoRows(bodyItems);
-
-      for (const row of rows) {
-        if (shouldSkipLine(row.text)) continue;
-
-        if (isOrderReferenceLine(row.text)) {
-          commitBlock();
-          this.orderTracker.startNewBlock(extractOrderReferences(row.text));
-          orders.splice(0, orders.length, ...this.orderTracker.getCurrentOrders());
-          continue;
-        }
-
-        const zoned = classifyItemsByZone(row.items, cols);
-        const starter = isBlockStarter(zoned.zone1);
-
-        if (starter) {
-          if (currentBlock && currentBlock.pzQty > 0) commitBlock();
-          if (!currentBlock) {
-            currentBlock = { articleNo: starter.articleNo, ean: starter.ean, descriptionParts: [], pzQty: 0, priceValues: [], rawLines: [], rows: [] };
-          } else {
-            if (starter.articleNo && !currentBlock.articleNo) currentBlock.articleNo = starter.articleNo;
-            if (starter.ean && !currentBlock.ean) currentBlock.ean = starter.ean;
+    // Also check if the next row within ±Y_TOL has LEFT_COL items (split line)
+    if (!articleNumber && pzRowIdx + 1 < allRows.length) {
+      const nextRow = allRows[pzRowIdx + 1];
+      if (Math.abs(nextRow.y - pzRow.y) <= Y_TOL) {
+        const leftNext = colItems(nextRow, COL.LEFT_COL);
+        if (leftNext.length > 0) {
+          const text = concatItemsText(leftNext);
+          if (!PAT.ean.test(text) && text.length >= 4 && /\d/.test(text)) {
+            articleNumber = text;
           }
         }
-
-        if (!currentBlock) currentBlock = { articleNo: '', ean: '', descriptionParts: [], pzQty: 0, priceValues: [], rawLines: [], rows: [] };
-
-        // Track raw text
-        currentBlock.rawLines.push(row.text);
-
-        const normalizedText = normalizeEuropeanPrices(row.text);
-        const zone3Text = normalizeEuropeanPrices(smartJoinRowItems(zoned.zone3));
-
-        // Implicit Commit: 2nd PZ on same block
-        const pzMatch = zone3Text.match(/PZ\s+(\d+)/i) || normalizedText.match(/PZ\s+(\d+)/i);
-        if (pzMatch) {
-          const qty = parseIntSafe(pzMatch[1]);
-          if (currentBlock.pzQty > 0) {
-            commitBlock();
-            currentBlock = { articleNo: '', ean: '', descriptionParts: [], pzQty: qty, priceValues: [], rawLines: [row.text], rows: [] };
-          } else {
-            currentBlock.pzQty = qty;
-          }
-        }
-
-        // Anywhere EAN fallback
-        if (!currentBlock.ean) {
-          const eanFallback = normalizedText.match(/(803\d{10})/);
-          if (eanFallback) currentBlock.ean = eanFallback[1];
-        }
-
-        const extractedPrices = zoned.zone3.length > 0 ? this.extractPricesFromText(zone3Text) : this.extractPricesFromText(normalizedText);
-        currentBlock.priceValues.push(...extractedPrices);
-
-        let descText = zoned.zone2.length > 0 ? smartJoinRowItems(zoned.zone2) : normalizedText;
-        descText = descText.replace(/PZ\s+\d+/gi, '').replace(new RegExp(PRICE_VALUE_PATTERN.source, 'g'), '').trim();
-        if (descText) currentBlock.descriptionParts.push(descText);
       }
     }
-    commitBlock();
 
-    return { lines: enrichedLines, warnings: allWarnings };
+    // 2. Scan number block below PZ line (topY + 3 to topY + 25)
+    if (!ean) {
+      const pzY = pzRow.y;
+      const blockItems = bodyItems.filter(it =>
+        it.topY > pzY + 2 && it.topY < pzY + NUM_BLOCK_SCAN && inCol(it.x, COL.LEFT_COL)
+      );
+
+      if (blockItems.length > 0) {
+        // Concatenate split pdfjs items (e.g., "80341227" + "11317" → "8034122711317")
+        const blockText = concatItemsText(blockItems);
+        const eanMatch = blockText.match(PAT.ean);
+
+        if (eanMatch) {
+          ean = eanMatch[1];
+          if (!articleNumber) {
+            const beforeEan = blockText.substring(0, blockText.indexOf(ean)).trim();
+            if (beforeEan && beforeEan.length >= 4 && /\d/.test(beforeEan)) {
+              articleNumber = beforeEan;
+            }
+          }
+        } else if (!articleNumber) {
+          if (blockText.length >= 4 && /\d/.test(blockText)) {
+            articleNumber = blockText;
+          }
+        }
+      }
+    }
+
+    // Determine status
+    let status: string = 'red';
+    if (articleNumber && ean) status = 'green';
+    else if (articleNumber || ean) status = 'yellow';
+
+    return { articleNumber, ean, status };
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // HEADER HELPERS
-  // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // DESCRIPTION EXTRACTION
+  // ═══════════════════════════════════════════════════════════════════════
 
-  private parsePackagesCountFromItems(items: ExtractedTextItem[]): number {
-    const text = items.map(i => i.text).join(' ');
-    const match = text.match(/packages\s*(\d{1,4})/i);
-    return match ? parseIntSafe(match[1]) : 0;
+  private extractDescription(pzRow: Row, allRows: Row[], pzRowIdx: number): string {
+    // Get description text from DESCRIPTION column on PZ row
+    const descItems = colItems(pzRow, COL.DESCRIPTION);
+    const parts: string[] = [];
+
+    if (descItems.length > 0) {
+      parts.push(descItems.map(it => it.text).join(' '));
+    }
+
+    return parts.join(' ').trim();
   }
 
-  private parseInvoiceTotalFromItems(items: ExtractedTextItem[]): number {
-    const text = normalizeEuropeanPrices(items.map(i => i.text).join(' '));
-    const match = text.match(/(?:CONTRIBUTO\s+AMBIENTALE|AMOUNT\s+.*TO\s+PAY|TOTAL\s+EUR).*?(\d{1,3}(?:\.\d{3})*,\d{2})/i);
-    return match ? parsePrice(match[1]) || 0 : 0;
+  // ═══════════════════════════════════════════════════════════════════════
+  // FOOTER EXTRACTION (last page only)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private extractFooter(page: ExtractedPage): { packages: number; totalGoods: number; invoiceTotal: number; dueDate: string } {
+    const allItems = convertAndSort(page.items);
+
+    let packages = 0;
+    let totalGoods = 0;
+    let invoiceTotal = 0;
+    let dueDate = '';
+
+    // Check if this is actually the last page (no "Continues...")
+    const hasContinues = allItems.some(it => /^Continues/i.test(it.text));
+    if (hasContinues) {
+      return { packages: 0, totalGoods: 0, invoiceTotal: 0, dueDate: '' };
+    }
+
+    // Package count
+    for (const item of allItems) {
+      if (inRegion(item, FOOTER.packagesValue)) {
+        const m = item.text.match(/^(\d+)$/);
+        if (m) { packages = parseInt(m[1], 10); break; }
+      }
+    }
+
+    // Total goods value
+    for (const item of allItems) {
+      if (inRegion(item, FOOTER.totalGoodsValue)) {
+        const p = parseEurPrice(item.text);
+        if (p !== null) { totalGoods = p; break; }
+      }
+    }
+
+    // Invoice total (scan wider area)
+    for (const item of allItems) {
+      if (inRegion(item, FOOTER.invoiceTotalValue)) {
+        const p = parseEurPrice(item.text);
+        if (p !== null) { invoiceTotal = p; break; }
+      }
+    }
+
+    // Due date
+    for (const item of allItems) {
+      if (inRegion(item, FOOTER.dueDate)) {
+        const m = item.text.match(PAT.invoiceDate);
+        if (m) { dueDate = m[1]; break; }
+      }
+    }
+
+    return { packages, totalGoods, invoiceTotal, dueDate };
   }
 
-  // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
   // VALIDATION
-  // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
 
-  private runValidation(header: ParsedInvoiceHeader, lines: ParsedInvoiceLine[]): ValidationResult[] {
+  private runValidation(
+    header: ParsedInvoiceHeader,
+    lines: ParsedInvoiceLine[],
+    footer: { packages: number; totalGoods: number; invoiceTotal: number }
+  ): ValidationResult[] {
     const results: ValidationResult[] = [];
+
+    // Rule 1: Position sum vs invoice total
     const sumAmount = Math.round(lines.reduce((sum, l) => sum + l.totalPrice, 0) * 100) / 100;
-    if (header.invoiceTotal && Math.abs(sumAmount - header.invoiceTotal) >= 0.02) {
+    if (footer.invoiceTotal > 0) {
+      const diff = Math.abs(sumAmount - footer.invoiceTotal);
       results.push({
-        ruleId: 'amount_vs_total',
-        ruleName: 'Amount vs Total',
-        passed: false,
-        message: `Preissumme ${sumAmount.toFixed(2)} weicht von Rechnungstotal ${header.invoiceTotal.toFixed(2)} ab (Diff: ${Math.abs(sumAmount - header.invoiceTotal).toFixed(2)})`,
-        severity: 'error',
+        ruleId: 'POSITION_SUM_VS_TOTAL',
+        ruleName: 'Position Sum vs Invoice Total',
+        passed: diff <= 0.02,
+        message: diff <= 0.02
+          ? `Preissumme ${sumAmount.toFixed(2)} == Rechnungstotal ${footer.invoiceTotal.toFixed(2)}`
+          : `Preissumme ${sumAmount.toFixed(2)} != Rechnungstotal ${footer.invoiceTotal.toFixed(2)} (Diff: ${diff.toFixed(2)})`,
+        severity: diff <= 0.02 ? 'info' : 'error',
       });
     }
+
+    // Rule 2: Quantity sum vs package count
+    if (footer.packages > 0) {
+      const qtySum = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
+      results.push({
+        ruleId: 'QUANTITY_SUM_VS_PACKAGES',
+        ruleName: 'Quantity Sum vs Package Count',
+        passed: qtySum === footer.packages,
+        message: qtySum === footer.packages
+          ? `Mengensumme ${qtySum} == Paketzahl ${footer.packages}`
+          : `Mengensumme ${qtySum} != Paketzahl ${footer.packages}`,
+        severity: qtySum === footer.packages ? 'info' : 'error',
+      });
+    }
+
+    // Rule 3: Line item price check
+    let priceCheckFailed = false;
+    for (const line of lines) {
+      const expected = Math.round(line.quantityDelivered * line.unitPrice * 100) / 100;
+      const diff = Math.abs(expected - line.totalPrice);
+      if (diff > 0.02) {
+        priceCheckFailed = true;
+        results.push({
+          ruleId: 'LINE_ITEM_PRICE_CHECK',
+          ruleName: `Price Check Pos ${line.positionIndex}`,
+          passed: false,
+          message: `Pos ${line.positionIndex}: ${line.quantityDelivered} x ${line.unitPrice.toFixed(2)} = ${expected.toFixed(2)} != ${line.totalPrice.toFixed(2)}`,
+          severity: 'warning',
+        });
+      }
+    }
+    if (!priceCheckFailed) {
+      results.push({
+        ruleId: 'LINE_ITEM_PRICE_CHECK',
+        ruleName: 'Line Item Price Check',
+        passed: true,
+        message: 'All line items: qty x unitPrice == totalPrice',
+        severity: 'info',
+      });
+    }
+
     return results;
   }
 }
