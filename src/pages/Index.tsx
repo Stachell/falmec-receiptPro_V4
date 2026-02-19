@@ -127,7 +127,7 @@ const Index = () => {
         <div className="enterprise-card">
           <div className="p-4 border-b border-border">
             <h2 className="text-lg font-semibold text-foreground">
-              Dasboard Archiv
+              Archiv
             </h2>
           </div>
           <Table>

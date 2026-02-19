@@ -67,6 +67,18 @@ interface ZoneBounds {
   bodyEndY: number;
 }
 
+interface ColumnZones {
+  descriptionX: number;  // X-coord of "DESCRIPTION" (boundary Zone1↔Zone2)
+  qtyX: number;          // X-coord of "Q.TY" (boundary Zone2↔Zone3)
+  valid: boolean;        // false = fallback to current behavior
+}
+
+interface ZonedItems {
+  zone1: ExtractedTextItem[];  // Left/IDs:     x < descriptionX
+  zone2: ExtractedTextItem[];  // Middle/Text:   descriptionX <= x < qtyX
+  zone3: ExtractedTextItem[];  // Right/Values:  x >= qtyX
+}
+
 interface RowGroup {
   y: number;
   items: ExtractedTextItem[];
@@ -115,6 +127,23 @@ function smartJoinRowItems(items: ExtractedTextItem[]): string {
     }
   }
   return result;
+}
+
+// ─── Zone Classification ─────────────────────────────────────────────
+
+function classifyItemsByZone(items: ExtractedTextItem[], zones: ColumnZones): ZonedItems {
+  if (!zones.valid) {
+    return { zone1: items, zone2: [], zone3: [] };  // Fallback: everything in zone1 like before
+  }
+  const zone1: ExtractedTextItem[] = [];
+  const zone2: ExtractedTextItem[] = [];
+  const zone3: ExtractedTextItem[] = [];
+  for (const item of items) {
+    if (item.x < zones.descriptionX) zone1.push(item);
+    else if (item.x < zones.qtyX) zone2.push(item);
+    else zone3.push(item);
+  }
+  return { zone1, zone2, zone3 };
 }
 
 // ─── Block helpers ────────────────────────────────────────────────────
@@ -457,6 +486,20 @@ export class FatturaParserService_V2 implements InvoiceParser {
     return { bodyStartY, bodyEndY };
   }
 
+  private detectColumnZones(page: ExtractedPage, bodyStartY: number): ColumnZones {
+    // Header items = items on the bodyStartY line (±Y_TOLERANCE)
+    const headerItems = page.items.filter(
+      it => Math.abs(it.y - bodyStartY) <= Y_TOLERANCE
+    );
+    const descItem = headerItems.find(it => it.text.trim().toUpperCase().includes('DESCRIPTION'));
+    const qtyItem = headerItems.find(it => it.text.trim().toUpperCase().includes('Q.TY'));
+
+    if (!descItem || !qtyItem) {
+      return { descriptionX: 0, qtyX: Infinity, valid: false };
+    }
+    return { descriptionX: descItem.x, qtyX: qtyItem.x, valid: true };
+  }
+
   private getBodyItems(page: ExtractedPage, zone: ZoneBounds): ExtractedTextItem[] {
     return page.items.filter(
       it => it.y < zone.bodyStartY && it.y > zone.bodyEndY
@@ -508,10 +551,11 @@ export class FatturaParserService_V2 implements InvoiceParser {
 
     for (const page of pages) {
       const zone = this.detectZone(page);
+      const columnZones = this.detectColumnZones(page, zone.bodyStartY);
       const bodyItems = this.getBodyItems(page, zone);
 
       logService.debug(
-        `[v2] Page ${page.pageNumber}: zone Y=[${zone.bodyEndY.toFixed(0)}..${zone.bodyStartY.toFixed(0)}], ${bodyItems.length} body items`,
+        `[v2] Page ${page.pageNumber}: zone Y=[${zone.bodyEndY.toFixed(0)}..${zone.bodyStartY.toFixed(0)}], ${bodyItems.length} body items, columns valid=${columnZones.valid}${columnZones.valid ? ` descX=${columnZones.descriptionX.toFixed(0)} qtyX=${columnZones.qtyX.toFixed(0)}` : ''}`,
         { runId, step: 'Position' }
       );
 
@@ -527,6 +571,7 @@ export class FatturaParserService_V2 implements InvoiceParser {
         const rawText = row.items.map(it => it.text).join(' ');
         const smartText = smartJoinRowItems(row.items);
         const normalizedText = normalizeEuropeanPrices(smartText);
+        const zoned = classifyItemsByZone(row.items, columnZones);
 
         // 1. Skip header/footer lines
         if (shouldSkipLine(rawText)) continue;
@@ -547,8 +592,8 @@ export class FatturaParserService_V2 implements InvoiceParser {
           continue;
         }
 
-        // B) Block-Starter (article/EAN detected)?
-        const starter = isBlockStarter(row.items);
+        // B) Block-Starter (article/EAN detected)? — Zone 1 only (left/ID column)
+        const starter = isBlockStarter(zoned.zone1);
         if (starter) {
           if (currentBlock && currentBlock.pzQty > 0) {
             // Previous block is complete (has PZ) → commit, then start new
@@ -579,8 +624,10 @@ export class FatturaParserService_V2 implements InvoiceParser {
           currentBlock = createEmptyBlock();
         }
 
-        // D) PZ match on this line?
-        const pzMatch = normalizedText.match(/PZ\s+(\d+)/i);
+        // D) PZ match on this line? — prefer Zone 3 (right/values column)
+        const zone3Text = normalizeEuropeanPrices(smartJoinRowItems(zoned.zone3));
+        const pzMatch = zone3Text.match(/PZ\s+(\d+)/i)
+          || normalizedText.match(/PZ\s+(\d+)/i);  // Fallback: full line
         if (pzMatch) {
           const pzQty = parseIntSafe(pzMatch[1]);
           if (pzQty > 0 && currentBlock.pzQty > 0) {
@@ -593,23 +640,32 @@ export class FatturaParserService_V2 implements InvoiceParser {
           }
         }
 
-        // D2) EAN extraction on this line (if block has no EAN yet)
+        // D2) EAN extraction on this line (if block has no EAN yet) — prefer Zone 1
         if (!currentBlock.ean) {
-          const eanInline = normalizedText.match(/\b(803\d{10})\b/);
+          const zone1Text = zoned.zone1.map(it => it.text).join(' ');
+          const eanInline = zone1Text.match(/\b(803\d{10})\b/)
+            || normalizedText.match(/\b(803\d{10})\b/);  // Fallback: full line
           if (eanInline) {
             currentBlock.ean = eanInline[1];
           }
         }
 
-        // E) Extract prices from this line
-        const prices = this.extractPricesFromText(normalizedText);
+        // E) Extract prices from this line — prefer Zone 3 (right/values column)
+        const prices = zoned.zone3.length > 0
+          ? this.extractPricesFromText(zone3Text)
+          : this.extractPricesFromText(normalizedText);
         currentBlock.priceValues.push(...prices);
 
-        // F) Accumulate description text (strip PZ pattern and price patterns)
-        let descText = normalizedText
-          .replace(/PZ\s+\d+/gi, '')
-          .replace(new RegExp(PRICE_VALUE_PATTERN.source, 'g'), '')
-          .trim();
+        // F) Accumulate description text — prefer Zone 2 (middle/description column)
+        let descText: string;
+        if (zoned.zone2.length > 0) {
+          descText = smartJoinRowItems(zoned.zone2).trim();
+        } else {
+          descText = normalizedText
+            .replace(/PZ\s+\d+/gi, '')
+            .replace(new RegExp(PRICE_VALUE_PATTERN.source, 'g'), '')
+            .trim();
+        }
         if (descText) {
           currentBlock.descriptionParts.push(descText);
         }
