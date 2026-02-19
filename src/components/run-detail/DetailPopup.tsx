@@ -81,7 +81,7 @@ export function DetailPopup({ line, open, onOpenChange }: DetailPopupProps) {
             const display = rendered == null || rendered === '' ? '--' : rendered;
             return (
               <div key={label}>
-                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dt className="text-xs" style={{ color: '#E3E0CF' }}>{label}</dt>
                 <dd className={`text-sm font-medium ${mono ? 'font-mono' : ''}`}>
                   {display}
                 </dd>

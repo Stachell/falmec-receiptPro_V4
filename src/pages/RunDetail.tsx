@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, FileWarning, RefreshCw, Play, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
@@ -59,11 +59,16 @@ export default function RunDetail() {
   }, [decodedRunId, runs, setCurrentRun]);
 
   const [showEvent, setShowEvent] = useState(false);
+  const mountedAtRef = useRef(Date.now());
   useEffect(() => {
     if (!parsedInvoiceResult) return;
-    setShowEvent(true);
-    const timer = setTimeout(() => setShowEvent(false), 4000);
-    return () => clearTimeout(timer);
+    // KISS Race-Condition Fix: delay the initial toast by 2s so the real parse
+    // success state has time to settle before we show any error toast.
+    const age = Date.now() - mountedAtRef.current;
+    const delay = age < 2000 ? 2000 - age : 0;
+    const showTimer = setTimeout(() => setShowEvent(true), delay);
+    const hideTimer = setTimeout(() => setShowEvent(false), delay + 4000);
+    return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
   }, [parsedInvoiceResult]);
 
   // Auto-switch tab based on current workflow step
@@ -244,8 +249,8 @@ export default function RunDetail() {
         <KPIGrid className="mb-6">
           {/* Kachel 1: erkannte Positionen */}
           <KPITile
-            value={`${currentRun.stats.parsedInvoiceLines}/${parsedInvoiceResult?.header.totalQty ?? '?'}`}
-            label="erkannte Positionen"
+            value={`${currentRun.stats.parsedInvoiceLines} / ${parsedInvoiceResult?.header.pzCount ?? parsedInvoiceResult?.header.parsedPositionsCount ?? '?'}`}
+            label="Rechnungszeilen"
             subValue={
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
                 ? 'Fehler: Anzahl stimmt nicht'
@@ -328,7 +333,7 @@ export default function RunDetail() {
           <div className="flex items-center gap-4">
             <TabsList className="bg-card border border-border">
               <TabsTrigger value="invoice-preview">
-                Rechnung
+                RE-Positionen
                 {parsedInvoiceResult && (
                   <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded ${
                     parsedInvoiceResult.success
@@ -340,9 +345,9 @@ export default function RunDetail() {
                 )}
               </TabsTrigger>
               <TabsTrigger value="items">
-                Positionen
+                Artikelliste
                 <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded">
-                  {currentRun.stats.parsedInvoiceLines}
+                  {parsedInvoiceResult?.header.packagesCount ?? currentRun.invoice.packagesCount ?? currentRun.stats.parsedInvoiceLines}
                 </span>
               </TabsTrigger>
               <TabsTrigger value="issues">

@@ -72,12 +72,19 @@ function parserDevPlugin(): Plugin {
           return;
         }
 
-        // ── GET /api/dev/open-folder ─────────────────────────────
-        if (req.method === "GET" && req.url === "/api/dev/open-folder") {
+        // ── GET /api/dev/open-folder[?subfolder=<name>] ──────────
+        if (req.method === "GET" && req.url?.startsWith("/api/dev/open-folder")) {
+          const parsedUrl = new URL(req.url, "http://localhost");
+          const subfolder = parsedUrl.searchParams.get("subfolder");
+          // Build target: if subfolder provided, open archive sub-folder relative to project root
+          const ARCHIVE_BASE_DIR = path.resolve(__dirname, "archive");
+          const targetPath = subfolder
+            ? path.join(ARCHIVE_BASE_DIR, subfolder)
+            : MODULES_DIR;
           if (process.platform === "win32") {
-            exec(`explorer "${MODULES_DIR.replace(/\//g, "\\")}"`);
+            exec(`explorer "${targetPath.replace(/\//g, "\\")}"`);
             res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: true }));
+            res.end(JSON.stringify({ success: true, path: targetPath }));
           } else {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success: false, error: "Nur unter Windows verfuegbar" }));

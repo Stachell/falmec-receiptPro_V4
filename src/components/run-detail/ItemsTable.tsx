@@ -28,6 +28,7 @@ export function ItemsTable() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [detailLine, setDetailLine] = useState<InvoiceLine | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const filteredLines = invoiceLines.filter(line => {
     const term = searchTerm.toLowerCase();
@@ -198,7 +199,7 @@ export function ItemsTable() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => setDetailLine(line)}
+                    onClick={() => { setDetailLine(line); setDetailOpen(true); }}
                   >
                     <Info className="w-3.5 h-3.5" />
                   </Button>
@@ -216,10 +217,13 @@ export function ItemsTable() {
       )}
 
       {/* Detail Popup */}
+      {/* Crash-Fix: detailLine is NOT cleared on close — it stays until the next open.
+          This prevents shadcn Dialog's exit-animation frame from rendering with an empty object,
+          which caused runtime errors when FIELDS accessors ran on {} as InvoiceLine. */}
       <DetailPopup
         line={detailLine ?? ({} as InvoiceLine)}
-        open={detailLine !== null}
-        onOpenChange={(open) => { if (!open) setDetailLine(null); }}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
       />
     </div>
   );

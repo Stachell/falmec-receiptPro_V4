@@ -83,6 +83,8 @@ export interface InvoiceHeader {
   totalQty?: number;
   /** Number of parsed positions */
   parsedPositionsCount?: number;
+  /** Physical PZ entries counted in UM column (= parsedPositionsCount) */
+  pzCount?: number;
   /** Validation status: positions count vs totalQty */
   qtyValidationStatus?: 'ok' | 'mismatch' | 'unknown';
 }
@@ -120,6 +122,8 @@ export interface Run {
   invoice: InvoiceHeader;
   stats: RunStats;
   steps: WorkflowStep[];
+  /** Folder name of the archive package (set after successful export/archiving) */
+  archivePath?: string | null;
 }
 
 export interface InvoiceLine {

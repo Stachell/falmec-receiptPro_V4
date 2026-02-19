@@ -1,16 +1,15 @@
 import { Run } from '@/types';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { FileText, Calendar, Settings2, Clock, Package, Layers } from 'lucide-react';
-import { mockAuditLog } from '@/data/mockData';
+import { FileText, Calendar, Settings2, Package, Layers, FolderOpen } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
+import { Button } from '@/components/ui/button';
 
 interface OverviewPanelProps {
   run: Run;
 }
 
 export function OverviewPanel({ run }: OverviewPanelProps) {
-  const auditEntries = mockAuditLog.filter(entry => entry.runId === run.id);
   const { parsedInvoiceResult } = useRunStore();
 
   return (
@@ -119,41 +118,27 @@ export function OverviewPanel({ run }: OverviewPanelProps) {
         </dl>
       </div>
 
-      {/* Audit Log - Full Width */}
+      {/* LINK — Archiv-Ordner öffnen */}
       <div className="enterprise-card p-6 lg:col-span-3">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock className="w-5 h-5 text-muted-foreground" />
-          <h3 className="font-semibold text-foreground">Aktivitätsprotokoll</h3>
-        </div>
-        {auditEntries.length > 0 ? (
-          <div className="space-y-3">
-            {auditEntries.map((entry) => (
-              <div 
-                key={entry.id} 
-                className="flex items-start gap-4 p-3 bg-surface-sunken rounded-lg"
-              >
-                <div className="text-xs text-muted-foreground whitespace-nowrap">
-                  {format(new Date(entry.timestamp), 'HH:mm:ss', { locale: de })}
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-foreground">
-                    {entry.action}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {entry.details}
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {entry.userId === 'system' ? 'System' : 'Benutzer'}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Keine Aktivitäten protokolliert.
-          </p>
-        )}
+        <h3 className="font-semibold text-foreground mb-3">LINK</h3>
+        <Button
+          variant="outline"
+          style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+          onClick={() => {
+            const subfolder = run.archivePath;
+            const url = subfolder
+              ? `/api/dev/open-folder?subfolder=${encodeURIComponent(subfolder)}`
+              : '/api/dev/open-folder';
+            fetch(url);
+          }}
+        >
+          <FolderOpen className="w-4 h-4 mr-2" />
+          Öffnet die Original-Rechnung
+        </Button>
+        <p className="text-xs text-muted-foreground mt-2">
+          Öffnet den Archiv-Ordner im Windows Explorer
+          {run.archivePath ? ` (${run.archivePath})` : ''}
+        </p>
       </div>
     </div>
   );

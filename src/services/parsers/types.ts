@@ -60,6 +60,8 @@ export interface ParsedInvoiceHeader {
   totalQty: number;
   /** Number of parsed positions */
   parsedPositionsCount: number;
+  /** Physical PZ entries counted in UM column (= parsedPositionsCount) */
+  pzCount: number;
   /** Validation status: positions count vs totalQty */
   qtyValidationStatus: 'ok' | 'mismatch' | 'unknown';
 }

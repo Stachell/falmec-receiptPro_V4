@@ -237,6 +237,7 @@ export class FatturaParser_Master implements InvoiceParser {
       // 4. Populate header summary fields
       header.totalQty = lines.reduce((sum, l) => sum + l.quantityDelivered, 0);
       header.parsedPositionsCount = lines.length;
+      header.pzCount = lines.length;
       header.packagesCount = footer.packages;
       header.invoiceTotal = footer.invoiceTotal;
 

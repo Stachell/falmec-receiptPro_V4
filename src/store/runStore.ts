@@ -1069,6 +1069,18 @@ export const useRunStore = create<RunState>((set, get) => ({
     const lines = state.invoiceLines.filter(l => l.lineId.startsWith(runId));
     const result = await archiveService.writeArchivePackage(run, lines);
 
+    // Persist archive folder name in the run for later reference (e.g. PDF link button)
+    if (result.success && result.folderName) {
+      set((state) => ({
+        runs: state.runs.map(r =>
+          r.id === runId ? { ...r, archivePath: result.folderName } : r
+        ),
+        currentRun: state.currentRun?.id === runId
+          ? { ...state.currentRun, archivePath: result.folderName }
+          : state.currentRun,
+      }));
+    }
+
     return { success: result.success, folderName: result.folderName };
   },
 
