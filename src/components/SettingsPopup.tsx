@@ -58,6 +58,16 @@ export function SettingsPopup({ open, onOpenChange, activeParser }: SettingsPopu
     }
   }, [open]);
 
+  // Pre-select active parser in "Parser entfernen" dropdown when popup opens
+  useEffect(() => {
+    if (open && activeParser?.parserId && parsers.length > 0) {
+      const activeId = activeParser.parserId;
+      if (activeId !== 'auto' && parsers.some(p => p.moduleId === activeId)) {
+        setParserToDelete(activeId);
+      }
+    }
+  }, [open, parsers, activeParser?.parserId]);
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };

@@ -1,7 +1,7 @@
 /**
- * V3 Parser Self-Test — Standalone Node.js script
+ * FatturaParser_Master Self-Test — Standalone Node.js script
  *
- * Replicates the coordinate-based extraction logic from FatturaParserService_V3
+ * Replicates the coordinate-based extraction logic from FatturaParser_Master
  * using pdfjs-dist Node.js API (no Vite worker needed).
  *
  * Usage: npx tsx tests/v3-self-test.ts
@@ -18,7 +18,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// ─── CONSTANTS (same as V3 parser) ───────────────────────────────────
+// ─── CONSTANTS (same as FatturaParser_Master) ────────────────────────
 
 const PAGE_HEIGHT = 841;
 const Y_TOL = 5;
@@ -213,7 +213,7 @@ async function extractPages(pdfPath: string): Promise<TDItem[][]> {
   return allPages;
 }
 
-// ─── PARSING LOGIC (mirrors V3 parser) ──────────────────────────────
+// ─── PARSING LOGIC (mirrors FatturaParser_Master) ───────────────────
 
 function detectBodyBounds(items: TDItem[]): { bodyStartY: number; bodyEndY: number } {
   let bodyStartY = 289;

@@ -2,7 +2,7 @@
  * Invoice Parser Module Registry
  *
  * Modular setup: New parsers can simply be added to the LOCAL_PARSERS array.
- * V2 is registered BEFORE V1 for higher priority (per PROJ-14 Spec C.4).
+ * FatturaParser_Master is the sole production parser (Phase E cleanup, PROJ-14).
  */
 
 // Types
@@ -18,36 +18,25 @@ export type {
 } from './types';
 
 // Parser Imports
-export { FatturaParserService_V1 } from './modules/FatturaParserService_V1';
-export { FatturaParserService_V2 } from './modules/FatturaParserService_V2';
-export { FatturaParserService_V3 } from './modules/FatturaParserService_V3';
+export { FatturaParser_Master } from './modules/FatturaParser_Master';
 
-import { FatturaParserService_V1 } from './modules/FatturaParserService_V1';
-import { FatturaParserService_V2 } from './modules/FatturaParserService_V2';
-import { FatturaParserService_V3 } from './modules/FatturaParserService_V3';
+import { FatturaParser_Master } from './modules/FatturaParser_Master';
 import type { InvoiceParser } from './types';
 import { logService } from '../logService';
 
-// 1. Initialisierung der Singleton-Instanzen
-const fatturaParserV3 = new FatturaParserService_V3();
-const fatturaParserV2 = new FatturaParserService_V2();
-const fatturaParserV1 = new FatturaParserService_V1();
+// Singleton-Instanz
+const fatturaMaster = new FatturaParser_Master();
 
-// 2. MODULARE REGISTRIERUNG: Alle lokalen TypeScript-Parser hier eintragen
-//    V3 VOR V2 VOR V1 = hoechste Prioritaet zuerst (PROJ-14 Spec C.4)
+// MODULARE REGISTRIERUNG: Alle lokalen TypeScript-Parser hier eintragen
 const LOCAL_PARSERS: InvoiceParser[] = [
-  fatturaParserV3,
-  fatturaParserV2,
-  fatturaParserV1,
+  fatturaMaster,
 ];
 
 /** Registry for direct ID lookups */
 export const parserRegistry: Map<string, InvoiceParser> = new Map([
-  [fatturaParserV3.moduleId, fatturaParserV3],
-  [fatturaParserV2.moduleId, fatturaParserV2],
-  [fatturaParserV1.moduleId, fatturaParserV1],
-  ['typescript', fatturaParserV3],
-  ['auto', fatturaParserV3],
+  [fatturaMaster.moduleId, fatturaMaster],
+  ['typescript', fatturaMaster],
+  ['auto', fatturaMaster],
 ]);
 
 export function getParser(moduleId: string): InvoiceParser | undefined {
@@ -58,12 +47,12 @@ export function getAllParsers(): InvoiceParser[] {
   return [...LOCAL_PARSERS];
 }
 
-/** * THE ROUTER: Findet den passenden Parser modular und transparent.
+/**
+ * THE ROUTER: Findet den passenden Parser modular und transparent.
  */
 export async function findParserForFile(pdfFile: File): Promise<InvoiceParser> {
-  logService.info(`[Router] Suche passenden lokalen Parser für: ${pdfFile.name}`);
+  logService.info(`[Router] Suche passenden lokalen Parser fuer: ${pdfFile.name}`);
 
-  // Wir iterieren durch alle angemeldeten lokalen Parser
   for (const parser of LOCAL_PARSERS) {
     if (parser.canHandle) {
       const canHandle = await parser.canHandle(pdfFile);
@@ -72,13 +61,12 @@ export async function findParserForFile(pdfFile: File): Promise<InvoiceParser> {
         return parser;
       }
     } else {
-      // Wenn der Parser keine canHandle-Prüfung hat, nimmt er die Datei standardmäßig
-      logService.info(`[Router] Zuschlag: Lokaler Parser '${parser.moduleName}' übernimmt (Standard).`);
+      logService.info(`[Router] Zuschlag: Lokaler Parser '${parser.moduleName}' uebernimmt (Standard).`);
       return parser;
     }
   }
 
   // ABSOLUTER NOTFALL-FALLBACK
-  logService.error('[Router] Keine spezifische Zuordnung gefunden! Erzwinge V2-Parser als Notlösung.');
-  return fatturaParserV2;
+  logService.error('[Router] Keine spezifische Zuordnung gefunden! Erzwinge Master-Parser als Notloesung.');
+  return fatturaMaster;
 }

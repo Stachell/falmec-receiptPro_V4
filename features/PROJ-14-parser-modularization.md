@@ -1240,6 +1240,52 @@ Der "Parser importieren"-Button oeffnet den File-Picker und fuehrt Client-seitig
 
 ---
 
+### Phase E: Cleanup, canHandle & UI-Stabilisierung — ERLEDIGT (2026-02-19)
+
+**Ziel:** V3 wird zum alleinigen Master-Parser. V1/V2 restlos entfernt. UI-Bugs gefixt.
+
+**1. Umbenennung V3 → FatturaParser_Master:**
+- `FatturaParserService_V3.ts` → `FatturaParser_Master.ts` (Datei)
+- Klasse: `FatturaParserService_V3` → `FatturaParser_Master`
+- moduleId: `FatturaParser_Master`, moduleName (Anzeige): `fatturaParser_master`, version: `3.1.0`
+- FatturaParser_Master ist der technologische Grundstein fuer alle zukuenftigen Parser-Module in diesem Projekt, hervorgegangen aus der erfolgreichen V3-Entwicklung (Coordinate-Based Parsing).
+
+**2. canHandle-Tuersteherdurch implementiert:**
+- `FatturaParser_Master.canHandle(pdfFile)` prueft `pages[0].fullText` (case-insensitive)
+- Match-Kriterien: 'FALMEC SPA', 'WWW.FALMEC.COM' oder '02344900267'
+- Konform mit Interface `InvoiceParser.canHandle?(pdfFile: File): Promise<boolean>`
+- Bei Fehler → `false` (Router ueberspringt graceful)
+
+**3. V1/V2 Loeschung:**
+- `FatturaParserService_V1.ts` geloescht
+- `FatturaParserService_V2.ts` geloescht
+- `index.ts` bereinigt: nur FatturaParser_Master in LOCAL_PARSERS + parserRegistry
+- Fallback in `findParserForFile()` von V2 auf Master geaendert
+- `fatturaPatterns.ts` und `ExtendedOrderRecognition.ts` bewusst beibehalten (potenzielle Wiederverwendung)
+
+**4. UI Footer Fix (AppFooter.tsx):**
+- `parserReady` von always-true-after-init auf berechneten Wert umgestellt
+- Bedingung: `registryModules.length > 0 && getParser(selectedParserId) !== undefined`
+- Reagiert dynamisch auf Parser-Dropdown-Aenderungen
+
+**5. SettingsPopup Default (SettingsPopup.tsx):**
+- `parserToDelete` wird beim Oeffnen auf den aktiven Parser vorbelegt
+- Nur wenn `activeParser.parserId` nicht 'auto' und in der Parserliste vorhanden
+- Keine destruktiven Side-Effects — Loeschung weiterhin nur ueber Confirm-Dialog
+
+**Geaenderte Dateien:**
+- `src/services/parsers/modules/FatturaParser_Master.ts` — Umbenannt + canHandle() hinzugefuegt
+- `src/services/parsers/index.ts` — V1/V2 entfernt, nur FatturaParser_Master
+- `src/components/AppFooter.tsx` — parserReady-Logik korrigiert
+- `src/components/SettingsPopup.tsx` — Default-Selektion beim Oeffnen
+- `tests/v3-self-test.ts` — Kommentare aktualisiert
+
+**Geloeschte Dateien:**
+- `src/services/parsers/modules/FatturaParserService_V1.ts`
+- `src/services/parsers/modules/FatturaParserService_V2.ts`
+
+---
+
 ### Noch offen (fuer spaetere Phasen):
-- Phase E: Logging & Issue-Center Integration
+- Phase E (Logging): Home-Log Events + Issue-Center Integration
 - Phase F: Tests & QA

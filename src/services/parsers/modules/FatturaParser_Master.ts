@@ -1,5 +1,8 @@
 /**
- * Fattura PDF Parser Service V3 — Coordinate-Based Parsing
+ * FatturaParser_Master — Coordinate-Based Invoice Parser
+ *
+ * Evolved from V3 (PROJ-14 Phase E). This is the sole production parser and the
+ * technological foundation for all future parser modules in this project.
  *
  * Deterministic extraction using vendor profile column bands and PZ-anchor detection.
  * Single top-down pass per page ensures correct order block → line item assignment.
@@ -179,11 +182,30 @@ function deriveOrderStatus(candidates: string[]): OrderStatus {
 
 // ─── PARSER CLASS ────────────────────────────────────────────────────────
 
-export class FatturaParserService_V3 implements InvoiceParser {
-  public readonly moduleId = 'FatturaParserService_V3';
-  public readonly moduleName = 'Fattura Falmec V3';
-  public readonly version = '3.0.0';
+export class FatturaParser_Master implements InvoiceParser {
+  public readonly moduleId = 'FatturaParser_Master';
+  public readonly moduleName = 'fatturaParser_master';
+  public readonly version = '3.1.0';
   private orderTracker = new OrderBlockTracker();
+
+  // ── canHandle: Falmec-Türsteher ──────────────────────────────────────
+
+  async canHandle(pdfFile: File): Promise<boolean> {
+    try {
+      const pages = await extractTextFromPDF(pdfFile);
+      if (pages.length === 0) return false;
+      const text = pages[0].fullText.toUpperCase();
+      return (
+        text.includes('FALMEC SPA') ||
+        text.includes('WWW.FALMEC.COM') ||
+        text.includes('02344900267')
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  // ── parseInvoice ─────────────────────────────────────────────────────
 
   async parseInvoice(pdfFile: File, runId?: string): Promise<ParsedInvoiceResult> {
     const activeRunId = runId || `fallback_${Date.now()}`;

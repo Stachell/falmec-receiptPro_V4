@@ -14,6 +14,7 @@ import {
 import { logService } from '@/services/logService';
 import { fileSystemService } from '@/services/fileSystemService';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
+import { getParser } from '@/services/parsers';
 import { SettingsPopup } from '@/components/SettingsPopup';
 
 const DEFAULT_DATA_PATH = 'nicht gewaehlt';
@@ -54,9 +55,15 @@ export function AppFooter() {
     parserRegistryService.initialize().then((registry) => {
       setSelectedParserId(registry.selectedParserId);
       setRegistryModules(registry.modules);
-      setParserReady(true);
     });
   }, []);
+
+  // Compute parserReady: true only when registry has modules AND selected parser is valid
+  useEffect(() => {
+    const hasModules = registryModules.length > 0;
+    const resolvedParser = getParser(selectedParserId);
+    setParserReady(hasModules && resolvedParser !== undefined);
+  }, [registryModules, selectedParserId]);
 
   const handleDataPathChange = async () => {
     // Mark as selecting
