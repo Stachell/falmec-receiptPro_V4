@@ -47,7 +47,7 @@ const FOOTER_REGION = {
 const PAT = {
   invoiceNumber: /(\d{2}\.\d{3})/,
   invoiceDate:   /(\d{2}\/\d{2}\/\d{4})/,
-  ean:           /\b(803\d{10})\b/,
+  ean:           /(803\d{10})/,
   eurPrice:      /([\d.]+,\d{2})/,
   // Non-anchored patterns for matching anywhere in row text
   vsOrder:       /Vs\.\s+ORDINE/i,
@@ -256,6 +256,23 @@ function findValueInBand(rows: Row[], pzIdx: number, col: { xMin: number; xMax: 
   return null;
 }
 
+/**
+ * Find the Y-coordinate of the next logical boundary below the current PZ row.
+ * A boundary is either the next PZ line item or the next order block header.
+ */
+function findNextBoundaryY(rows: Row[], pzIdx: number): number | null {
+  const pzY = rows[pzIdx].y;
+  for (let i = pzIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.y <= pzY) continue;
+    const text = rowText(row);
+    const pzItems = colItems(row, COL.UM);
+    if (pzItems.some(it => it.text.trim().toUpperCase() === 'PZ')) return row.y;
+    if (PAT.vsOrder.test(text) || PAT.nsOrder.test(text)) return row.y;
+  }
+  return null;
+}
+
 function extractNumberBlock(pzRow: Row, allRows: Row[], pzIdx: number, bodyItems: TDItem[]): { articleNumber: string | null; ean: string | null } {
   let articleNumber: string | null = null;
   let ean: string | null = null;
@@ -291,11 +308,13 @@ function extractNumberBlock(pzRow: Row, allRows: Row[], pzIdx: number, bodyItems
     }
   }
 
-  // 2. Scan number block below PZ line
+  // 2. Scan number block below PZ line (dynamic boundary)
   if (!ean) {
     const pzY = pzRow.y;
+    const nextBoundary = findNextBoundaryY(allRows, pzIdx);
+    const scanLimit = nextBoundary !== null ? nextBoundary - 2 : pzY + 80;
     const blockItems = bodyItems.filter(it =>
-      it.topY > pzY + 2 && it.topY < pzY + NUM_BLOCK_SCAN && inCol(it.x, COL.LEFT_COL)
+      it.topY > pzY + 2 && it.topY < scanLimit && inCol(it.x, COL.LEFT_COL)
     );
 
     if (blockItems.length > 0) {

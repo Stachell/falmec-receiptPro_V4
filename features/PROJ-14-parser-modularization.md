@@ -1,5 +1,24 @@
 # PROJ-14: Modularisierung PDF-Parser & UI-Bereinigung
 
+## 0. Abschluss-Fix: Dynamic EAN Scan (2026-02-19)
+
+**Problem:** V3 Parser verpasste 2 von 45 EANs.
+- **Ursache 1:** Die Bounding-Box fuer den Nummernblock-Scan war starr auf `NUM_BLOCK_SCAN = 25pt` limitiert. Bei Artikeln mit mehrzeiligen Beschreibungen (z.B. KCVJN.00#3) rutschte die EAN-Zeile aus diesem Fenster heraus.
+- **Ursache 2:** `PAT.ean = /\b(803\d{10})\b/` scheiterte an Word-Boundaries, wenn `concatItemsText` Buchstaben direkt an die EAN-Ziffern klebte.
+
+**Loesung:**
+1. **Regex**: `/\b(803\d{10})\b/` → `/(803\d{10})/` — Word-Boundaries entfernt, da LEFT_COL-Spaltenfilter + 13-Stellen-Pattern + "803"-Prefix ausreichend eindeutig sind.
+2. **Neue Methode `findNextBoundaryY`**: Sucht dynamisch die Y-Koordinate des naechsten logischen Stopps (naechste PZ-Zeile oder Order-Block-Header) unterhalb der aktuellen Position.
+3. **Dynamischer Scan-Bereich**: Statt `pzY + NUM_BLOCK_SCAN` wird jetzt `nextBoundaryY - 2` als Untergrenze verwendet (Fallback: `pzY + 80` fuer das letzte Item auf der Seite).
+
+**Geaenderte Dateien:**
+- `src/services/parsers/modules/FatturaParserService_V3.ts` (Regex, neue Methode, Scan-Logik)
+- `tests/v3-self-test.ts` (gespiegelte Aenderungen)
+
+**Validierung:** Self-Test PASSED — 45/45 Positionen, 295/295 Menge, 104.209,50 Preissumme, 8/8 Spot-Checks.
+
+---
+
 ## 1. Zusammenfassung
 
 Umstellung der Parser-Architektur auf ein modulares, laufzeitdynamisches System mit austauschbaren Parser-Regeldateien. Parallel dazu: Auslagerung globaler Einstellungen aus dem Slider in ein eigenes Settings-Popup, Einfuehrung eines Parser-Dropdowns, Importfunktion fuer externe Parser-Dateien, sowie systemweite Umlaut-Korrektur auf UI-Ebene.

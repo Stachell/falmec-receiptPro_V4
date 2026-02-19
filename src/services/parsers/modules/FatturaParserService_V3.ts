@@ -65,7 +65,7 @@ const FOOTER = {
 const PAT = {
   invoiceNumber: /(\d{2}\.\d{3})/,
   invoiceDate:   /(\d{2}\/\d{2}\/\d{4})/,
-  ean:           /\b(803\d{10})\b/,
+  ean:           /(803\d{10})/,
   eurPrice:      /([\d.]+,\d{2})/,
   quantity:       /^(\d+)$/,
   vsOrder:       /Vs\.\s+ORDINE/i,
@@ -501,6 +501,30 @@ export class FatturaParserService_V3 implements InvoiceParser {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // DYNAMIC BOUNDARY — find next PZ or order block below current row
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Finds the Y-coordinate of the next logical boundary below the current PZ row.
+   * A boundary is either the next PZ line item or the next order block header.
+   * Returns null if this is the last item on the page.
+   */
+  private findNextBoundaryY(rows: Row[], pzRowIdx: number): number | null {
+    const pzY = rows[pzRowIdx].y;
+    for (let i = pzRowIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.y <= pzY) continue;
+      const text = rowText(row);
+      // Next PZ line = next line item
+      const pzItems = colItems(row, COL.UM);
+      if (pzItems.some(it => it.text.trim().toUpperCase() === 'PZ')) return row.y;
+      // Order block header = next block
+      if (PAT.vsOrder.test(text) || PAT.nsOrder.test(text)) return row.y;
+    }
+    return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // NUMBER BLOCK EXTRACTION (Article + EAN)
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -549,11 +573,13 @@ export class FatturaParserService_V3 implements InvoiceParser {
       }
     }
 
-    // 2. Scan number block below PZ line (topY + 3 to topY + 25)
+    // 2. Scan number block below PZ line (dynamic boundary)
     if (!ean) {
       const pzY = pzRow.y;
+      const nextBoundary = this.findNextBoundaryY(allRows, pzRowIdx);
+      const scanLimit = nextBoundary !== null ? nextBoundary - 2 : pzY + 80;
       const blockItems = bodyItems.filter(it =>
-        it.topY > pzY + 2 && it.topY < pzY + NUM_BLOCK_SCAN && inCol(it.x, COL.LEFT_COL)
+        it.topY > pzY + 2 && it.topY < scanLimit && inCol(it.x, COL.LEFT_COL)
       );
 
       if (blockItems.length > 0) {
