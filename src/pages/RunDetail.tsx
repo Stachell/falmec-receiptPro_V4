@@ -42,7 +42,7 @@ export default function RunDetail() {
     parserWarnings,
     advanceToNextStep,
     createNewRunWithParsing,
-    executeArticleMatching,
+    executeMatcherCrossMatch,
     isProcessing,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
@@ -312,7 +312,7 @@ export default function RunDetail() {
                   advanceToNextStep(currentRun.id);
                 } else if (nextStep.stepNo === 2) {
                   // Re-trigger article matching
-                  executeArticleMatching(mockArticleMaster);
+                  executeMatcherCrossMatch(mockArticleMaster);
                 } else {
                   advanceToNextStep(currentRun.id);
                 }

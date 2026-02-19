@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Filter, Info } from 'lucide-react';
+import { Search, Filter, Info, Barcode, Type } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,12 @@ import { StatusCheckbox } from './StatusCheckbox';
 import { PriceCell } from './PriceCell';
 import { DetailPopup } from './DetailPopup';
 import { InvoiceLine } from '@/types';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export function ItemsTable() {
   const { invoiceLines } = useRunStore();
@@ -135,9 +141,19 @@ export function ItemsTable() {
                   />
                 </TableCell>
 
-                {/* #3: Artikel-# (DE) */}
+                {/* #3: Artikel-# (DE) + match-type icon */}
                 <TableCell className="font-mono text-xs truncate">
-                  {line.falmecArticleNo ?? <span className="text-muted-foreground">--</span>}
+                  <div className="flex items-center gap-1">
+                    {line.matchStatus === 'ean-only' && (
+                      <Barcode className="w-3 h-3 text-orange-400 flex-shrink-0" title="EAN-Match" />
+                    )}
+                    {(line.matchStatus === 'code-it-only' || line.matchStatus === 'full-match') && (
+                      <Type className="w-3 h-3 text-green-500 flex-shrink-0" title="ArtNo-Match" />
+                    )}
+                    <span className="truncate">
+                      {line.falmecArticleNo ?? <span className="text-muted-foreground">--</span>}
+                    </span>
+                  </div>
                 </TableCell>
 
                 {/* #4: Artikel-# (IT) */}
@@ -183,14 +199,45 @@ export function ItemsTable() {
                   )}
                 </TableCell>
 
-                {/* #10: Serial-# */}
+                {/* #10: Serial-# with S/N text + status square */}
                 <TableCell className="text-xs">
-                  {line.serialNumber
-                    ? <span className="break-all">{line.serialNumber}</span>
-                    : line.serialRequired
-                      ? <span className="text-muted-foreground">ja</span>
-                      : <span className="text-muted-foreground">nein</span>
-                  }
+                  <div className="flex items-center gap-1">
+                    {/* S/N Text */}
+                    {!line.serialRequired ? (
+                      <span className="font-thin italic text-muted-foreground">----------</span>
+                    ) : line.serialNumber ? (
+                      <span className="font-mono break-all">{line.serialNumber}</span>
+                    ) : null}
+                    {/* S/N Status Square */}
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="inline-block w-3 h-3 rounded-sm flex-shrink-0 border"
+                            style={{
+                              backgroundColor: !line.serialRequired
+                                ? '#000000'
+                                : line.serialNumber
+                                  ? '#22C55E'
+                                  : '#E5E7EB',
+                              borderColor: !line.serialRequired
+                                ? '#000000'
+                                : line.serialNumber
+                                  ? '#16A34A'
+                                  : '#9CA3AF',
+                            }}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {!line.serialRequired
+                            ? 'Keine S/N-Pflicht'
+                            : line.serialNumber
+                              ? `${line.serialNumber} (${line.serialSource})`
+                              : 'S/N ausstehend'}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 </TableCell>
 
                 {/* #12: Details */}

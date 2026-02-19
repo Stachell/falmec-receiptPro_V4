@@ -34,6 +34,9 @@ import { getParsingTimeoutMs } from '@/services/parsers/config';
 import type { ParserWarning } from '@/services/parsers/types';
 import { matchAllArticles } from '@/services/matching/ArticleMatcher';
 import { matchAllOrders } from '@/services/matching/OrderMatcher';
+import { getMatcher } from '@/services/matchers';
+import { matcherRegistryService } from '@/services/matcherRegistryService';
+import type { SerialDocument } from '@/services/matchers/types';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -222,6 +225,9 @@ interface RunState {
   parsedPositions: ParsedInvoiceLineExtended[];
   parserWarnings: InvoiceParserWarning[];
 
+  // Serial document (from Step 3, PROJ-16)
+  serialDocument: SerialDocument | null;
+
   // Global Config
   globalConfig: RunConfig;
 
@@ -263,9 +269,13 @@ interface RunState {
   // Run update with parsed data
   updateRunWithParsedData: (runId: string, result: ParsedInvoiceResult) => void;
 
-  // PROJ-11 Phase B: Article matching (Step 2)
+  // PROJ-11 Phase B: Article matching (Step 2) — legacy, kept for backwards compat
   executeArticleMatching: (articles: ArticleMaster[]) => void;
   setManualPrice: (lineId: string, price: number) => void;
+
+  // PROJ-16: Matcher-based actions (replace executeArticleMatching)
+  executeMatcherCrossMatch: (articles: ArticleMaster[]) => void;
+  executeMatcherSerialExtract: () => void;
 
   // PROJ-11 Phase C: Order matching (Step 4)
   executeOrderMatching: (openPositions: OpenWEPosition[]) => void;
@@ -286,6 +296,9 @@ export const useRunStore = create<RunState>((set, get) => ({
   parsedInvoiceResult: loadParsedInvoice(),
   parsedPositions: [],
   parserWarnings: [],
+
+  // Serial document (PROJ-16)
+  serialDocument: null,
 
   // Global Config
   globalConfig: {
@@ -1017,14 +1030,13 @@ export const useRunStore = create<RunState>((set, get) => ({
       // Set next step to 'running'
       get().updateStepStatus(runId, nextStep.stepNo, 'running');
 
-      // Auto-execute Step 2 (Article Matching) immediately after Step 1 completes
+      // Auto-execute Step 2 (Cross-Match via Matcher Module) after Step 1 completes
       if (nextStep.stepNo === 2) {
-        // Use mockArticleMaster until a real XML/XLSX parser for the uploaded articleList is wired up
         setTimeout(() => {
           const currentState = get();
           if (currentState.currentRun?.id === runId) {
-            logService.info('Auto-Start: Artikel-Matching (Step 2)', { runId, step: 'Artikel extrahieren' });
-            currentState.executeArticleMatching(mockArticleMaster);
+            logService.info('Auto-Start: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
+            currentState.executeMatcherCrossMatch(mockArticleMaster);
             // Auto-advance to Step 3 after matching completes
             setTimeout(() => {
               const afterMatch = get();
@@ -1033,6 +1045,27 @@ export const useRunStore = create<RunState>((set, get) => ({
               if (step2 && (step2.status === 'ok' || step2.status === 'soft-fail')) {
                 logService.info('Auto-Advance: Step 2 → Step 3', { runId, step: 'System' });
                 afterMatch.advanceToNextStep(runId);
+              }
+            }, 100);
+          }
+        }, 100);
+      }
+
+      // Auto-execute Step 3 (Serial Extraction via Matcher Module) after Step 2 completes
+      if (nextStep.stepNo === 3) {
+        setTimeout(() => {
+          const currentState = get();
+          if (currentState.currentRun?.id === runId) {
+            logService.info('Auto-Start: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+            currentState.executeMatcherSerialExtract();
+            // Auto-advance to Step 4 after serial extraction completes
+            setTimeout(() => {
+              const afterSerial = get();
+              const updatedRun = afterSerial.runs.find(r => r.id === runId);
+              const step3 = updatedRun?.steps.find(s => s.stepNo === 3);
+              if (step3 && (step3.status === 'ok' || step3.status === 'soft-fail')) {
+                logService.info('Auto-Advance: Step 3 → Step 4', { runId, step: 'System' });
+                afterSerial.advanceToNextStep(runId);
               }
             }, 100);
           }
@@ -1394,5 +1427,185 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
         : state.currentRun,
     }));
+  },
+
+  // ─── PROJ-16: Matcher-based Cross-Match (Step 2) ──────────────────
+
+  executeMatcherCrossMatch: (articles) => {
+    const { invoiceLines, runs, currentRun, globalConfig } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] executeMatcherCrossMatch: no currentRun');
+      return;
+    }
+
+    const runId = currentRun.id;
+    const run = runs.find(r => r.id === runId);
+    if (!run) {
+      console.warn('[RunStore] executeMatcherCrossMatch: run not found for id', runId);
+      return;
+    }
+
+    try {
+      // Resolve active matcher module
+      const matcherId = matcherRegistryService.getSelectedMatcherId();
+      const matcher = getMatcher(matcherId);
+      if (!matcher) {
+        console.error('[RunStore] executeMatcherCrossMatch: matcher not found for id', matcherId);
+        get().updateStepStatus(runId, 2, 'failed');
+        return;
+      }
+
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      console.log(`[RunStore] executeMatcherCrossMatch: ${runLines.length} lines, ${articles.length} articles, matcher=${matcher.moduleId}`);
+
+      if (runLines.length === 0) {
+        console.warn('[RunStore] executeMatcherCrossMatch: no invoiceLines found for run.');
+        return;
+      }
+
+      const result = matcher.crossMatch(
+        runLines,
+        articles,
+        { tolerance: globalConfig.tolerance, caseSensitive: false },
+        runId,
+      );
+
+      // Determine step 2 status
+      const noMatchCount = result.stats.noMatchCount ?? 0;
+      const step2Status: StepStatus = noMatchCount > 0 ? 'soft-fail' : 'ok';
+
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
+
+        const newRun: Run = {
+          ...updatedRun,
+          stats: { ...updatedRun.stats, ...result.stats },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 2
+              ? { ...step, status: step2Status, issuesCount: result.issues.length }
+              : step
+          ),
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...result.lines, ...otherLines],
+          issues: [
+            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 2)),
+            ...result.issues,
+          ],
+        };
+      });
+
+      logService.info(
+        `Matcher Cross-Match abgeschlossen: ${result.stats.articleMatchedCount} von ${result.lines.length} gematcht (${matcher.moduleId})`,
+        { runId, step: 'Artikel extrahieren' },
+      );
+
+      if (result.warnings.length > 0) {
+        for (const w of result.warnings) {
+          logService.warn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Artikel extrahieren' });
+        }
+      }
+    } catch (error) {
+      console.error('[RunStore] executeMatcherCrossMatch error:', error);
+      logService.error(`Matcher Cross-Match fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Artikel extrahieren',
+      });
+      get().updateStepStatus(runId, 2, 'failed');
+    }
+  },
+
+  // ─── PROJ-16: Matcher-based Serial Extraction (Step 3) ────────────
+
+  executeMatcherSerialExtract: () => {
+    const { invoiceLines, currentRun, serialDocument } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] executeMatcherSerialExtract: no currentRun');
+      return;
+    }
+
+    const runId = currentRun.id;
+
+    try {
+      // Resolve active matcher module
+      const matcherId = matcherRegistryService.getSelectedMatcherId();
+      const matcher = getMatcher(matcherId);
+      if (!matcher) {
+        console.error('[RunStore] executeMatcherSerialExtract: matcher not found for id', matcherId);
+        get().updateStepStatus(runId, 3, 'failed');
+        return;
+      }
+
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      // If no serial document is loaded, mark step as ok (no S/N data to process)
+      if (!serialDocument) {
+        logService.info('Keine S/N-Datei geladen — Step 3 wird uebersprungen', { runId, step: 'Seriennummer anfuegen' });
+        get().updateStepStatus(runId, 3, 'ok');
+        return;
+      }
+
+      console.log(`[RunStore] executeMatcherSerialExtract: ${runLines.length} lines, ${serialDocument.rows.length} S/N rows, matcher=${matcher.moduleId}`);
+
+      // Extract invoice number from run
+      const invoiceNumber = currentRun.invoice.fattura;
+
+      const result = matcher.serialExtract(runLines, serialDocument, invoiceNumber);
+
+      // Update serialMatchedCount in stats
+      const step3Status: StepStatus = result.checksum.match ? 'ok' : 'soft-fail';
+
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
+
+        const newRun: Run = {
+          ...updatedRun,
+          stats: {
+            ...updatedRun.stats,
+            serialMatchedCount: result.stats.assignedCount,
+            serialRequiredCount: result.stats.requiredCount,
+          },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 3
+              ? { ...step, status: step3Status, issuesCount: result.warnings.length }
+              : step
+          ),
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...result.lines, ...otherLines],
+        };
+      });
+
+      logService.info(
+        `Matcher Serial-Extraktion abgeschlossen: ${result.stats.assignedCount}/${result.stats.requiredCount} S/N zugewiesen (${matcher.moduleId})`,
+        { runId, step: 'Seriennummer anfuegen' },
+      );
+
+      if (result.warnings.length > 0) {
+        for (const w of result.warnings) {
+          logService.warn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Seriennummer anfuegen' });
+        }
+      }
+    } catch (error) {
+      console.error('[RunStore] executeMatcherSerialExtract error:', error);
+      logService.error(`Matcher Serial-Extraktion fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Seriennummer anfuegen',
+      });
+      get().updateStepStatus(runId, 3, 'failed');
+    }
   },
 }));

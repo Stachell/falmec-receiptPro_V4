@@ -29,6 +29,8 @@ import { Upload, FolderOpen, Trash2, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAllParsers } from '@/services/parsers';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
+import { getMatcher } from '@/services/matchers';
+import type { MatcherRegistryModule } from '@/services/matcherRegistryService';
 
 interface SettingsPopupProps {
   open: boolean;
@@ -38,9 +40,14 @@ interface SettingsPopupProps {
     modules: ParserRegistryModule[];
     ready: boolean;
   };
+  activeMatcher?: {
+    matcherId: string;
+    modules: MatcherRegistryModule[];
+    ready: boolean;
+  };
 }
 
-export function SettingsPopup({ open, onOpenChange, activeParser }: SettingsPopupProps) {
+export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher }: SettingsPopupProps) {
   const { globalConfig, setGlobalConfig } = useRunStore();
   const [importSuccessOpen, setImportSuccessOpen] = useState(false);
   const [importedFileName, setImportedFileName] = useState('');
@@ -159,6 +166,15 @@ export function SettingsPopup({ open, onOpenChange, activeParser }: SettingsPopu
     ? 'Auto'
     : activeParser?.modules.find(m => m.moduleId === activeParser.parserId)?.moduleName
       || activeParser?.parserId || '–';
+
+  // Active matcher display name + schema
+  const activeMatcherDisplayName = activeMatcher?.matcherId === 'auto'
+    ? 'Auto'
+    : activeMatcher?.modules.find(m => m.moduleId === activeMatcher.matcherId)?.moduleName
+      || activeMatcher?.matcherId || '–';
+  const resolvedMatcher = activeMatcher?.matcherId
+    ? getMatcher(activeMatcher.matcherId)
+    : undefined;
 
   return (
     <>
@@ -301,6 +317,41 @@ export function SettingsPopup({ open, onOpenChange, activeParser }: SettingsPopu
                 <div className="flex items-center gap-1.5 text-sm">
                   <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
                   <span>{activeParserDisplayName}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Aktiver Matcher (read-only) */}
+            {activeMatcher?.ready && (
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm whitespace-nowrap">Aktiver Matcher</Label>
+                <div className="flex items-center gap-1.5 text-sm">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                  <span>{activeMatcherDisplayName}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Matcher Schema (read-only) */}
+            {resolvedMatcher && (
+              <div className="flex flex-col gap-2">
+                <Label className="text-sm font-semibold">Matcher Schema: {resolvedMatcher.schemaDefinition.name}</Label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {resolvedMatcher.schemaDefinition.fields.map((field) => (
+                    <div key={field.fieldId} className="flex items-start gap-2">
+                      <span className="text-xs font-medium min-w-[90px]">{field.label}:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {field.aliases.map((alias) => (
+                          <span
+                            key={alias}
+                            className="inline-block px-1.5 py-0.5 text-[10px] rounded bg-white/70 border border-border"
+                          >
+                            {alias}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

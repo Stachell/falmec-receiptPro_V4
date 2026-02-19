@@ -12,7 +12,8 @@ export type IssueType =
   | 'parser-error'
   | 'no-article-match'
   | 'price-missing'
-  | 'order-no-match';
+  | 'order-no-match'
+  | 'conflict';
 
 export type MatchStatus =
   | 'pending'

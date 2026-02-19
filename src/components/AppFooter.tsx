@@ -14,7 +14,9 @@ import {
 import { logService } from '@/services/logService';
 import { fileSystemService } from '@/services/fileSystemService';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
+import { matcherRegistryService, type MatcherRegistryModule } from '@/services/matcherRegistryService';
 import { getParser } from '@/services/parsers';
+import { getMatcher } from '@/services/matchers';
 import { SettingsPopup } from '@/components/SettingsPopup';
 
 const DEFAULT_DATA_PATH = 'nicht gewaehlt';
@@ -38,6 +40,9 @@ export function AppFooter() {
   const [selectedParserId, setSelectedParserId] = useState('auto');
   const [registryModules, setRegistryModules] = useState<ParserRegistryModule[]>([]);
   const [parserReady, setParserReady] = useState(false);
+  const [selectedMatcherId, setSelectedMatcherId] = useState('auto');
+  const [matcherModules, setMatcherModules] = useState<MatcherRegistryModule[]>([]);
+  const [matcherReady, setMatcherReady] = useState(false);
   const { globalConfig, setGlobalConfig } = useRunStore();
   const { wrap, isLocked } = useClickLock();
 
@@ -58,12 +63,27 @@ export function AppFooter() {
     });
   }, []);
 
+  // Initialize matcher registry (boot validation + auto-select)
+  useEffect(() => {
+    matcherRegistryService.initialize().then((registry) => {
+      setSelectedMatcherId(registry.selectedMatcherId);
+      setMatcherModules(registry.modules);
+    });
+  }, []);
+
   // Compute parserReady: true only when registry has modules AND selected parser is valid
   useEffect(() => {
     const hasModules = registryModules.length > 0;
     const resolvedParser = getParser(selectedParserId);
     setParserReady(hasModules && resolvedParser !== undefined);
   }, [registryModules, selectedParserId]);
+
+  // Compute matcherReady: true only when registry has modules AND selected matcher is valid
+  useEffect(() => {
+    const hasModules = matcherModules.length > 0;
+    const resolvedMatcher = getMatcher(selectedMatcherId);
+    setMatcherReady(hasModules && resolvedMatcher !== undefined);
+  }, [matcherModules, selectedMatcherId]);
 
   const handleDataPathChange = async () => {
     // Mark as selecting
@@ -102,6 +122,19 @@ export function AppFooter() {
     }
   };
 
+  const handleMatcherChange = (matcherId: string) => {
+    const prev = selectedMatcherId;
+    setSelectedMatcherId(matcherId);
+
+    matcherRegistryService.setSelectedMatcherId(matcherId);
+
+    if (prev !== matcherId) {
+      const prevName = prev === 'auto' ? 'Auto' : matcherModules.find(m => m.moduleId === prev)?.moduleName || prev;
+      const newName = matcherId === 'auto' ? 'Auto' : matcherModules.find(m => m.moduleId === matcherId)?.moduleName || matcherId;
+      logService.info(`Matcher gewechselt: ${prevName} → ${newName}`, { step: 'System' });
+    }
+  };
+
   const closeFooter = useCallback(() => {
     setIsOpen(false);
   }, []);
@@ -123,8 +156,9 @@ export function AppFooter() {
     };
   }, [isOpen, closeFooter]);
 
-  // Determine dropdown display: if only 1 parser, hide "Auto" option
+  // Determine dropdown display: if only 1 module, hide "Auto" option
   const showAutoOption = registryModules.length > 1;
+  const showMatcherAutoOption = matcherModules.length > 1;
 
   return (
     <>
@@ -224,6 +258,51 @@ export function AppFooter() {
             </Select>
           </div>
 
+          {/* [1b] Matcher-Dropdown (PROJ-16) */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="footer-matcher" className="text-xs text-sidebar-foreground whitespace-nowrap flex items-center gap-1">
+              Matcher
+              {matcherReady && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
+            </Label>
+            <Select
+              value={selectedMatcherId}
+              onValueChange={handleMatcherChange}
+            >
+              <SelectTrigger
+                id="footer-matcher"
+                className="h-7 w-56 text-xs border rounded-md transition-colors"
+                style={{
+                  backgroundColor: 'var(--sidebar)',
+                  borderColor: 'var(--input)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#c9c3b6';
+                  e.currentTarget.style.borderColor = '#666666';
+                  e.currentTarget.style.color = '#666666';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--sidebar)';
+                  e.currentTarget.style.borderColor = 'var(--input)';
+                  e.currentTarget.style.color = '';
+                }}
+              >
+                <SelectValue placeholder="Matcher waehlen..." />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                {showMatcherAutoOption && (
+                  <SelectItem value="auto">Auto</SelectItem>
+                )}
+                {matcherModules.map((matcher) => (
+                  <SelectItem key={matcher.moduleId} value={matcher.moduleId}>
+                    {matcher.moduleName} v{matcher.version}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* [2] Data Directory (bestehend) */}
           <div className="flex items-center gap-2">
             <Label htmlFor="footer-datapath" className="text-xs text-sidebar-foreground whitespace-nowrap">
@@ -295,6 +374,11 @@ export function AppFooter() {
           parserId: selectedParserId,
           modules: registryModules,
           ready: parserReady,
+        }}
+        activeMatcher={{
+          matcherId: selectedMatcherId,
+          modules: matcherModules,
+          ready: matcherReady,
         }}
       />
     </>
