@@ -12,7 +12,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRunStore } from '@/store/runStore';
-import { mockRuns } from '@/data/mockData';
+import { mockRuns, mockArticleMaster } from '@/data/mockData';
 import { ItemsTable } from '@/components/run-detail/ItemsTable';
 import { IssuesCenter } from '@/components/run-detail/IssuesCenter';
 import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
@@ -42,6 +42,7 @@ export default function RunDetail() {
     parserWarnings,
     advanceToNextStep,
     createNewRunWithParsing,
+    executeArticleMatching,
     isProcessing,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
@@ -130,19 +131,22 @@ export default function RunDetail() {
 
   const totalIssues = currentRun.steps.reduce((acc, step) => acc + step.issuesCount, 0);
 
-  // Determine next workflow step
+  // Determine next workflow step (includes failed steps for manual retry)
   const getNextStep = () => {
     if (!currentRun) return null;
 
-    // Find first step that is 'not-started' or 'running'
-    const nextStep = currentRun.steps.find(
-      step => step.status === 'not-started' || step.status === 'running'
-    );
+    // First: any failed step that needs manual retry
+    const failedStep = currentRun.steps.find(step => step.status === 'failed');
+    if (failedStep) return failedStep;
 
-    return nextStep || null;
+    // Then: first step still in progress or not started
+    return currentRun.steps.find(
+      step => step.status === 'not-started' || step.status === 'running'
+    ) || null;
   };
 
   const nextStep = getNextStep();
+  const hasFailedStep = currentRun.steps.some(step => step.status === 'failed');
   const allStepsComplete = currentRun.steps.every(
     step => step.status === 'ok' || step.status === 'soft-fail'
   );
@@ -301,6 +305,17 @@ export default function RunDetail() {
             onClick={wrap('next-step', () => {
               if (allStepsComplete) {
                 setActiveTab('export');
+              } else if (currentRun && hasFailedStep && nextStep) {
+                // Manual retry: reset failed step to running and re-execute
+                if (nextStep.stepNo === 1) {
+                  // Re-trigger parsing (user must fix the PDF and retry)
+                  advanceToNextStep(currentRun.id);
+                } else if (nextStep.stepNo === 2) {
+                  // Re-trigger article matching
+                  executeArticleMatching(mockArticleMaster);
+                } else {
+                  advanceToNextStep(currentRun.id);
+                }
               } else if (currentRun) {
                 advanceToNextStep(currentRun.id);
               }
@@ -313,7 +328,7 @@ export default function RunDetail() {
                 <Play style={{ width: '42px', height: '42px', color: '#666666' }} />
               )}
               <span className="text-base font-semibold mt-1" style={{ color: '#666666' }}>
-                {allStepsComplete ? 'Export' : 'Start'}
+                {allStepsComplete ? 'Export' : hasFailedStep ? 'Retry' : 'Start'}
               </span>
             </div>
             {!allStepsComplete && nextStep && (

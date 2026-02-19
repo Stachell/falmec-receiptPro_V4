@@ -122,9 +122,9 @@ export function ItemsTable() {
                   line.positionIndex % 2 === 1 ? 'bg-slate-50/50' : ''
                 } ${!line.activeFlag ? 'bg-status-soft-fail/5' : ''}`}
               >
-                {/* #1: Position */}
+                {/* #1: Position (positionIndex is already 1-based from the parser) */}
                 <TableCell className="font-mono text-xs text-muted-foreground text-center">
-                  {line.positionIndex + 1}
+                  {line.positionIndex}
                 </TableCell>
 
                 {/* #2: Checkbox (Match-Status) */}

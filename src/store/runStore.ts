@@ -16,7 +16,8 @@ import {
 import {
   mockRuns,
   mockIssues,
-  mockAuditLog
+  mockAuditLog,
+  mockArticleMaster,
 } from '@/data/mockData';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
@@ -1015,6 +1016,28 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (nextStep) {
       // Set next step to 'running'
       get().updateStepStatus(runId, nextStep.stepNo, 'running');
+
+      // Auto-execute Step 2 (Article Matching) immediately after Step 1 completes
+      if (nextStep.stepNo === 2) {
+        // Use mockArticleMaster until a real XML/XLSX parser for the uploaded articleList is wired up
+        setTimeout(() => {
+          const currentState = get();
+          if (currentState.currentRun?.id === runId) {
+            logService.info('Auto-Start: Artikel-Matching (Step 2)', { runId, step: 'Artikel extrahieren' });
+            currentState.executeArticleMatching(mockArticleMaster);
+            // Auto-advance to Step 3 after matching completes
+            setTimeout(() => {
+              const afterMatch = get();
+              const updatedRun = afterMatch.runs.find(r => r.id === runId);
+              const step2 = updatedRun?.steps.find(s => s.stepNo === 2);
+              if (step2 && (step2.status === 'ok' || step2.status === 'soft-fail')) {
+                logService.info('Auto-Advance: Step 2 → Step 3', { runId, step: 'System' });
+                afterMatch.advanceToNextStep(runId);
+              }
+            }, 100);
+          }
+        }, 100);
+      }
     } else {
       // All steps completed → mark run as finished and auto-archive
       get().updateRunStatus(runId, 'ok');
