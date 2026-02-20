@@ -349,6 +349,15 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
                             {alias}
                           </span>
                         ))}
+                        {/* PROJ-17: show validation regex if defined */}
+                        {field.validationPattern && (
+                          <span
+                            title={`Validierung: /${field.validationPattern}/`}
+                            className="inline-block px-1.5 py-0.5 text-[10px] rounded bg-amber-100 border border-amber-300 text-amber-700 font-mono"
+                          >
+                            /{field.validationPattern}/
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

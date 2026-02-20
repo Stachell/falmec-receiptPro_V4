@@ -37,6 +37,7 @@ export default function RunDetail() {
     setCurrentRun,
     activeTab,
     setActiveTab,
+    setIssuesStepFilter,
     parsedInvoiceResult,
     parsedPositions,
     parserWarnings,
@@ -264,19 +265,27 @@ export default function RunDetail() {
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch' ? 'warning' : 'default'
             }
           />
-          {/* Kachel 2: Artikel extrahieren */}
+          {/* Kachel 2: Artikel extrahieren — klickbar wenn Issues vorhanden */}
           <KPITile
             value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Artikel extrahieren"
             subValue={currentRun.stats.noMatchCount > 0 ? `${currentRun.stats.noMatchCount} ohne Match` : undefined}
             variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
+            onClick={currentRun.stats.noMatchCount > 0 ? () => {
+              setIssuesStepFilter('2');
+              setActiveTab('issues');
+            } : undefined}
           />
-          {/* Kachel 3: Serial parsen */}
+          {/* Kachel 3: Serial parsen — klickbar wenn S/N-Issues vorhanden */}
           <KPITile
             value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
             label="Serial parsen"
             subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
             variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
+            onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
+              setIssuesStepFilter('3');
+              setActiveTab('issues');
+            } : undefined}
           />
           {/* Kachel 4: Preise checken */}
           <KPITile

@@ -16,21 +16,34 @@ import type {
 
 /** Single field definition with alias mapping for ArticleMaster column matching */
 export interface SchemaFieldDef {
-  /** Internal field ID, e.g. 'artNo', 'ean', 'price' */
+  /** Internal field ID, e.g. 'artNoDE', 'artNoIT', 'ean', 'price' */
   fieldId: string;
-  /** UI-Label, e.g. "Artikelnummer" */
+  /** UI-Label, e.g. "Art-# (DE)" or "Art-# (IT)" */
   label: string;
-  /** Column name aliases for fuzzy header matching: ["Art.-Nr.", "Artikelnummer", ...] */
+  /** Column name aliases for fuzzy header matching */
   aliases: string[];
   /** Optional transform applied to raw cell value */
   transform?: (raw: string) => string;
   /** Whether this field is required for matching */
   required: boolean;
+  /**
+   * PROJ-17: Regex pattern string for UI display in Settings (e.g. "^1\\d{5}$").
+   * Not enforced at runtime — use `validate` for enforcement.
+   */
+  validationPattern?: string;
+  /**
+   * PROJ-17: Runtime validation function.
+   * Returns true if the cell value is structurally valid for this field.
+   */
+  validate?: (value: string) => boolean;
 }
 
 /** Schema definition for an ArticleMaster file */
 export interface SchemaDefinition {
-  /** The schema fields (6 mandatory: artNo, ean, price, serialRequired, storageLocation, supplierId) */
+  /**
+   * The schema fields.
+   * Mandatory: artNoDE, artNoIT, ean, price, serialRequired, storageLocation, supplierId
+   */
   fields: SchemaFieldDef[];
   /** Human-readable schema name, e.g. "Falmec Artikelstamm" */
   name: string;
@@ -102,6 +115,8 @@ export interface SerialExtractionResult {
   stats: { assignedCount: number; requiredCount: number; mismatchCount: number };
   /** Warnings (e.g. invoice ref not found, checksum mismatch) */
   warnings: MatcherWarning[];
+  /** Blocking/soft-fail issues for the Issues-Center (PROJ-17) */
+  issues: Issue[];
   /** Checksum: regexHits vs assignedSNs */
   checksum: { regexHits: number; assignedSNs: number; match: boolean };
 }

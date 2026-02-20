@@ -10,6 +10,8 @@ interface KPITileProps {
   subValue?: string;
   className?: string;
   variant?: 'default' | 'success' | 'warning' | 'error';
+  /** PROJ-17: KPI-Navigation to Issues-Center */
+  onClick?: () => void;
 }
 
 const variantStyles = {
@@ -19,17 +21,21 @@ const variantStyles = {
   error: 'border-l-4 border-l-status-failed border-t-0 border-r-0 border-b-0',
 };
 
-export function KPITile({ 
-  value, 
-  label, 
-  icon, 
-  trend, 
-  subValue, 
+export function KPITile({
+  value,
+  label,
+  icon,
+  trend,
+  subValue,
   className,
-  variant = 'default' 
+  variant = 'default',
+  onClick,
 }: KPITileProps) {
   return (
-    <div className={cn('kpi-tile', variantStyles[variant], className)}>
+    <div
+      className={cn('kpi-tile', variantStyles[variant], className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
+      onClick={onClick}
+    >
       <div className="flex items-center justify-between">
         <span className="kpi-tile-value">{value}</span>
         {icon && <span className="text-muted-foreground">{icon}</span>}

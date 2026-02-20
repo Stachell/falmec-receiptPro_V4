@@ -235,10 +235,13 @@ interface RunState {
   activeTab: string;
   isProcessing: boolean;
   parsingProgress: string;
+  /** PROJ-17: step filter preset from KPI-Tile click navigation (null = no preset) */
+  issuesStepFilter: string | null;
 
   // Actions
   setCurrentRun: (run: Run | null) => void;
   setActiveTab: (tab: string) => void;
+  setIssuesStepFilter: (filter: string | null) => void;
   setGlobalConfig: (config: Partial<RunConfig>) => void;
   addUploadedFile: (file: UploadedFile) => void;
   removeUploadedFile: (type: UploadedFile['type']) => void;
@@ -313,11 +316,14 @@ export const useRunStore = create<RunState>((set, get) => ({
   activeTab: 'overview',
   isProcessing: false,
   parsingProgress: '',
+  issuesStepFilter: null,
 
   // Actions
   setCurrentRun: (run) => set({ currentRun: run }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  setIssuesStepFilter: (filter) => set({ issuesStepFilter: filter }),
 
   setGlobalConfig: (config) => set((state) => ({
     globalConfig: { ...state.globalConfig, ...config }
@@ -1577,7 +1583,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           },
           steps: updatedRun.steps.map(step =>
             step.stepNo === 3
-              ? { ...step, status: step3Status, issuesCount: result.warnings.length }
+              ? { ...step, status: step3Status, issuesCount: result.issues.length }
               : step
           ),
         };
@@ -1586,6 +1592,11 @@ export const useRunStore = create<RunState>((set, get) => ({
           runs: state.runs.map(r => r.id === runId ? newRun : r),
           currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
           invoiceLines: [...result.lines, ...otherLines],
+          // PROJ-17: propagate Step-3 issues (inject runId, mirror pattern from executeMatcherCrossMatch)
+          issues: [
+            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 3)),
+            ...result.issues.map(issue => ({ ...issue, runId })),
+          ],
         };
       });
 

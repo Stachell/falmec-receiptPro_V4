@@ -13,7 +13,15 @@ export type IssueType =
   | 'no-article-match'
   | 'price-missing'
   | 'order-no-match'
-  | 'conflict';
+  | 'conflict'
+  // PROJ-17: Step 2 deep-logging subtypes
+  | 'match-artno-not-found'
+  | 'match-ean-not-found'
+  | 'match-conflict-id'
+  // PROJ-17: Step 3 deep-logging subtypes
+  | 'sn-invoice-ref-missing'
+  | 'sn-regex-failed'
+  | 'sn-insufficient-count';
 
 export type MatchStatus =
   | 'pending'
