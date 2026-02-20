@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Warehouse, Edit2, Save, X } from 'lucide-react';
+import { Warehouse, Edit2, Save, X, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { STORAGE_LOCATIONS, StorageLocation } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ export function WarehouseLocations() {
   const [editMode, setEditMode] = useState(false);
   const [globalWE, setGlobalWE] = useState<StorageLocation>('WE Lager;0;0;0');
   const [globalKDD, setGlobalKDD] = useState<StorageLocation>('WE KDD;0;0;0');
+  const [expandedDetails, setExpandedDetails] = useState(false);
 
   // Group items by storage location category
   const { weLagerItems, kddItems, otherItems } = useMemo(() => {
@@ -145,65 +146,88 @@ export function WarehouseLocations() {
           </Button>
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow className="data-table-header">
-              <TableHead>Artikelnummer</TableHead>
-              <TableHead>Beschreibung</TableHead>
-              <TableHead>Menge</TableHead>
-              <TableHead>Aktueller Lagerort</TableHead>
-              {editMode && <TableHead>Neuer Lagerort</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {invoiceLines.map((line) => (
-              <TableRow 
-                key={line.lineId} 
-                className={`hover:bg-muted/30 ${!line.storageLocation ? 'bg-status-failed/5' : ''}`}
-              >
-                <TableCell>
-                  <span className="font-mono text-sm">{line.manufacturerArticleNo}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="text-sm truncate max-w-[200px] block">
-                    {line.descriptionIT}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <span className="font-medium">{line.qty}</span>
-                </TableCell>
-                <TableCell>
-                  {line.storageLocation ? (
-                    <span className="text-sm">{line.storageLocation}</span>
-                  ) : (
-                    <span className="text-sm text-status-failed font-medium">
-                      Nicht zugewiesen
-                    </span>
-                  )}
-                </TableCell>
-                {editMode && (
-                  <TableCell>
-                    <Select 
-                      value={line.storageLocation || ''} 
-                      onValueChange={(value) => 
-                        updateInvoiceLine(line.lineId, { storageLocation: value as StorageLocation })
-                      }
-                    >
-                      <SelectTrigger className="w-[200px] bg-surface-elevated">
-                        <SelectValue placeholder="Auswählen..." />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover">
-                        {STORAGE_LOCATIONS.map((loc) => (
-                          <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                )}
+        <div
+          className={`transition-all duration-500 ease-in-out ${
+            expandedDetails
+              ? 'max-h-[5000px] overflow-y-hidden'
+              : 'max-h-[360px] overflow-y-auto'
+          }`}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="data-table-header">
+                <TableHead>Artikelnummer</TableHead>
+                <TableHead>Beschreibung</TableHead>
+                <TableHead>Menge</TableHead>
+                <TableHead>Aktueller Lagerort</TableHead>
+                {editMode && <TableHead>Neuer Lagerort</TableHead>}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {invoiceLines.map((line) => (
+                <TableRow
+                  key={line.lineId}
+                  className={`hover:bg-muted/30 ${!line.storageLocation ? 'bg-status-failed/5' : ''}`}
+                >
+                  <TableCell>
+                    <span className="font-mono text-sm">{line.manufacturerArticleNo}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm truncate max-w-[200px] block">
+                      {line.descriptionIT}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-medium">{line.qty}</span>
+                  </TableCell>
+                  <TableCell>
+                    {line.storageLocation ? (
+                      <span className="text-sm">{line.storageLocation}</span>
+                    ) : (
+                      <span className="text-sm text-status-failed font-medium">
+                        Nicht zugewiesen
+                      </span>
+                    )}
+                  </TableCell>
+                  {editMode && (
+                    <TableCell>
+                      <Select
+                        value={line.storageLocation || ''}
+                        onValueChange={(value) =>
+                          updateInvoiceLine(line.lineId, { storageLocation: value as StorageLocation })
+                        }
+                      >
+                        <SelectTrigger className="w-[200px] bg-surface-elevated">
+                          <SelectValue placeholder="Auswählen..." />
+                        </SelectTrigger>
+                        <SelectContent className="bg-popover">
+                          {STORAGE_LOCATIONS.map((loc) => (
+                            <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Expand / Collapse Toggle */}
+        <div className="flex justify-center py-2 border-t border-border/40">
+          <button
+            className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
+            onClick={() => setExpandedDetails((e) => !e)}
+            aria-label={expandedDetails ? 'Einklappen' : 'Ausklappen'}
+          >
+            {expandedDetails ? (
+              <ChevronsUp className="w-5 h-5" />
+            ) : (
+              <ChevronsDown className="w-5 h-5 animate-pulse" />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

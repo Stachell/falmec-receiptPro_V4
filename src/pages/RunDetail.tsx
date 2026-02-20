@@ -348,11 +348,8 @@ export default function RunDetail() {
           </div>
         </KPIGrid>
 
-        {/* Spacer between KPIs and Tabs */}
-        <div className="mb-4" />
-
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           {/* Tab-Leiste + Ereignisfeld nebeneinander */}
           <div className="flex items-center gap-4">
             <TabsList className="bg-card border border-border">

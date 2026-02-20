@@ -7,11 +7,11 @@
  * @component
  */
 
-import { AlertCircle, AlertTriangle, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended } from '@/types';
 
 interface InvoicePreviewProps {
@@ -61,6 +61,7 @@ export function InvoicePreview({
   isSuccess,
   sourceFileName,
 }: InvoicePreviewProps) {
+  const [expandedPositions, setExpandedPositions] = useState(false);
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
 
@@ -129,66 +130,86 @@ export function InvoicePreview({
               </p>
             </div>
           ) : (
-            <ScrollArea className="h-[400px]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="w-[60px]">Pos.</TableHead>
-                    <TableHead className="w-[140px]">EAN</TableHead>
-                    <TableHead>Herstellerartikelnr.</TableHead>
-                    <TableHead className="text-right w-[80px]">Menge</TableHead>
-                    <TableHead className="text-right w-[100px]">Einzelpreis</TableHead>
-                    <TableHead className="text-right w-[100px]">Gesamtpreis</TableHead>
-                    <TableHead className="w-[100px]">Bestellung</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {positions.map((position) => {
-                    const orderBadge = getOrderStatusBadge(position.orderStatus);
-                    return (
-                      <TableRow key={position.positionIndex}>
-                        <TableCell className="font-medium">
-                          {position.positionIndex}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {position.ean || (
-                            <span className="text-destructive">Fehlt</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="max-w-[200px] truncate" title={position.manufacturerArticleNo}>
-                            {position.manufacturerArticleNo || (
+            <>
+              <div
+                className={`overflow-y-auto overflow-x-hidden transition-all duration-500 ease-in-out ${
+                  expandedPositions ? 'max-h-[5000px]' : 'max-h-[400px]'
+                }`}
+              >
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="w-[60px]">Pos.</TableHead>
+                      <TableHead className="w-[140px]">EAN</TableHead>
+                      <TableHead>Herstellerartikelnr.</TableHead>
+                      <TableHead className="text-right w-[80px]">Menge</TableHead>
+                      <TableHead className="text-right w-[100px]">Einzelpreis</TableHead>
+                      <TableHead className="text-right w-[100px]">Gesamtpreis</TableHead>
+                      <TableHead className="w-[100px]">Bestellung</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {positions.map((position) => {
+                      const orderBadge = getOrderStatusBadge(position.orderStatus);
+                      return (
+                        <TableRow key={position.positionIndex}>
+                          <TableCell className="font-medium">
+                            {position.positionIndex}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {position.ean || (
                               <span className="text-destructive">Fehlt</span>
                             )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {position.quantityDelivered}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(position.unitPrice)}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(position.totalPrice)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge variant={orderBadge.variant}>
-                              {orderBadge.label}
-                            </Badge>
-                            {position.orderCandidatesText && (
-                              <span className="text-xs text-muted-foreground font-mono">
-                                {position.orderCandidatesText}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                          </TableCell>
+                          <TableCell>
+                            <div className="max-w-[200px] truncate" title={position.manufacturerArticleNo}>
+                              {position.manufacturerArticleNo || (
+                                <span className="text-destructive">Fehlt</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {position.quantityDelivered}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatCurrency(position.unitPrice)}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {formatCurrency(position.totalPrice)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant={orderBadge.variant}>
+                                {orderBadge.label}
+                              </Badge>
+                              {position.orderCandidatesText && (
+                                <span className="text-xs text-muted-foreground font-mono">
+                                  {position.orderCandidatesText}
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              {/* Expand / Collapse Toggle */}
+              <div className="flex justify-center pt-1 pb-1 border-t border-border/40">
+                <button
+                  className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
+                  onClick={() => setExpandedPositions((e) => !e)}
+                  aria-label={expandedPositions ? 'Einklappen' : 'Ausklappen'}
+                >
+                  {expandedPositions ? (
+                    <ChevronsUp className="w-5 h-5" />
+                  ) : (
+                    <ChevronsDown className="w-5 h-5 animate-pulse" />
+                  )}
+                </button>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

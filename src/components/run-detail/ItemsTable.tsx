@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Filter, Info, Barcode, Type } from 'lucide-react';
+import { Search, Filter, Info, Barcode, Type, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +35,7 @@ export function ItemsTable() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [detailLine, setDetailLine] = useState<InvoiceLine | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const filteredLines = invoiceLines.filter(line => {
     const term = searchTerm.toLowerCase();
@@ -102,15 +103,21 @@ export function ItemsTable() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Table — collapsible */}
+      <div
+        className={`overflow-x-auto transition-all duration-500 ease-in-out ${
+          expanded
+            ? 'max-h-[5000px] overflow-y-hidden'
+            : 'max-h-[400px] overflow-y-auto'
+        }`}
+      >
         <Table className="table-fixed w-full">
           <TableHeader>
             <TableRow className="data-table-header">
               <TableHead className="w-9 text-center">#</TableHead>
               <TableHead className="w-10"></TableHead>
-              <TableHead className="w-16">DE</TableHead>
-              <TableHead className="w-36">Artikel-# (IT)</TableHead>
+              <TableHead className="w-16">Art-# (DE)</TableHead>
+              <TableHead className="w-36">Art-# (IT)</TableHead>
               <TableHead className="w-28">EAN</TableHead>
               <TableHead>Bezeichnung (DE)</TableHead>
               <TableHead className="w-12 text-right">Menge</TableHead>
@@ -256,6 +263,23 @@ export function ItemsTable() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Expand / Collapse Toggle */}
+      {filteredLines.length > 0 && (
+        <div className="flex justify-center py-2 border-t border-border/40">
+          <button
+            className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
+            onClick={() => setExpanded((e) => !e)}
+            aria-label={expanded ? 'Einklappen' : 'Ausklappen'}
+          >
+            {expanded ? (
+              <ChevronsUp className="w-5 h-5" />
+            ) : (
+              <ChevronsDown className="w-5 h-5 animate-pulse" />
+            )}
+          </button>
+        </div>
+      )}
 
       {filteredLines.length === 0 && (
         <div className="p-8 text-center text-muted-foreground">

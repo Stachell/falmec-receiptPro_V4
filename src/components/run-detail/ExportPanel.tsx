@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
-import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check } from 'lucide-react';
+import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { format } from 'date-fns';
 import { Run } from '@/types';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ExportPanelProps {
   run: Run;
@@ -15,6 +14,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
   const { invoiceLines, issues } = useRunStore();
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [expandedXml, setExpandedXml] = useState(false);
   const { wrap, isLocked } = useClickLock();
 
   const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
@@ -142,11 +142,31 @@ ${invoiceLines.map(line => `    <Item>
             )}
           </Button>
         </div>
-        <ScrollArea className="h-[300px]">
-          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-x-auto">
+        <div
+          className={`overflow-x-auto transition-all duration-500 ease-in-out ${
+            expandedXml
+              ? 'max-h-[5000px] overflow-y-hidden'
+              : 'max-h-[300px] overflow-y-auto'
+          }`}
+        >
+          <pre className="p-4 text-xs font-mono text-muted-foreground">
             {xmlPreview}
           </pre>
-        </ScrollArea>
+        </div>
+        {/* Expand / Collapse Toggle */}
+        <div className="flex justify-center py-2 border-t border-border/40">
+          <button
+            className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
+            onClick={() => setExpandedXml((e) => !e)}
+            aria-label={expandedXml ? 'Einklappen' : 'Ausklappen'}
+          >
+            {expandedXml ? (
+              <ChevronsUp className="w-5 h-5" />
+            ) : (
+              <ChevronsDown className="w-5 h-5 animate-pulse" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Export Button */}
