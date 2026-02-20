@@ -1,6 +1,13 @@
 /**
  * ArticleMatcher – PROJ-11 Phase B
  *
+ * @deprecated PROJ-11 Legacy — Replaced by FalmecMatcher_Master (PROJ-16/18).
+ * The active article-matching path in the workflow uses executeMatcherCrossMatch()
+ * in runStore.ts, which delegates to matcher.crossMatch() → FalmecMatcher_Master.
+ * FalmecMatcher_Master implements a 4-strategy fallback chain (Exact → EAN →
+ * Sanitized → Partial) with full MATCH_TRACE logging.
+ * This module is retained for reference and backwards-compatibility only.
+ *
  * Stateless matching of InvoiceLines against ArticleMaster[].
  * Computes MatchStatus (5 states) and PriceCheckStatus per line.
  *

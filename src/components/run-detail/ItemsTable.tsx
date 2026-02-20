@@ -116,10 +116,10 @@ export function ItemsTable() {
             <TableRow className="data-table-header">
               <TableHead className="w-9 text-center">#</TableHead>
               <TableHead className="w-10"></TableHead>
-              <TableHead className="w-16">Art-# (DE)</TableHead>
+              <TableHead className="w-20">Art-# (DE)</TableHead>
               <TableHead className="w-36">Art-# (IT)</TableHead>
               <TableHead className="w-28">EAN</TableHead>
-              <TableHead>Bezeichnung (DE)</TableHead>
+              <TableHead>Bezeichnung</TableHead>
               <TableHead className="w-12 text-right">Menge</TableHead>
               <TableHead className="w-36 text-right">Preis</TableHead>
               <TableHead className="w-24">Bestellung</TableHead>

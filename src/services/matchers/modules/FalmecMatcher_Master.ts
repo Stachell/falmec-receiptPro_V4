@@ -36,14 +36,18 @@ const SN_REGEX = /K[0-2][0-9]{10}K/;
 /**
  * PROJ-17: German ERP article number validation.
  * Rule: exactly 6 digits, MUST start with "1".
- * Examples: 100001, 123456, 187654 → valid
- *           99999, 200001, ABC123 → invalid
  */
 const ARTNO_DE_REGEX = /^1\d{5}$/;
 
 // ── Normalization helper ──────────────────────────────────────────────
 function normalize(value: string | null | undefined): string {
   return String(value ?? '').trim().toUpperCase();
+}
+
+// ── Sanitize helper (Strategy 3) ─────────────────────────────────────
+/** Strips special chars used in Falmec article numbers before comparison. */
+function sanitize(value: string): string {
+  return value.replace(/[.\-#/,\s]/g, '');
 }
 
 // ── Price check ───────────────────────────────────────────────────────
@@ -54,29 +58,11 @@ function checkPrice(invoicePrice: number, sagePrice: number, tolerance: number):
   return diff <= tolerance ? 'ok' : 'mismatch';
 }
 
-// ── Schema ────────────────────────────────────────────────────────────
-/**
- * FIELD SEMANTICS — wichtige Unterscheidung:
- *
- * Art-# (DE)  = falmecArticleNo  = 6-stellige ERP-Nummer im Sage-System Deutschland.
- *               Format: ^1\d{5}$ (beginnt mit "1", genau 6 Ziffern).
- *               Primärer Stammdaten-Schlüssel der deutschen Niederlassung.
- *
- * Art-# (IT)  = manufacturerArticleNo = Herstellerartikelnummer aus dem Falmec-Hauptwerk
- *               (z. B. "FIM988IT", "KHFI120"). Diese Nummer steht auf der Eingangsrechnung.
- *               Wird für Step-2-Matching (Invoice-Zeile → Stammdaten) verwendet.
- *
- * Matching-Richtung: Invoice.manufacturerArticleNo (Art-# IT) → Stamm.manufacturerArticleNo
- *                    Invoice.ean                               → Stamm.ean
- *
- * KEIN automatischer Fallback von Art-# (IT) auf Art-# (DE)!
- * Fehlt Art-# (IT) in der Rechnung, greift nur noch EAN als Fallback.
- */
-const FALMEC_SCHEMA: SchemaDefinition = {
+// ── Schema Definition ─────────────────────────────────────────────────
+export const FALMEC_SCHEMA: SchemaDefinition = {
   name: 'Falmec Artikelstamm',
   fields: [
     {
-      // ERP-Nummer Deutschland — 6-stellig, beginnt mit "1"
       fieldId: 'artNoDE',
       label: 'Art-# (DE)',
       aliases: [
@@ -86,55 +72,56 @@ const FALMEC_SCHEMA: SchemaDefinition = {
         'DE-Artikelnummer',
         'Art. DE',
         'Artikel DE',
+        'Art-# (DE)',
+        'Artikelnummer' 
       ],
       required: true,
       validationPattern: '^1\\d{5}$',
       validate: (v) => ARTNO_DE_REGEX.test(v.trim()),
     },
     {
-      // Herstellerartikelnummer aus dem Falmec-Hauptwerk (Italien)
       fieldId: 'artNoIT',
       label: 'Art-# (IT)',
       aliases: [
-        'Artikelnummer',
+        'Herstellerartikelnummer',
+        'Hersteller-Artikelnummer',
+        'Hersteller ArtNr',
         'Art.-Nr.',
         'Article No',
         'Codice Articolo',
-        'Herstellerartikelnummer',
-        'Hersteller ArtNr',
         'Art. IT',
+        'Art-# (IT)'
       ],
       required: true,
     },
     {
       fieldId: 'ean',
       label: 'EAN',
-      // PROJ-17: "EAN-NUMMER" als weiteres Alias ergänzt
       aliases: ['EAN', 'EAN-Code', 'EAN-NUMMER', 'Barcode', 'GTIN'],
       required: true,
     },
     {
       fieldId: 'price',
       label: 'Preis netto',
-      aliases: ['Preis netto', 'VK netto', 'Net Price', 'Prezzo'],
+      aliases: ['Preis netto', 'VK netto', 'Net Price', 'Prezzo', 'Einzelpreis'],
       required: true,
     },
     {
       fieldId: 'serialRequired',
       label: 'SN-Pflicht',
-      aliases: ['SN-Pflicht', 'Serial Required', 'Seriennummer'],
+      aliases: ['SN-Pflicht', 'Serial Required', 'Seriennummer', 'Seriennummerpflicht', 'Seriennummernpflicht'],
       required: false,
     },
     {
       fieldId: 'storageLocation',
       label: 'Lagerort',
-      aliases: ['Lagerort', 'Storage Location', 'Magazzino'],
+      aliases: ['Lagerort', 'Storage Location', 'Magazzino', 'Hauptlagerplatz', 'Hauptlager'],
       required: false,
     },
     {
       fieldId: 'supplierId',
       label: 'Lieferant',
-      aliases: ['Lieferant', 'Supplier', 'Fornitore'],
+      aliases: ['Lieferant', 'Supplier', 'Fornitore', 'Hauptlieferant'],
       required: false,
     },
   ],
@@ -162,18 +149,22 @@ export class FalmecMatcher_Master implements MatcherModule {
     // Pre-index articles by normalized ArtNo and EAN for O(1) lookups
     const byArtNo = new Map<string, ArticleMaster>();
     const byEan = new Map<string, ArticleMaster>();
+    // Strategy 3: sanitized ArtNo index (special chars stripped)
+    const bySanitizedArt = new Map<string, ArticleMaster>();
 
     for (const article of articles) {
       const normArt = normalize(article.manufacturerArticleNo);
       const normEan = normalize(article.ean);
       if (normArt) byArtNo.set(normArt, article);
       if (normEan) byEan.set(normEan, article);
+      const san = sanitize(normArt);
+      if (san && san !== normArt) bySanitizedArt.set(san, article);
     }
 
-    // PROJ-17: Collect per-line match results with trace reasons
+    // PROJ-18: Collect per-line match results with trace reasons
     const matchResults = lines.map((line) => {
       try {
-        return this.matchSingleLine(line, byArtNo, byEan, config, warnings);
+        return this.matchSingleLine(line, byArtNo, byEan, bySanitizedArt, articles, config, warnings);
       } catch (error) {
         console.error(`[FalmecMatcher] Error matching line ${line.lineId}:`, error);
         return {
@@ -270,6 +261,8 @@ export class FalmecMatcher_Master implements MatcherModule {
     line: InvoiceLine,
     byArtNo: Map<string, ArticleMaster>,
     byEan: Map<string, ArticleMaster>,
+    bySanitizedArt: Map<string, ArticleMaster>,
+    articles: ArticleMaster[],
     config: MatcherConfig,
     warnings: MatcherWarning[],
   ): { line: InvoiceLine; reason: string; isConflict: boolean } {
@@ -297,9 +290,15 @@ export class FalmecMatcher_Master implements MatcherModule {
       };
     }
 
-    // Lookup by normalized ArtNo and EAN
+    const attempts: string[] = [];
+
+    // ── Strategy 1: Exact ArtNo match (O(1)) ─────────────────────────
     const matchByCode = lineCode ? byArtNo.get(lineCode) : undefined;
+    if (!matchByCode && lineCode) attempts.push(`Exact-ArtNo fail ('${line.manufacturerArticleNo}')`);
+
+    // ── Strategy 2: Exact EAN match (O(1)) ───────────────────────────
     const matchByEan = lineEan ? byEan.get(lineEan) : undefined;
+    if (!matchByEan && lineEan) attempts.push(`Exact-EAN fail ('${line.ean}')`);
 
     // Determine MatchStatus
     let matchStatus: MatchStatus;
@@ -310,7 +309,6 @@ export class FalmecMatcher_Master implements MatcherModule {
     if (matchByCode && matchByEan) {
       // Both match — check if same article
       if (matchByCode.id === matchByEan.id) {
-        // PERFECT: Both point to the same article
         matchStatus = 'full-match';
         matchedArticle = matchByCode;
         reason = `Volltreffer: ArtNo + EAN → ${matchByCode.falmecArticleNo}`;
@@ -330,18 +328,55 @@ export class FalmecMatcher_Master implements MatcherModule {
     } else if (matchByCode) {
       matchStatus = 'code-it-only';
       matchedArticle = matchByCode;
-      reason = `ArtNo-Match via '${line.manufacturerArticleNo}' (code-it-only)`;
+      reason = `Strat-1 Exact-ArtNo Match: '${line.manufacturerArticleNo}' → ${matchByCode.falmecArticleNo}`;
     } else if (matchByEan) {
       matchStatus = 'ean-only';
       matchedArticle = matchByEan;
-      reason = `EAN-Match via '${line.ean}' (ean-only)`;
+      reason = `Strat-2 Exact-EAN Match: '${line.ean}' → ${matchByEan.falmecArticleNo}`;
     } else {
-      matchStatus = 'no-match';
-      matchedArticle = undefined;
-      const parts: string[] = [];
-      if (lineCode) parts.push(`ArtNo '${line.manufacturerArticleNo}' nicht im Artikelstamm`);
-      if (lineEan) parts.push(`EAN '${line.ean}' nicht im Artikelstamm`);
-      reason = parts.join(', ') || 'Kein Identifier vorhanden';
+      // ── Strategy 3: Sanitized ArtNo match (O(1)) ─────────────────
+      const lineSanitized = lineCode ? sanitize(lineCode) : '';
+      const matchBySanitized = lineSanitized ? bySanitizedArt.get(lineSanitized) : undefined;
+
+      if (matchBySanitized) {
+        matchStatus = 'code-it-only';
+        matchedArticle = matchBySanitized;
+        reason = `Strat-3 Sanitized-ArtNo Match: '${line.manufacturerArticleNo}' → '${lineSanitized}' → ${matchBySanitized.falmecArticleNo}`;
+        warnings.push({
+          code: 'MATCH_TRACE',
+          message: `[Strat-3] ${attempts.join('; ')} → Sanitized Treffer: '${lineSanitized}' → ${matchBySanitized.falmecArticleNo}`,
+          severity: 'info' as MatcherWarning['severity'],
+          lineId: line.lineId,
+        });
+      } else {
+        if (lineSanitized) attempts.push(`Sanitized-ArtNo fail ('${lineSanitized}')`);
+
+        // ── Strategy 4: Partial ArtNo match (linear scan, fallback) ──
+        let matchByPartial: ArticleMaster | undefined;
+        if (lineCode && lineCode.length >= 4) {
+          matchByPartial = articles.find(a => {
+            const normA = normalize(a.manufacturerArticleNo);
+            return normA.includes(lineCode) || lineCode.includes(normA);
+          });
+        }
+
+        if (matchByPartial) {
+          matchStatus = 'code-it-only';
+          matchedArticle = matchByPartial;
+          reason = `Strat-4 Partial-ArtNo Match: '${line.manufacturerArticleNo}' ⊆ '${matchByPartial.manufacturerArticleNo}' → ${matchByPartial.falmecArticleNo}`;
+          warnings.push({
+            code: 'MATCH_TRACE',
+            message: `[Strat-4] ${attempts.join('; ')} → Partial Treffer: '${line.manufacturerArticleNo}' ~ '${matchByPartial.manufacturerArticleNo}' → ${matchByPartial.falmecArticleNo}`,
+            severity: 'info' as MatcherWarning['severity'],
+            lineId: line.lineId,
+          });
+        } else {
+          matchStatus = 'no-match';
+          matchedArticle = undefined;
+          if (lineCode) attempts.push(`Partial-ArtNo fail`);
+          reason = attempts.join('; ') || 'Kein Identifier vorhanden';
+        }
+      }
     }
 
     // No match → return with missing status

@@ -17,8 +17,9 @@ import {
   mockRuns,
   mockIssues,
   mockAuditLog,
-  mockArticleMaster,
 } from '@/data/mockData';
+import { useMasterDataStore } from '@/store/masterDataStore';
+import { parseMasterDataFile } from '@/services/masterDataParser';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
 import { fileStorageService } from '@/services/fileStorageService';
@@ -77,16 +78,31 @@ function savePersistedFiles(files: UploadedFile[]): void {
   }
 }
 
-// Persist parsed invoice result (without File objects)
+// Max size (bytes) for full parsed-invoice payload in localStorage (~400 KB)
+const PARSED_INVOICE_MAX_BYTES = 400 * 1024;
+
+// Persist parsed invoice result (without File objects).
+// If the serialized payload exceeds PARSED_INVOICE_MAX_BYTES, only the
+// header + warnings are stored (no lines) to avoid QuotaExceededError.
 function saveParsedInvoice(result: ParsedInvoiceResult | null): void {
   try {
-    if (result) {
-      localStorage.setItem(PARSED_INVOICE_KEY, JSON.stringify(result));
-    } else {
+    if (!result) {
       localStorage.removeItem(PARSED_INVOICE_KEY);
+      return;
+    }
+    const full = JSON.stringify(result);
+    if (full.length <= PARSED_INVOICE_MAX_BYTES) {
+      localStorage.setItem(PARSED_INVOICE_KEY, full);
+    } else {
+      // Store header + warnings only; lines are already in invoiceLines state
+      const slim = JSON.stringify({ ...result, lines: [] });
+      localStorage.setItem(PARSED_INVOICE_KEY, slim);
+      console.warn(`[RunStore] parsedInvoice too large (${(full.length / 1024).toFixed(0)} KB) — stored header only`);
     }
   } catch (error) {
     console.warn('[RunStore] Failed to persist parsed invoice result:', error);
+    // Last resort: clear the key so we don't block future writes
+    try { localStorage.removeItem(PARSED_INVOICE_KEY); } catch { /* ignore */ }
   }
 }
 
@@ -276,8 +292,9 @@ interface RunState {
   executeArticleMatching: (articles: ArticleMaster[]) => void;
   setManualPrice: (lineId: string, price: number) => void;
 
-  // PROJ-16: Matcher-based actions (replace executeArticleMatching)
-  executeMatcherCrossMatch: (articles: ArticleMaster[]) => void;
+  // PROJ-16/19: Matcher-based actions (replace executeArticleMatching)
+  // Articles are now sourced from masterDataStore — no parameter needed
+  executeMatcherCrossMatch: () => void;
   executeMatcherSerialExtract: () => void;
 
   // PROJ-11 Phase C: Order matching (Step 4)
@@ -337,10 +354,33 @@ export const useRunStore = create<RunState>((set, get) => ({
     };
 
     // Clear old parsed invoice data when a new invoice is uploaded
-    // This ensures fresh parsing with the new file
     if (file.type === 'invoice') {
       console.log('[RunStore] New invoice uploaded, clearing cached parse results');
       get().clearParsedInvoice();
+    }
+
+    // Parse articleList immediately on upload → persist to masterDataStore
+    if (file.type === 'articleList' && fileWithTimestamp.file) {
+      parseMasterDataFile(fileWithTimestamp.file)
+        .then((result) => {
+          useMasterDataStore.getState().save(result.articles, fileWithTimestamp.name);
+          logService.info(
+            `Stammdaten importiert: ${result.rowCount} Artikel aus '${fileWithTimestamp.name}'`,
+            { step: 'Stammdaten' },
+          );
+          if (result.warnings.length > 0) {
+            for (const w of result.warnings) {
+              logService.warn(`[Stammdaten] ${w}`, { step: 'Stammdaten' });
+            }
+          }
+        })
+        .catch((err) => {
+          console.error('[RunStore] masterDataParser failed:', err);
+          logService.error(
+            `Stammdaten-Import fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+            { step: 'Stammdaten' },
+          );
+        });
     }
 
     // Save to IndexedDB (async, fire and forget)
@@ -1042,7 +1082,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           const currentState = get();
           if (currentState.currentRun?.id === runId) {
             logService.info('Auto-Start: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
-            currentState.executeMatcherCrossMatch(mockArticleMaster);
+            currentState.executeMatcherCrossMatch();
             // Auto-advance to Step 3 after matching completes
             setTimeout(() => {
               const afterMatch = get();
@@ -1141,6 +1181,14 @@ export const useRunStore = create<RunState>((set, get) => ({
           ? { ...state.currentRun, archivePath: result.folderName }
           : state.currentRun,
       }));
+    }
+
+    // After a successful archive write, flush the run-log buffer to disk
+    // and clean up localStorage (prevents QuotaExceededError on next run)
+    if (result.cleanedUp) {
+      logService.exportRunLog(runId).catch(err =>
+        console.warn('[RunStore] archiveRun: exportRunLog failed', err)
+      );
     }
 
     return { success: result.success, folderName: result.folderName };
@@ -1435,10 +1483,10 @@ export const useRunStore = create<RunState>((set, get) => ({
     }));
   },
 
-  // ─── PROJ-16: Matcher-based Cross-Match (Step 2) ──────────────────
+  // ─── PROJ-16/19: Matcher-based Cross-Match (Step 2) ──────────────────
 
-  executeMatcherCrossMatch: (articles) => {
-    const { invoiceLines, runs, currentRun, globalConfig } = get();
+  executeMatcherCrossMatch: () => {
+    const { invoiceLines, runs, currentRun, globalConfig, parsedInvoiceResult } = get();
     if (!currentRun) {
       console.warn('[RunStore] executeMatcherCrossMatch: no currentRun');
       return;
@@ -1448,6 +1496,35 @@ export const useRunStore = create<RunState>((set, get) => ({
     const run = runs.find(r => r.id === runId);
     if (!run) {
       console.warn('[RunStore] executeMatcherCrossMatch: run not found for id', runId);
+      return;
+    }
+
+    // PROJ-19: Source articles from global masterDataStore, NOT from caller
+    const articles = useMasterDataStore.getState().articles;
+    if (articles.length === 0) {
+      console.error('[RunStore] executeMatcherCrossMatch: no master data available');
+      logService.error('Stammdaten fehlen — bitte Artikelstammdaten hochladen', {
+        runId,
+        step: 'Artikel extrahieren',
+      });
+      const blockingIssue: Issue = {
+        id: `issue-${runId}-step2-no-master-${Date.now()}`,
+        runId,
+        severity: 'blocking',
+        stepNo: 2,
+        type: 'no-article-match',
+        message: 'Keine Stammdaten vorhanden — bitte Artikelstammdaten (Excel) hochladen',
+        details: 'masterDataStore ist leer. Upload der Stammdaten-Datei im linken Sidebar-Panel.',
+        relatedLineIds: [],
+        status: 'open',
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+        resolutionNote: null,
+      };
+      set((state) => ({
+        issues: [...state.issues.filter(i => !(i.runId === runId && i.stepNo === 2)), blockingIssue],
+      }));
+      get().updateStepStatus(runId, 2, 'failed');
       return;
     }
 
@@ -1462,22 +1539,63 @@ export const useRunStore = create<RunState>((set, get) => ({
       }
 
       const linePrefix = `${runId}-line-`;
-      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
       const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
 
-      console.log(`[RunStore] executeMatcherCrossMatch: ${runLines.length} lines, ${articles.length} articles, matcher=${matcher.moduleId}`);
+      // PROJ-19 PRE-EXPLOSION MATCHING:
+      // Match on unique positions (one per positionIndex) from the parsed invoice,
+      // then spread the matched result back to all expanded lines.
+      // This avoids running the matcher N times for qty=N articles.
+      const allRunLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
 
-      if (runLines.length === 0) {
+      // Deduplicate: take the first expanded line for each positionIndex
+      const positionMap = new Map<number, typeof allRunLines[0]>();
+      for (const line of allRunLines) {
+        if (!positionMap.has(line.positionIndex)) {
+          positionMap.set(line.positionIndex, line);
+        }
+      }
+      const representativeLines = Array.from(positionMap.values());
+
+      console.log(
+        `[RunStore] executeMatcherCrossMatch: ${representativeLines.length} positions (of ${allRunLines.length} expanded), ${articles.length} articles, matcher=${matcher.moduleId}`,
+      );
+
+      if (representativeLines.length === 0) {
         console.warn('[RunStore] executeMatcherCrossMatch: no invoiceLines found for run.');
         return;
       }
 
+      // Run matcher on representative lines only
       const result = matcher.crossMatch(
-        runLines,
+        representativeLines,
         articles,
         { tolerance: globalConfig.tolerance, caseSensitive: false },
         runId,
       );
+
+      // Spread matched fields from representative → all expanded lines of same position
+      const matchedByPosition = new Map<number, typeof result.lines[0]>();
+      for (const matchedLine of result.lines) {
+        matchedByPosition.set(matchedLine.positionIndex, matchedLine);
+      }
+
+      const enrichedLines = allRunLines.map(line => {
+        const matched = matchedByPosition.get(line.positionIndex);
+        if (!matched) return line;
+        // Copy all match-result fields but keep this line's own lineId/expansionIndex
+        return {
+          ...line,
+          matchStatus: matched.matchStatus,
+          falmecArticleNo: matched.falmecArticleNo,
+          descriptionDE: matched.descriptionDE,
+          unitPriceSage: matched.unitPriceSage,
+          serialRequired: matched.serialRequired,
+          activeFlag: matched.activeFlag,
+          storageLocation: matched.storageLocation,
+          priceCheckStatus: matched.priceCheckStatus,
+          unitPriceFinal: matched.unitPriceFinal,
+        };
+      });
 
       // Determine step 2 status
       const noMatchCount = result.stats.noMatchCount ?? 0;
@@ -1500,7 +1618,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         return {
           runs: state.runs.map(r => r.id === runId ? newRun : r),
           currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
-          invoiceLines: [...result.lines, ...otherLines],
+          invoiceLines: [...enrichedLines, ...otherLines],
           issues: [
             ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 2)),
             ...result.issues,
@@ -1509,14 +1627,13 @@ export const useRunStore = create<RunState>((set, get) => ({
       });
 
       logService.info(
-        `Matcher Cross-Match abgeschlossen: ${result.stats.articleMatchedCount} von ${result.lines.length} gematcht (${matcher.moduleId})`,
+        `Matcher Cross-Match abgeschlossen: ${result.stats.articleMatchedCount} Positionen gematcht, ${enrichedLines.length} Zeilen angereichert (${matcher.moduleId})`,
         { runId, step: 'Artikel extrahieren' },
       );
 
-      if (result.warnings.length > 0) {
-        for (const w of result.warnings) {
-          logService.warn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Artikel extrahieren' });
-        }
+      for (const w of result.warnings) {
+        const logFn = w.severity === 'error' ? logService.error.bind(logService) : logService.warn.bind(logService);
+        logFn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Artikel extrahieren' });
       }
     } catch (error) {
       console.error('[RunStore] executeMatcherCrossMatch error:', error);
@@ -1605,10 +1722,9 @@ export const useRunStore = create<RunState>((set, get) => ({
         { runId, step: 'Seriennummer anfuegen' },
       );
 
-      if (result.warnings.length > 0) {
-        for (const w of result.warnings) {
-          logService.warn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Seriennummer anfuegen' });
-        }
+      for (const w of result.warnings) {
+        const logFn = w.severity === 'error' ? logService.error.bind(logService) : logService.warn.bind(logService);
+        logFn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Seriennummer anfuegen' });
       }
     } catch (error) {
       console.error('[RunStore] executeMatcherSerialExtract error:', error);

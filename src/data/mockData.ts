@@ -336,6 +336,58 @@ export const mockArticleMaster: ArticleMaster[] = [
     activeFlag: true,
     serialRequirement: false,
   },
+  // ── Echte Falmec-Artikel aus Test-PDF (PROJ-18) ────────────────────
+  // Hinweis: unitPriceNet=0 → priceCheckStatus='missing' (korrekt, Preise kommen aus Excel-Upload)
+  {
+    id: 'art-fal-001',
+    falmecArticleNo: '100457',
+    manufacturerArticleNo: 'KACL.457#NF',
+    ean: '8034122713656',
+    storageLocation: 'WE Lager;0;0;0',
+    unitPriceNet: 0,
+    activeFlag: true,
+    serialRequirement: false,
+  },
+  {
+    id: 'art-fal-002',
+    falmecArticleNo: '101450',
+    manufacturerArticleNo: 'CAEI20.E0P2#ZZZB461F',
+    ean: '8034122354507',
+    storageLocation: 'WE Lager;0;0;0',
+    unitPriceNet: 0,
+    activeFlag: true,
+    serialRequirement: false,
+  },
+  {
+    id: 'art-fal-003',
+    falmecArticleNo: '102700',
+    manufacturerArticleNo: 'CENI66.E0P6#ZZZN441F',
+    ean: '8034122347004',
+    storageLocation: 'WE Lager;0;0;0',
+    unitPriceNet: 0,
+    activeFlag: true,
+    serialRequirement: false,
+  },
+  {
+    id: 'art-fal-004',
+    falmecArticleNo: '103670',
+    manufacturerArticleNo: 'CDCN60.E0P7#ZZZD461F',
+    ean: '8034122476704',
+    storageLocation: 'WE Lager;0;0;0',
+    unitPriceNet: 0,
+    activeFlag: true,
+    serialRequirement: false,
+  },
+  {
+    id: 'art-fal-005',
+    falmecArticleNo: '104718',
+    manufacturerArticleNo: 'CLVI20.E0P7#ZZZF461F',
+    ean: '8034122477183',
+    storageLocation: 'WE Lager;0;0;0',
+    unitPriceNet: 0,
+    activeFlag: true,
+    serialRequirement: false,
+  },
 ];
 
 export const mockIssues: Issue[] = [

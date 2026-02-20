@@ -12,7 +12,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRunStore } from '@/store/runStore';
-import { mockRuns, mockArticleMaster } from '@/data/mockData';
+import { mockRuns } from '@/data/mockData';
 import { ItemsTable } from '@/components/run-detail/ItemsTable';
 import { IssuesCenter } from '@/components/run-detail/IssuesCenter';
 import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
@@ -276,18 +276,7 @@ export default function RunDetail() {
               setActiveTab('issues');
             } : undefined}
           />
-          {/* Kachel 3: Serial parsen — klickbar wenn S/N-Issues vorhanden */}
-          <KPITile
-            value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
-            label="Serial parsen"
-            subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
-            variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
-            onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
-              setIssuesStepFilter('3');
-              setActiveTab('issues');
-            } : undefined}
-          />
-          {/* Kachel 4: Preise checken */}
+          {/* Kachel 3: Preise checken */}
           <KPITile
             value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Preise checken"
@@ -299,6 +288,17 @@ export default function RunDetail() {
                   : undefined
             }
             variant={currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0 ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default'}
+          />
+          {/* Kachel 4: Serial parsen — klickbar wenn S/N-Issues vorhanden */}
+          <KPITile
+            value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
+            label="Serial parsen"
+            subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
+            variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
+            onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
+              setIssuesStepFilter('3');
+              setActiveTab('issues');
+            } : undefined}
           />
           {/* Kachel 5: Bestellungen mappen */}
           <KPITile
@@ -321,7 +321,7 @@ export default function RunDetail() {
                   advanceToNextStep(currentRun.id);
                 } else if (nextStep.stepNo === 2) {
                   // Re-trigger article matching
-                  executeMatcherCrossMatch(mockArticleMaster);
+                  executeMatcherCrossMatch();
                 } else {
                   advanceToNextStep(currentRun.id);
                 }

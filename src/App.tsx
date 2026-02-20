@@ -9,15 +9,20 @@ import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
 import NotFound from "./pages/NotFound";
 import { fileSystemService } from "@/services/fileSystemService";
+import { useMasterDataStore } from "@/store/masterDataStore";
 
 const queryClient = new QueryClient();
 
 const App = () => {
-  // PROJ-12: App-Start hooks
+  // PROJ-12/19: App-Start hooks
   useEffect(() => {
     // Rotate old log files (delete > 30 days)
     fileSystemService.rotateHomeLogs().catch(() => {
       // Silently ignore — rotation is best-effort (no handle after reload)
+    });
+    // PROJ-19: Hydrate master data from IndexedDB into memory on boot
+    useMasterDataStore.getState().load().catch(() => {
+      // Silently ignore — store starts empty, user can re-upload
     });
   }, []);
 
