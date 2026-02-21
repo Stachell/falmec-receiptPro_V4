@@ -11,6 +11,8 @@
 
 Der Matcher gleicht jede Rechnungsposition (InvoiceLine) gegen den hochgeladenen Artikelstamm (ArticleMaster[]) ab. Ziel: Falmec-Artikelnummer (DE), Sage-Preis, S/N-Pflicht, Lagerort und Aktivstatus zuweisen.
 
+**PROJ-23 Aenderung:** Der Matcher arbeitet ab sofort auf **aggregierten Positionen** (z.B. 45 Zeilen mit qty > 1), nicht auf expandierten Einzelzeilen. Da das Matching auf Artikel-Identifiern basiert (nicht qty-abhaengig), aendert sich die Kern-Logik nicht. Das Match-Ergebnis wird einmal pro Position bestimmt und gilt fuer alle spaeter expandierten Einzelzeilen.
+
 Der Abgleich erfolgt über eine **4-Strategie-Kaskade** mit vorberechneten O(1)-Lookup-Maps. Erst wenn alle 4 Strategien scheitern, wird `matchStatus: 'no-match'` gesetzt.
 
 ---

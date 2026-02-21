@@ -28,6 +28,7 @@ import {
   parseInvoicePDF,
   convertToInvoiceLines,
   expandInvoiceLines,
+  createAggregatedInvoiceLines,
   convertToInvoiceHeader,
   generateRunId,
   type ParsedInvoiceResult,
@@ -42,6 +43,18 @@ import { matcherRegistryService } from '@/services/matcherRegistryService';
 import type { SerialDocument } from '@/services/matchers/types';
 import type { PreFilteredSerialRow } from '@/types';
 import { validateAgainstInvoice } from '@/services/serialFinder';
+import {
+  runPersistenceService,
+  type PersistedRunSummary,
+  type StorageStats,
+} from '@/services/runPersistenceService';
+import type { OrderPool } from '@/services/matching/orderPool';
+import {
+  buildOrderPool,
+  consumeFromPool,
+  returnToPool,
+} from '@/services/matching/orderPool';
+import { executeMatchingEngine } from '@/services/matching/matchingEngine';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -324,6 +337,12 @@ interface RunState {
   // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
   preFilteredSerials: PreFilteredSerialRow[];
 
+  // PROJ-23: OrderPool for manual resolution (Phase A3)
+  orderPool: OrderPool | null;
+
+  // PROJ-23: Persisted run summaries from IndexedDB (Phase A2)
+  persistedRunSummaries: PersistedRunSummary[];
+
   // Global Config
   globalConfig: RunConfig;
 
@@ -393,6 +412,16 @@ interface RunState {
   executeOrderMapping: (parsedOrders: ParsedOrderPosition[]) => void;
   setManualOrder: (lineId: string, orderYear: number, orderCode: string) => void;
   confirmNoOrder: (lineId: string) => void;
+  /** PROJ-23 Phase A5: Bidirectional manual reassignment with pool bookkeeping */
+  reassignOrder: (lineId: string, newOrderPositionId: string | 'NEW', freeText?: string) => void;
+
+  // PROJ-23: Persistence actions (Phase A2)
+  loadPersistedRun: (runId: string) => Promise<boolean>;
+  loadPersistedRunList: () => Promise<void>;
+  getStorageStats: () => Promise<StorageStats>;
+  exportRunsToDirectory: (purgeOlderThanMonths?: number) => Promise<number>;
+  deletePersistedRun: (runId: string) => Promise<boolean>;
+  clearPersistedRuns: () => Promise<boolean>;
 }
 
 export const useRunStore = create<RunState>((set, get) => ({
@@ -414,6 +443,12 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
   preFilteredSerials: [],
+
+  // PROJ-23: OrderPool for manual resolution (Phase A3)
+  orderPool: null,
+
+  // PROJ-23: Persisted run summaries from IndexedDB (Phase A2)
+  persistedRunSummaries: [],
 
   // Global Config
   globalConfig: {
@@ -592,6 +627,7 @@ export const useRunStore = create<RunState>((set, get) => ({
       id: `run-${Date.now()}`,
       createdAt: new Date().toISOString(),
       status: 'running',
+      isExpanded: false,
       config: globalConfig,
       invoice: {
         fattura: 'FA-2025-NEW',
@@ -705,6 +741,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         { stepNo: 4, name: 'Bestellungen mappen', status: 'not-started', issuesCount: 0 },
         { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
       ],
+      isExpanded: false,
     };
 
     set((state) => ({
@@ -1090,9 +1127,11 @@ export const useRunStore = create<RunState>((set, get) => ({
       }, null, 2));
 
       const invoiceHeader = convertToInvoiceHeader(result);
-      const invoiceLines = expandInvoiceLines(result.lines, runId);
+      // PROJ-23: Use aggregated lines (qty preserved) instead of expanded (qty=1) lines.
+      // Expansion to qty=1 happens later in Run 3 of the MatchingEngine.
+      const invoiceLines = createAggregatedInvoiceLines(result.lines, runId);
 
-      console.log(`[RunStore] Expansion complete: ${result.lines.length} positions → ${invoiceLines.length} lines`);
+      console.log(`[RunStore] Aggregated lines created: ${result.lines.length} positions → ${invoiceLines.length} aggregated lines`);
 
       const step1Issues = buildStep1ParserIssues(runId, result.warnings);
 
@@ -1113,10 +1152,13 @@ export const useRunStore = create<RunState>((set, get) => ({
             packagesCount: result.header.packagesCount,
             totalQty: result.header.totalQty,
           },
+          // PROJ-23: invoiceLines are now aggregated (qty>1), so expandedLineCount
+          // represents the total individual articles (sum of all qty values).
+          isExpanded: false,
           stats: {
             ...updatedRun.stats,
             parsedInvoiceLines: result.lines.length,
-            expandedLineCount: invoiceLines.length,
+            expandedLineCount: invoiceLines.reduce((sum, l) => sum + l.qty, 0),
           },
           steps: updatedRun.steps.map(step =>
             step.stepNo === 1
@@ -1742,7 +1784,7 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
-  // PROJ-20: 4-stage waterfall order mapping on aggregated positions
+  // PROJ-23: 3-Run Matching Engine on aggregated positions (replaces PROJ-20 waterfall-4)
   executeOrderMapping: (parsedOrders) => {
     const { invoiceLines, currentRun, parsedPositions } = get();
     if (!currentRun) {
@@ -1763,9 +1805,20 @@ export const useRunStore = create<RunState>((set, get) => ({
         return;
       }
 
-      console.log(`[RunStore] executeOrderMapping: ${runLines.length} lines, ${parsedOrders.length} orders (waterfall-4)`);
+      // Phase A3: Build Article-First OrderPool
+      const masterArticles = useMasterDataStore.getState().articles;
+      const poolResult = buildOrderPool(parsedOrders, runLines, masterArticles, runId);
+      console.log(
+        `[RunStore] OrderPool built: ${poolResult.filteredInCount} in, ${poolResult.filteredOutCount} out, ` +
+        `${poolResult.pool.totalRemaining} total remaining`
+      );
 
-      const result = mapAllOrdersWaterfall(runLines, parsedOrders, parsedPositions, runId);
+      // Phase A4: Execute 3-Run Matching Engine
+      console.log(`[RunStore] executeOrderMapping (3-Run Engine): ${runLines.length} aggregated lines, ${parsedOrders.length} orders`);
+      const result = executeMatchingEngine(runLines, poolResult.pool, parsedPositions, runId);
+
+      // Merge pool-build issues with engine issues
+      const allIssues = [...poolResult.issues, ...result.issues];
 
       // Determine step 4 status
       const step4Status: StepStatus = result.stats.notOrderedCount > 0 ? 'soft-fail' : 'ok';
@@ -1776,10 +1829,15 @@ export const useRunStore = create<RunState>((set, get) => ({
 
         const newRun: Run = {
           ...updatedRun,
-          stats: { ...updatedRun.stats, ...result.stats },
+          isExpanded: true,  // PROJ-23: Lines are now expanded to qty=1
+          stats: {
+            ...updatedRun.stats,
+            ...result.stats,
+            expandedLineCount: result.lines.length,
+          },
           steps: updatedRun.steps.map(step =>
             step.stepNo === 4
-              ? { ...step, status: step4Status, issuesCount: result.issues.length }
+              ? { ...step, status: step4Status, issuesCount: allIssues.length }
               : step
           ),
         };
@@ -1790,23 +1848,25 @@ export const useRunStore = create<RunState>((set, get) => ({
           invoiceLines: [...result.lines, ...otherLines],
           issues: [
             ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
-            ...result.issues,
+            ...allIssues,
           ],
+          orderPool: result.pool,  // PROJ-23: Persist pool for manual resolution
         };
       });
 
-      // PROJ-20: Cache cleanup after Step 4 success
+      // Cache cleanup after Step 4 success
       set({ preFilteredSerials: [], serialDocument: null });
       console.log('[RunStore] Cache cleanup: preFilteredSerials and serialDocument cleared');
 
       logService.info(
-        `OrderMapper (waterfall-4): ${result.stats.matchedOrders} zugeordnet, ${result.stats.notOrderedCount} ohne Bestellung ` +
-        `(P:${result.stats.perfectMatchCount} R:${result.stats.referenceMatchCount} S:${result.stats.smartQtyMatchCount} F:${result.stats.fifoFallbackCount})`,
+        `MatchingEngine (3-Run): ${result.stats.matchedOrders} zugeordnet, ${result.stats.notOrderedCount} ohne Bestellung ` +
+        `(P:${result.stats.perfectMatchCount} R:${result.stats.referenceMatchCount} S:${result.stats.smartQtyMatchCount} F:${result.stats.fifoFallbackCount}) ` +
+        `| ${result.lines.length} expanded lines`,
         { runId, step: 'Bestellungen mappen' },
       );
     } catch (error) {
       console.error('[RunStore] executeOrderMapping error:', error);
-      logService.error(`OrderMapper fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+      logService.error(`MatchingEngine fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
         runId,
         step: 'Bestellungen mappen',
       });
@@ -1866,6 +1926,95 @@ export const useRunStore = create<RunState>((set, get) => ({
         r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...orderStats } } : r
       ),
       currentRun: state.currentRun?.id === currentRun.id
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
+        : state.currentRun,
+    }));
+  },
+
+  // ─── PROJ-23 Phase A5: Manual Reassignment ───────────────────────────
+
+  reassignOrder: (lineId, newOrderPositionId, freeText) => {
+    const { invoiceLines, issues, orderPool, currentRun } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] reassignOrder: no currentRun');
+      return;
+    }
+    const runId = currentRun.id;
+    const line = invoiceLines.find(l => l.lineId === lineId);
+    if (!line) {
+      console.warn(`[RunStore] reassignOrder: line ${lineId} not found`);
+      return;
+    }
+
+    // Step a: Return previous allocation back to pool (if any)
+    if (orderPool && line.allocatedOrders.length > 0) {
+      const oldOrderNumber = line.allocatedOrders[0].orderNumber;
+      for (const [posId, entry] of orderPool.byId) {
+        const compositeKey = `${entry.position.orderYear}-${entry.position.orderNumber}`;
+        if (compositeKey === oldOrderNumber) {
+          returnToPool(orderPool, posId, 1);
+          break;
+        }
+      }
+    }
+
+    // Step b: Consume new order from pool (if not "NEW")
+    let newAllocatedOrders: import('@/types').AllocatedOrder[] = [];
+    let newOrderNumber: string | null = null;
+
+    if (newOrderPositionId !== 'NEW' && orderPool) {
+      const consumed = consumeFromPool(orderPool, newOrderPositionId, 1);
+      if (consumed) {
+        const entry = orderPool.byId.get(newOrderPositionId);
+        if (entry) {
+          newOrderNumber = `${entry.position.orderYear}-${entry.position.orderNumber}`;
+          newAllocatedOrders = [{
+            orderNumber: newOrderNumber,
+            orderYear: entry.position.orderYear,
+            qty: 1,
+            reason: 'manual-ok' as const,
+          }];
+        }
+      }
+    } else if (newOrderPositionId === 'NEW' && freeText?.trim()) {
+      newOrderNumber = freeText.trim();
+      const yearPart = parseInt(newOrderNumber.split('-')[0]) || 0;
+      newAllocatedOrders = [{
+        orderNumber: newOrderNumber,
+        orderYear: yearPart,
+        qty: 1,
+        reason: 'manual-ok' as const,
+      }];
+    }
+
+    // Step c: Update the line
+    const updatedLines = invoiceLines.map(l =>
+      l.lineId === lineId
+        ? {
+            ...l,
+            allocatedOrders: newAllocatedOrders,
+            orderNumberAssigned: newOrderNumber,
+            orderAssignmentReason: 'manual-ok' as const,
+          }
+        : l
+    );
+
+    // Step d: Auto-resolve issues that are no longer active
+    const resolvedIssues = autoResolveIssues(issues, updatedLines, runId);
+
+    // Update order stats
+    const runLines = updatedLines.filter(l => l.lineId.startsWith(runId));
+    const orderStats = computeOrderStats(runLines);
+
+    set((state) => ({
+      invoiceLines: updatedLines,
+      issues: resolvedIssues,
+      // Spread pool to trigger Zustand reactivity after in-place mutations
+      orderPool: orderPool ? { ...orderPool } : null,
+      runs: state.runs.map(r =>
+        r.id === runId ? { ...r, stats: { ...r.stats, ...orderStats } } : r
+      ),
+      currentRun: state.currentRun?.id === runId
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
         : state.currentRun,
     }));
@@ -2301,5 +2450,92 @@ export const useRunStore = create<RunState>((set, get) => ({
       });
       get().updateStepStatus(runId, 3, 'failed');
     }
+  },
+
+  // ── PROJ-23 Phase A2: Persistence actions ──────────────────────────
+
+  loadPersistedRun: async (runId: string) => {
+    try {
+      const data = await runPersistenceService.loadRun(runId);
+      if (!data) {
+        console.warn(`[RunStore] No persisted run found for: ${runId}`);
+        return false;
+      }
+
+      set((state) => {
+        // Merge persisted run into runs array (replace if exists, add if not)
+        const existingIndex = state.runs.findIndex(r => r.id === runId);
+        const updatedRuns = existingIndex >= 0
+          ? state.runs.map(r => r.id === runId ? data.run : r)
+          : [data.run, ...state.runs];
+
+        // Merge invoice lines: remove old lines for this run, add persisted
+        const linePrefix = `${runId}-line-`;
+        const otherLines = state.invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+        // Merge issues: remove old issues for this run, add persisted
+        const otherIssues = state.issues.filter(i => i.runId !== runId);
+
+        // Merge audit log: remove old entries for this run, add persisted
+        const otherAudit = state.auditLog.filter(a => a.runId !== runId);
+
+        return {
+          runs: updatedRuns,
+          currentRun: data.run,
+          invoiceLines: [...data.invoiceLines, ...otherLines],
+          issues: [...data.issues, ...otherIssues],
+          auditLog: [...data.auditLog, ...otherAudit],
+          parsedPositions: data.parsedPositions,
+          parserWarnings: data.parserWarnings,
+        };
+      });
+
+      console.log(`[RunStore] Persisted run loaded: ${runId}`);
+      return true;
+    } catch (error) {
+      console.error('[RunStore] Failed to load persisted run:', error);
+      return false;
+    }
+  },
+
+  loadPersistedRunList: async () => {
+    try {
+      const summaries = await runPersistenceService.loadRunList();
+      set({ persistedRunSummaries: summaries });
+      console.log(`[RunStore] Loaded ${summaries.length} persisted run summaries`);
+    } catch (error) {
+      console.error('[RunStore] Failed to load persisted run list:', error);
+    }
+  },
+
+  getStorageStats: async () => {
+    return runPersistenceService.getStorageStats();
+  },
+
+  exportRunsToDirectory: async (purgeOlderThanMonths?: number) => {
+    const result = await runPersistenceService.exportToDirectory(purgeOlderThanMonths);
+    // Refresh summaries after potential purge
+    if (result > 0 && purgeOlderThanMonths) {
+      await get().loadPersistedRunList();
+    }
+    return result;
+  },
+
+  deletePersistedRun: async (runId: string) => {
+    const success = await runPersistenceService.deleteRun(runId);
+    if (success) {
+      set((state) => ({
+        persistedRunSummaries: state.persistedRunSummaries.filter(s => s.id !== runId),
+      }));
+    }
+    return success;
+  },
+
+  clearPersistedRuns: async () => {
+    const success = await runPersistenceService.clearAll();
+    if (success) {
+      set({ persistedRunSummaries: [] });
+    }
+    return success;
   },
 }));

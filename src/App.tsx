@@ -10,10 +10,14 @@ import RunDetail from "./pages/RunDetail";
 import NotFound from "./pages/NotFound";
 import { fileSystemService } from "@/services/fileSystemService";
 import { useMasterDataStore } from "@/store/masterDataStore";
+import { useRunAutoSave } from "@/hooks/useRunAutoSave";
 
 const queryClient = new QueryClient();
 
 const App = () => {
+  // PROJ-23 Phase A2: Auto-save active run to IndexedDB on state changes
+  useRunAutoSave();
+
   // PROJ-12/19: App-Start hooks
   useEffect(() => {
     // Rotate old log files (delete > 30 days)

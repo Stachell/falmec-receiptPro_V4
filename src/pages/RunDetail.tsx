@@ -356,7 +356,8 @@ export default function RunDetail() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           {/* Tab-Leiste + Ereignisfeld nebeneinander */}
           <div className="flex items-center gap-4">
-            <TabsList className="bg-card border border-border">
+            {/* PROJ-22 B1: TabsList bg-[#c9c3b6] */}
+            <TabsList className="bg-[#c9c3b6] border border-border">
               <TabsTrigger value="invoice-preview">
                 RE-Positionen
                 {parsedInvoiceResult && (
@@ -371,7 +372,8 @@ export default function RunDetail() {
               </TabsTrigger>
               <TabsTrigger value="items">
                 Artikelliste
-                <span className="ml-1.5 text-xs bg-muted px-1.5 py-0.5 rounded">
+                {/* PROJ-22 B1: Artikelliste-Badge bg-[#008c99] white text */}
+                <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: '#008c99', color: '#ffffff' }}>
                   {parsedInvoiceResult?.header.packagesCount ?? currentRun.invoice.packagesCount ?? currentRun.stats.parsedInvoiceLines}
                 </span>
               </TabsTrigger>

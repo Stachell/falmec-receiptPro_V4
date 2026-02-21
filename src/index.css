@@ -153,12 +153,14 @@
     @apply bg-[hsl(var(--status-failed)/0.15)] text-[hsl(var(--status-failed))];
   }
 
+  /* PROJ-22 B1: KPI-Kacheln 20% kleiner */
   .kpi-tile {
-    @apply enterprise-card p-4 flex flex-col gap-1;
+    @apply enterprise-card p-3 flex flex-col gap-0.5;
   }
 
+  /* PROJ-22 B1: KPI-Wert 20% kleiner (text-xl statt text-2xl) */
   .kpi-tile-value {
-    @apply text-2xl font-bold text-foreground;
+    @apply text-xl font-bold text-foreground;
   }
 
   .kpi-tile-label {

@@ -1,6 +1,6 @@
 # Serial-Finder — Parsing-Rules
 
-> **Modul:** SerialFinder (PROJ-20)
+> **Modul:** SerialFinder (PROJ-20, aktualisiert PROJ-23)
 > **Pfad:** `src/services/serialFinder.ts`
 > **Step:** 3 — Seriennummer anfuegen
 > **Legacy-Pfad:** `FalmecMatcher_Master.serialExtract()` (via SerialDocument)
@@ -121,7 +121,9 @@ Nach der Validation ist das Feld `invoiceReference` semantisch redundant und wir
 
 ## 5. Phase 3: S/N-Zuweisung auf aggregierte Positionen
 
-Die Zuweisung erfolgt in `executeMatcherSerialExtract()` im runStore:
+Die Zuweisung erfolgt in `executeMatcherSerialExtract()` im runStore.
+
+**PROJ-23 Aenderung:** Da Step 1 ab sofort aggregierte Zeilen (qty>1) im Store haelt (statt expandierter qty=1 Zeilen), muss Phase 3 das `serialNumbers[]` Array auf der aggregierten Position befuellen (N Eintraege fuer qty=N). Die Logik bleibt EAN-basiert, operiert aber auf weniger Zeilen (~45 statt ~295).
 
 ### 5.1 EAN-basiertes Mapping
 
@@ -159,7 +161,7 @@ invoiceLine.serialNumbers = [
 // serialNumbers.length <= qty (immer)
 ```
 
-**Keine Expansion:** Die S/Ns werden als Array in der aggregierten Zeile gehalten. Die Expansion auf Einzelzeilen erfolgt erst bei UI-Darstellung via `expandForDisplay()`.
+**Keine Expansion in Phase 3:** Die S/Ns werden als Array in der aggregierten Zeile gehalten. Die Verteilung auf Einzelzeilen geschieht erst in **Run 3 der Matching-Engine** (PROJ-23 Phase A4), wenn die aggregierten Zeilen expandiert werden. Dabei erhaelt jede expandierte Zeile genau eine Seriennummer: `expandedLine.serialNumbers = [line.serialNumbers[i]]`.
 
 ### 5.3 Checksum
 

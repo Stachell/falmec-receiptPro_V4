@@ -160,6 +160,9 @@ export interface Run {
   steps: WorkflowStep[];
   /** Folder name of the archive package (set after successful export/archiving) */
   archivePath?: string | null;
+  /** PROJ-23: Whether invoiceLines have been expanded from aggregated (qty>1) to individual (qty=1) lines.
+   *  Set to true after Run 3 of the MatchingEngine. Before that, lines are aggregated. */
+  isExpanded: boolean;
 }
 
 export interface InvoiceLine {

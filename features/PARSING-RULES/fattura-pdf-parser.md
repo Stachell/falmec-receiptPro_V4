@@ -1,6 +1,6 @@
 # Fattura PDF-Parser — Parsing-Rules
 
-> **Modul:** `FatturaParser_Master` (v3)
+> **Modul:** `FatturaParser_Master` (v3, aktualisiert PROJ-23)
 > **Pfad:** `src/services/parsers/modules/FatturaParser_Master.ts`
 > **Step:** 1 — Rechnung auslesen
 > **Engine:** pdfjs-dist (rein browser-basiert, kein OCR/AI)
@@ -217,3 +217,20 @@ interface ParsedInvoiceLine {
   orderStatus: 'YES' | 'NO' | 'check';
 }
 ```
+
+### PROJ-23 Aenderung: Aggregiertes Datenmodell ab Step 1
+
+Der Parser-Output (`ParsedInvoiceLine[]`) bleibt unveraendert — er liefert weiterhin eine Zeile pro Position mit der vollen `quantityDelivered` (z.B. qty=7).
+
+**Frueher (PROJ-11):** `expandInvoiceLines()` expandierte sofort jede Position zu qty=1 Einzelzeilen im Store.
+
+**Neu (PROJ-23):** `createAggregatedInvoiceLines()` erzeugt eine `InvoiceLine` pro geparster Position und bewahrt die originale `qty`. Die Expansion auf Einzelzeilen erfolgt erst in Run 3 der Matching-Engine (Step 4).
+
+```
+Parser Output: 45 ParsedInvoiceLine (qty=1..20)
+    ↓
+PROJ-11 (alt): expandInvoiceLines() → ~295 InvoiceLine (alle qty=1)
+PROJ-23 (neu): createAggregatedInvoiceLines() → 45 InvoiceLine (qty bewahrt)
+```
+
+Die alte `expandInvoiceLines()` Funktion bleibt als `@deprecated` Backup-Referenz im Code.

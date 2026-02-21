@@ -21,6 +21,7 @@ import {
 import { StatusCheckbox } from './StatusCheckbox';
 import { PriceCell } from './PriceCell';
 import { DetailPopup } from './DetailPopup';
+import { ManualOrderPopup } from './ManualOrderPopup';
 import { InvoiceLine } from '@/types';
 import {
   Tooltip,
@@ -84,9 +85,9 @@ export function ItemsTable() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleSetPrice = (lineId: string, price: number, source: 'invoice' | 'sage' | 'custom') => {
-    // TODO: Wire to store action (Phase B)
-    console.log('setPrice', lineId, price, source);
+  // PROJ-22 B2: readOnly for ItemsTable — Preis is READ-ONLY here
+  const handleSetPrice = (_lineId: string, _price: number, _source: 'invoice' | 'sage' | 'custom') => {
+    // No-op: Price editing is READ-ONLY in Artikelliste (only active in RE-Positionen)
   };
 
   const formatPrice = (price: number) =>
@@ -94,8 +95,9 @@ export function ItemsTable() {
 
   return (
     <div className="enterprise-card">
-      {/* Toolbar */}
+      {/* PROJ-22 B2: Toolbar — Suchleiste links, "Einzelartikel Listung" rechts */}
       <div className="p-4 border-b border-border flex flex-wrap items-center gap-4">
+        {/* Left: search + filter */}
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -126,9 +128,13 @@ export function ItemsTable() {
         <div className="text-sm text-muted-foreground">
           {filteredLines.length} von {invoiceLines.length} Positionen
         </div>
+        {/* Right: label */}
+        <div className="ml-auto text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Einzelartikel Listung
+        </div>
       </div>
 
-      {/* Table — collapsible */}
+      {/* Table — collapsible with sticky header */}
       <div
         className={`overflow-x-auto transition-all duration-500 ease-in-out ${
           expanded
@@ -136,20 +142,24 @@ export function ItemsTable() {
             : 'max-h-[400px] overflow-y-auto'
         }`}
       >
+        {/* PROJ-22 B2: Unified column order matching InvoicePreview
+            1. Info-Icon | 2. Pos | 3. Match-Status | 4. Art.-Nr. | 5. Herstellerartikelnr.
+            | 6. EAN | 7. Bezeichnung | 8. Menge | 9. Preis (READ-ONLY) | 10. SN | 11. Bestellung */}
         <Table className="table-fixed w-full">
-          <TableHeader>
+          {/* PROJ-22 B1: sticky header */}
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow className="data-table-header">
-              <TableHead className="w-9 text-center">#</TableHead>
-              <TableHead className="w-10"></TableHead>
-              <TableHead className="w-20">Art-# (DE)</TableHead>
-              <TableHead className="w-36">Art-# (IT)</TableHead>
+              <TableHead className="w-10 text-center"></TableHead>
+              <TableHead className="w-9 text-center">Pos.</TableHead>
+              <TableHead className="w-10">Status</TableHead>
+              <TableHead className="w-20">Art.-Nr.</TableHead>
+              <TableHead className="w-36">Herstellerartikelnr.</TableHead>
               <TableHead className="w-28">EAN</TableHead>
               <TableHead>Bezeichnung</TableHead>
               <TableHead className="w-12 text-right">Menge</TableHead>
               <TableHead className="w-36 text-right">Preis</TableHead>
-              <TableHead className="w-24">Bestellung</TableHead>
               <TableHead className="w-14">SN</TableHead>
-              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-24">Bestellung</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -165,12 +175,24 @@ export function ItemsTable() {
                     : ''
                 }`}
               >
-                {/* #1: Position (positionIndex is already 1-based from the parser) */}
+                {/* Col 1: Info-Icon (moved to first — PROJ-22 B2) */}
+                <TableCell className="px-1 text-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => { setDetailLine(line); setDetailOpen(true); }}
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </Button>
+                </TableCell>
+
+                {/* Col 2: Pos */}
                 <TableCell className="font-mono text-xs text-muted-foreground text-center">
                   {line.positionIndex}
                 </TableCell>
 
-                {/* #2: Checkbox (Match-Status) */}
+                {/* Col 3: Match-Status checkbox */}
                 <TableCell className="px-1">
                   <StatusCheckbox
                     status={line.matchStatus}
@@ -178,7 +200,7 @@ export function ItemsTable() {
                   />
                 </TableCell>
 
-                {/* #3: Artikel-# (DE) + match-type icon */}
+                {/* Col 4: Art.-Nr. (DE) = falmecArticleNo — renamed from "Art-# (DE)" */}
                 <TableCell className="font-mono text-xs truncate">
                   <div className="flex items-center gap-1">
                     {line.matchStatus === 'ean-only' && (
@@ -193,50 +215,47 @@ export function ItemsTable() {
                   </div>
                 </TableCell>
 
-                {/* #4: Artikel-# (IT) */}
+                {/* Col 5: Herstellerartikelnr. (renamed from "Art-# (IT)") */}
                 <TableCell className="font-mono text-xs truncate" title={line.manufacturerArticleNo}>
                   {line.manufacturerArticleNo}
                 </TableCell>
 
-                {/* #5: EAN */}
+                {/* Col 6: EAN */}
                 <TableCell className="font-mono text-xs truncate" title={line.ean}>
                   {line.ean}
                 </TableCell>
 
-                {/* #6: Bezeichnung (DE) */}
+                {/* Col 7: Bezeichnung — max 35 chars truncate */}
                 <TableCell>
-                  <div className="text-xs truncate" title={line.descriptionDE ?? line.descriptionIT}>
-                    {line.descriptionDE ?? line.descriptionIT}
+                  <div
+                    className="text-xs truncate max-w-[140px]"
+                    title={line.descriptionDE ?? line.descriptionIT}
+                  >
+                    {(line.descriptionDE ?? line.descriptionIT)?.substring(0, 35)}
+                    {((line.descriptionDE ?? line.descriptionIT)?.length ?? 0) > 35 ? '…' : ''}
                   </div>
                   {line.descriptionDE && (
-                    <div className="text-[11px] text-muted-foreground truncate" title={line.descriptionIT}>
-                      {line.descriptionIT}
+                    <div
+                      className="text-[11px] text-muted-foreground truncate max-w-[140px]"
+                      title={line.descriptionIT}
+                    >
+                      {line.descriptionIT?.substring(0, 35)}
+                      {(line.descriptionIT?.length ?? 0) > 35 ? '…' : ''}
                     </div>
                   )}
                 </TableCell>
 
-                {/* #7: Menge */}
+                {/* Col 8: Menge */}
                 <TableCell className="text-right text-xs font-medium">
                   {line.qty}
                 </TableCell>
 
-                {/* #8: Preis (dynamic) */}
+                {/* Col 9: Preis — READ-ONLY in Artikelliste (PROJ-22 B2) */}
                 <TableCell className="text-right">
-                  <PriceCell line={line} onSetPrice={handleSetPrice} />
+                  <PriceCell line={line} onSetPrice={handleSetPrice} readOnly />
                 </TableCell>
 
-                {/* #9: Bestellung */}
-                <TableCell>
-                  {line.orderNumberAssigned ? (
-                    <div>
-                      <span className="font-mono text-xs">{line.orderNumberAssigned}</span>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-status-soft-fail">--</span>
-                  )}
-                </TableCell>
-
-                {/* #10: Serial-# with S/N text + status square */}
+                {/* Col 10: SN status */}
                 <TableCell className="text-xs">
                   <div className="flex items-center gap-1">
                     {/* S/N Text */}
@@ -277,16 +296,15 @@ export function ItemsTable() {
                   </div>
                 </TableCell>
 
-                {/* #12: Details */}
-                <TableCell className="px-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => { setDetailLine(line); setDetailOpen(true); }}
-                  >
-                    <Info className="w-3.5 h-3.5" />
-                  </Button>
+                {/* Col 11: Bestellung — last position (PROJ-22 B2); ACTIVE when run.isExpanded */}
+                <TableCell>
+                  {currentRun?.isExpanded ? (
+                    <ManualOrderPopup line={line} />
+                  ) : line.orderNumberAssigned ? (
+                    <span className="font-mono text-xs">{line.orderNumberAssigned}</span>
+                  ) : (
+                    <span className="text-xs text-status-soft-fail">--</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -294,18 +312,18 @@ export function ItemsTable() {
         </Table>
       </div>
 
-      {/* Expand / Collapse Toggle */}
+      {/* PROJ-22 B1: Expand / Collapse Toggle — 25% groesser (w-6 h-6) */}
       {filteredLines.length > 0 && (
-        <div className="flex justify-center py-2 border-t border-border/40">
+        <div className="flex justify-center py-2 border-t border-border/40 sticky bottom-0 bg-card">
           <button
             className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
             onClick={() => setExpanded((e) => !e)}
             aria-label={expanded ? 'Einklappen' : 'Ausklappen'}
           >
             {expanded ? (
-              <ChevronsUp className="w-5 h-5" />
+              <ChevronsUp className="w-6 h-6" />
             ) : (
-              <ChevronsDown className="w-5 h-5 animate-pulse" />
+              <ChevronsDown className="w-6 h-6 animate-pulse" />
             )}
           </button>
         </div>

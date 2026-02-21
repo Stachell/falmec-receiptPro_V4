@@ -110,6 +110,88 @@ export async function parseInvoicePDF(
 }
 
 /**
+ * PROJ-23: Create aggregated invoice lines — one InvoiceLine per parsed position,
+ * preserving the original qty (e.g. qty=7). No expansion to individual lines.
+ *
+ * LineId schema: {runId}-line-{positionIndex}
+ *
+ * The expansion to qty=1 individual lines happens later in Run 3 of the
+ * MatchingEngine (Phase A4), NOT here.
+ */
+export function createAggregatedInvoiceLines(
+  parsedLines: ParsedInvoiceLine[],
+  runId: string
+): InvoiceLine[] {
+  if (!Array.isArray(parsedLines)) {
+    console.error('[createAggregatedInvoiceLines] parsedLines is not an array:', typeof parsedLines);
+    return [];
+  }
+
+  const lines: InvoiceLine[] = [];
+
+  for (let idx = 0; idx < parsedLines.length; idx++) {
+    const parsed = parsedLines[idx];
+    if (!parsed) {
+      console.warn(`[createAggregatedInvoiceLines] Skipping null/undefined entry at index ${idx}`);
+      continue;
+    }
+
+    try {
+      const positionIndex = parsed.positionIndex ?? idx;
+      const rawQty = parsed.quantityDelivered;
+      const qty = Number.isFinite(rawQty) ? Math.round(rawQty) : 0;
+      const articleNo = parsed.manufacturerArticleNo ?? '';
+      const ean = parsed.ean ?? '';
+      const descriptionIT = parsed.descriptionIT ?? '';
+      const unitPrice = Number.isFinite(parsed.unitPrice) ? parsed.unitPrice : 0;
+      const totalPrice = Number.isFinite(parsed.totalPrice) ? parsed.totalPrice : 0;
+
+      if (qty <= 0) {
+        console.warn(`[createAggregatedInvoiceLines] Skipping position ${positionIndex} with qty=${qty} (raw: ${rawQty})`);
+        continue;
+      }
+
+      lines.push({
+        lineId: `${runId}-line-${positionIndex}`,
+        positionIndex,
+        expansionIndex: 0,
+        manufacturerArticleNo: articleNo,
+        ean,
+        descriptionIT,
+        qty,
+        unitPriceInvoice: unitPrice,
+        totalLineAmount: totalPrice,
+        orderNumberAssigned: null,
+        orderAssignmentReason: 'pending',
+        serialNumber: null,
+        serialSource: 'none',
+        falmecArticleNo: null,
+        descriptionDE: null,
+        storageLocation: null,
+        unitPriceSage: null,
+        unitPriceFinal: null,
+        activeFlag: true,
+        priceCheckStatus: 'pending',
+        matchStatus: 'pending',
+        serialRequired: false,
+        orderYear: null,
+        orderCode: null,
+        orderVorgang: null,
+        orderOpenQty: null,
+        supplierId: null,
+        serialNumbers: [],
+        allocatedOrders: [],
+      });
+    } catch (error) {
+      console.error(`[createAggregatedInvoiceLines] CRITICAL: Error processing position ${idx}:`, error, parsed);
+    }
+  }
+
+  console.log(`[createAggregatedInvoiceLines] Created ${lines.length} aggregated lines from ${parsedLines.length} positions`);
+  return lines;
+}
+
+/**
  * Convert parsed invoice lines to application InvoiceLine format (legacy, no expansion)
  */
 export function convertToInvoiceLines(
@@ -120,6 +202,10 @@ export function convertToInvoiceLines(
 }
 
 /**
+ * @deprecated PROJ-23: This function is kept as a backup reference only.
+ * The active workflow now uses createAggregatedInvoiceLines() instead.
+ * Expansion to qty=1 lines happens in Run 3 of the MatchingEngine (Phase A4).
+ *
  * Expand parsed invoice lines: each position with qty=N becomes N individual lines with qty=1.
  * This is the PROJ-11 expansion logic that replaces the old 1:1 mapping.
  *

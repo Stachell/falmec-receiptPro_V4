@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useClickLock } from '@/hooks/useClickLock';
-import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, FileText, CheckCircle, Settings } from 'lucide-react';
+import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, CheckCircle, Settings } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import {
@@ -11,13 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { logService } from '@/services/logService';
 import { fileSystemService } from '@/services/fileSystemService';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
 import { matcherRegistryService, type MatcherRegistryModule } from '@/services/matcherRegistryService';
 import { getParser } from '@/services/parsers';
 import { getMatcher } from '@/services/matchers';
 import { SettingsPopup } from '@/components/SettingsPopup';
+import { logService } from '@/services/logService';
 
 const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 
@@ -33,8 +33,6 @@ export function AppFooter() {
   const [isConfigured, setIsConfigured] = useState(false);
   const [isSelectingFolder, setIsSelectingFolder] = useState(false);
   const [isToggleHovered, setIsToggleHovered] = useState(false);
-  const [isLogfileHovered, setIsLogfileHovered] = useState(false);
-  const [isDirHovered, setIsDirHovered] = useState(false);
   const [isSettingsHovered, setIsSettingsHovered] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedParserId, setSelectedParserId] = useState('auto');
@@ -86,25 +84,13 @@ export function AppFooter() {
   }, [matcherModules, selectedMatcherId]);
 
   const handleDataPathChange = async () => {
-    // Mark as selecting
     setIsSelectingFolder(true);
-
-    // Open folder picker dialog
     const result = await fileSystemService.selectDirectory();
-
-    // Done selecting
     setIsSelectingFolder(false);
-
     if (result.success) {
       setDataPath(result.path);
       setIsConfigured(true);
     }
-  };
-
-  const handleShowLogfile = () => {
-    // Create a snapshot and open log in new browser tab
-    logService.info('Logfile angezeigt', { step: 'System' });
-    logService.viewLogWithSnapshot();
   };
 
   const handleParserChange = (parserId: string) => {
@@ -303,25 +289,27 @@ export function AppFooter() {
             </Select>
           </div>
 
-          {/* [2] Data Directory (bestehend) */}
+          {/* [2] Datenverzeichnis — PROJ-22 B4: Schwarzer klickbarer Link-Text */}
           <div className="flex items-center gap-2">
-            <Label htmlFor="footer-datapath" className="text-xs text-sidebar-foreground whitespace-nowrap">
+            <Label className="text-xs text-sidebar-foreground whitespace-nowrap">
               Datenverzeichnis
             </Label>
             <button
               onClick={handleDataPathChange}
-              onMouseEnter={() => setIsDirHovered(true)}
-              onMouseLeave={() => setIsDirHovered(false)}
-              className="h-7 px-2 text-xs border rounded-md flex items-center gap-1.5 transition-colors"
+              className="h-7 px-2 text-xs flex items-center gap-1.5 transition-colors"
               style={{
-                backgroundColor: isSelectingFolder ? '#c9c3b6' : (isDirHovered ? '#c9c3b6' : 'var(--surface-elevated)'),
-                borderColor: isSelectingFolder ? '#666666' : 'var(--input)',
-                color: (isSelectingFolder || isDirHovered) ? '#666666' : undefined,
+                color: '#000000',
+                textDecoration: isSelectingFolder ? 'none' : 'underline',
+                textDecorationColor: '#000000',
+                textUnderlineOffset: '2px',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
               }}
               title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwaehlen'}
             >
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span className="truncate max-w-[180px]">
+              <FolderOpen className="w-3.5 h-3.5" style={{ color: '#000000' }} />
+              <span className="truncate max-w-[200px]" style={{ color: '#000000' }}>
                 {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner waehlen...'}
               </span>
               {isConfigured && (
@@ -330,24 +318,7 @@ export function AppFooter() {
             </button>
           </div>
 
-          {/* [3] Logfile Button (bestehend) */}
-          <button
-            onClick={handleShowLogfile}
-            onMouseEnter={() => setIsLogfileHovered(true)}
-            onMouseLeave={() => setIsLogfileHovered(false)}
-            className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
-            style={{
-              backgroundColor: isLogfileHovered ? HOVER_BG : '#c9c3b6',
-              color: isLogfileHovered ? HOVER_TEXT : '#666666',
-              borderColor: isLogfileHovered ? HOVER_BORDER : '#666666',
-            }}
-            title="Logfile"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Logfile</span>
-          </button>
-
-          {/* [4] Einstellungen Button (NEU) */}
+          {/* [3] Einstellungen Button — Logfile wurde in SettingsPopup Tab 1 verschoben */}
           <button
             onClick={() => setSettingsOpen(true)}
             onMouseEnter={() => setIsSettingsHovered(true)}
