@@ -3,7 +3,8 @@
 import { logService } from './logService';
 import { fileSystemService } from './fileSystemService';
 import { fileStorageService } from './fileStorageService';
-import type { Run, InvoiceLine, ArchiveMetadata } from '../types';
+import { buildLeanArchive } from './serialFinder';
+import type { Run, InvoiceLine, ArchiveMetadata, PreFilteredSerialRow, Issue } from '../types';
 
 export interface ArchiveFile {
   id: string;
@@ -350,7 +351,7 @@ class ArchiveService {
   async writeArchivePackage(
     run: Run,
     lines: InvoiceLine[],
-    options?: { exportXml?: string; exportCsv?: string }
+    options?: { exportXml?: string; exportCsv?: string; preFilteredSerials?: PreFilteredSerialRow[]; issues?: Issue[] }
   ): Promise<{ success: boolean; cleanedUp: boolean; folderName: string; failedFiles: string[] }> {
     const runId = run.id;
     const failedFiles: string[] = [];
@@ -417,7 +418,50 @@ class ArchiveService {
       }
     }
 
-    // 7. Build and write metadata.json
+    // 7. PROJ-20: Write serial-data.json (lean archive, no raw Excel)
+    let serialDataInfo: { name: string; size: number } | null = null;
+    if (options?.preFilteredSerials && options.preFilteredSerials.length > 0) {
+      const leanSerials = buildLeanArchive(options.preFilteredSerials);
+      const serialJson = JSON.stringify(leanSerials, null, 2);
+      const ok = await fileSystemService.saveToArchive(folderName, 'serial-data.json', serialJson);
+      if (ok) {
+        serialDataInfo = { name: 'serial-data.json', size: serialJson.length };
+      } else {
+        failedFiles.push('serial-data.json');
+      }
+    }
+
+    // 7.5 PROJ-21: Write run-report.json (Issues + Summary)
+    let runReportInfo: { name: string; size: number } | null = null;
+    if (options?.issues && options.issues.length > 0) {
+      const runIssues = options.issues.filter(i => i.runId === run.id);
+      const runReport = {
+        version: 1,
+        runId,
+        fattura: run.invoice.fattura,
+        generatedAt: new Date().toISOString(),
+        summary: {
+          totalIssues: runIssues.length,
+          openIssues: runIssues.filter(i => i.status === 'open').length,
+          resolvedIssues: runIssues.filter(i => i.status === 'resolved').length,
+          bySeverity: {
+            error: runIssues.filter(i => i.severity === 'error').length,
+            warning: runIssues.filter(i => i.severity === 'warning').length,
+            info: runIssues.filter(i => i.severity === 'info').length,
+          },
+        },
+        issues: runIssues,
+      };
+      const reportJson = JSON.stringify(runReport, null, 2);
+      const ok = await fileSystemService.saveToArchive(folderName, 'run-report.json', reportJson);
+      if (ok) {
+        runReportInfo = { name: 'run-report.json', size: reportJson.length };
+      } else {
+        failedFiles.push('run-report.json');
+      }
+    }
+
+    // 8. Build and write metadata.json
     const metadata: ArchiveMetadata = {
       version: 1,
       runId,
@@ -446,6 +490,8 @@ class ArchiveService {
         exportCsv: exportCsvInfo,
         artikelstamm: null,
         offeneBestellungen: null,
+        serialData: serialDataInfo,
+        runReport: runReportInfo,
       },
     };
 

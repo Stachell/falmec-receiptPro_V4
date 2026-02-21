@@ -48,16 +48,17 @@ export function PriceStatusChip({ status, className }: PriceStatusChipProps) {
 }
 
 interface SeverityBadgeProps {
-  severity: 'blocking' | 'soft-fail';
+  severity: 'error' | 'warning' | 'info';
   className?: string;
 }
 
 export function SeverityBadge({ severity, className }: SeverityBadgeProps) {
   const config = {
-    blocking: { class: 'status-chip-failed', label: 'Blockierend' },
-    'soft-fail': { class: 'status-chip-soft-fail', label: 'Warnung' },
+    error: { class: 'status-chip-failed', label: 'Fehler' },
+    warning: { class: 'status-chip-soft-fail', label: 'Warnung' },
+    info: { class: 'bg-blue-500/20 text-blue-400', label: 'Info' },
   };
-  
+
   return (
     <span className={cn('status-chip', config[severity].class, className)}>
       {config[severity].label}

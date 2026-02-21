@@ -1,6 +1,7 @@
 export type StepStatus = 'not-started' | 'running' | 'ok' | 'soft-fail' | 'failed';
 
-export type IssueSeverity = 'blocking' | 'soft-fail';
+// PROJ-21: 3-tier severity (migrated from 'blocking'|'soft-fail')
+export type IssueSeverity = 'error' | 'warning' | 'info';
 
 export type IssueType =
   | 'order-assignment'
@@ -21,7 +22,11 @@ export type IssueType =
   // PROJ-17: Step 3 deep-logging subtypes
   | 'sn-invoice-ref-missing'
   | 'sn-regex-failed'
-  | 'sn-insufficient-count';
+  | 'sn-insufficient-count'
+  // PROJ-21: Step 4 deep-logging subtypes
+  | 'order-incomplete'
+  | 'order-multi-split'
+  | 'order-fifo-only';
 
 export type MatchStatus =
   | 'pending'
@@ -41,7 +46,20 @@ export type OrderAssignmentReason =
   | 'manual'
   | 'manual-ok'
   | 'not-ordered'
-  | 'pending';
+  | 'pending'
+  // PROJ-20: 4-stage waterfall mapper reasons
+  | 'perfect-match'
+  | 'reference-match'
+  | 'smart-qty-match'
+  | 'fifo-fallback';
+
+// PROJ-20: Partial order allocation on aggregated positions
+export interface AllocatedOrder {
+  orderNumber: string;    // e.g. "2025-10153"
+  orderYear: number;
+  qty: number;            // Partial quantity from this order
+  reason: OrderAssignmentReason;
+}
 
 export interface RunConfig {
   priceBasis: 'Net' | 'Gross';
@@ -49,6 +67,9 @@ export interface RunConfig {
   tolerance: number;
   eingangsart: string;
   clickLockSeconds: number;
+  // PROJ-20: Active module selection
+  activeSerialFinderId: string;   // Default: 'default'
+  activeOrderMapperId: string;    // Default: 'waterfall-4'
 }
 
 export interface RunStats {
@@ -73,6 +94,12 @@ export interface RunStats {
   priceMissingCount: number;
   priceCustomCount: number;
   manualOkOrderCount: number;
+
+  // PROJ-20: 4-stage waterfall mapper stats
+  perfectMatchCount: number;
+  referenceMatchCount: number;
+  smartQtyMatchCount: number;
+  fifoFallbackCount: number;
 }
 
 export interface WorkflowStep {
@@ -176,6 +203,12 @@ export interface InvoiceLine {
 
   // --- PROJ-11: Supplier ---
   supplierId: string | null;
+
+  // --- PROJ-20: Aggregated S/N data (array per position instead of expansion) ---
+  serialNumbers: string[];
+
+  // --- PROJ-20: Aggregated order allocations (partial quantities per order) ---
+  allocatedOrders: AllocatedOrder[];
 }
 
 export interface OpenWEPosition {
@@ -226,6 +259,13 @@ export interface Issue {
   createdAt: string;
   resolvedAt: string | null;
   resolutionNote: string | null;
+  // PROJ-21: Optional context for jump-links and auto-resolve
+  context?: {
+    positionIndex?: number;        // Aggregated position (1-based)
+    field?: string;                // Affected field (e.g. 'priceCheckStatus', 'serialNumber')
+    expectedValue?: string;        // Expected value (for auto-resolve check)
+    actualValue?: string;          // Current value
+  };
 }
 
 export interface AuditLogEntry {
@@ -267,6 +307,54 @@ export const EINGANGSART_OPTIONS = [
   'Sondereingang',
 ] as const;
 
+// PROJ-20: Expanded view line for UI display and XML export (derived from aggregated InvoiceLine)
+export interface ExpandedViewLine extends Omit<InvoiceLine, 'serialNumbers' | 'allocatedOrders'> {
+  /** Index within the expansion (0..qty-1) */
+  expansionIndex: number;
+  /** Single serial number for this expanded line (from serialNumbers[i]) */
+  serialNumber: string | null;
+  /** Single allocated order for this expanded line */
+  allocatedOrder: AllocatedOrder | null;
+  /** Unique line ID for the expanded view */
+  lineId: string;
+}
+
+// PROJ-20: Parsed order position (from orderParser)
+export interface ParsedOrderPosition {
+  id: string;
+  artNoDE: string;
+  ean: string;
+  artNoIT: string;
+  supplierId: string;
+  openQuantity: number;
+  orderNumber: string;    // Regex /^1\d{4}$/
+  orderYear: number;      // Regex /^\d{4}$/
+  belegnummer: string;
+}
+
+export interface OrderParseResult {
+  positions: ParsedOrderPosition[];
+  rowCount: number;
+  warnings: string[];
+}
+
+// PROJ-20: Pre-filtered serial row (from serialFinder pre-filter step)
+export interface PreFilteredSerialRow {
+  serialNumber: string;
+  ean: string;
+  artNoIT: string;
+  invoiceReference: string;
+  sourceRowIndex: number;
+}
+
+// PROJ-20: Lean archive entry for S/N data (no raw files, no invoiceReference)
+export interface LeanSerialArchiveEntry {
+  ean: string;
+  artNoIT: string;
+  serialNumber: string;
+  sourceRowIndex: number;
+}
+
 // PROJ-12: Archive package metadata written to metadata.json on disk
 export interface ArchiveMetadata {
   version: 1;
@@ -299,5 +387,9 @@ export interface ArchiveMetadata {
     exportCsv: { name: string; size: number } | null;
     artikelstamm: { name: string; size: number } | null;
     offeneBestellungen: { name: string; size: number } | null;
+    // PROJ-20: Lean serial archive (JSON, not raw Excel)
+    serialData: { name: string; size: number } | null;
+    // PROJ-21: Run report with issues summary
+    runReport: { name: string; size: number } | null;
   };
 }

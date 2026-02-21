@@ -20,7 +20,11 @@ import {
 } from '@/components/ui/table';
 
 export function WarehouseLocations() {
-  const { invoiceLines, updateInvoiceLine } = useRunStore();
+  const { invoiceLines: allInvoiceLines, updateInvoiceLine, currentRun } = useRunStore();
+  // HOTFIX-1: Filter lines to current run only
+  const invoiceLines = currentRun
+    ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
+    : allInvoiceLines;
   const [editMode, setEditMode] = useState(false);
   const [globalWE, setGlobalWE] = useState<StorageLocation>('WE Lager;0;0;0');
   const [globalKDD, setGlobalKDD] = useState<StorageLocation>('WE KDD;0;0;0');

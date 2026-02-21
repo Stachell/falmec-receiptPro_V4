@@ -365,6 +365,39 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
               </div>
             )}
 
+            {/* PROJ-20: Aktiver Serial-Finder */}
+            <div className="flex items-center justify-between gap-4">
+              <Label className="text-sm whitespace-nowrap">Aktiver Serial-Finder</Label>
+              <Select
+                value={globalConfig.activeSerialFinderId ?? 'default'}
+                onValueChange={(v) => setGlobalConfig({ activeSerialFinderId: v })}
+              >
+                <SelectTrigger className="h-8 w-28 text-sm bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="default">Standard</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* PROJ-20: Aktiver OrderMapper */}
+            <div className="flex items-center justify-between gap-4">
+              <Label className="text-sm whitespace-nowrap">Aktiver OrderMapper</Label>
+              <Select
+                value={globalConfig.activeOrderMapperId ?? 'waterfall-4'}
+                onValueChange={(v) => setGlobalConfig({ activeOrderMapperId: v })}
+              >
+                <SelectTrigger className="h-8 w-28 text-sm bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="legacy-3">Legacy (3 Regeln)</SelectItem>
+                  <SelectItem value="waterfall-4">Wasserfall (4 Stufen)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Separator */}
             <div className="border-t border-border my-1" />
 

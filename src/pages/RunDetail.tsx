@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileWarning, RefreshCw, Play, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, FileWarning, RefreshCw, Play, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -42,6 +42,7 @@ export default function RunDetail() {
     parsedPositions,
     parserWarnings,
     advanceToNextStep,
+    retryStep,              // HOTFIX-2
     createNewRunWithParsing,
     executeMatcherCrossMatch,
     isProcessing,
@@ -252,24 +253,34 @@ export default function RunDetail() {
 
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
-          {/* Kachel 1: erkannte Positionen */}
+          {/* Kachel 1: Positionen erhalten — PROJ-20 */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines} / ${parsedInvoiceResult?.header.pzCount ?? parsedInvoiceResult?.header.parsedPositionsCount ?? '?'}`}
-            label="Rechnungszeilen"
+            label="Positionen erhalten"
             subValue={
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
                 ? 'Fehler: Anzahl stimmt nicht'
-                : `${parsedInvoiceResult?.header.parsedPositionsCount ?? 0} Positionen`
+                : parsedInvoiceResult?.header.fatturaNumber ?? 'n/a'
             }
             variant={
-              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch' ? 'warning' : 'default'
+              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+                ? 'warning'
+                : parsedInvoiceResult?.header.qtyValidationStatus === 'ok'
+                  ? 'success'
+                  : 'default'
             }
           />
-          {/* Kachel 2: Artikel extrahieren — klickbar wenn Issues vorhanden */}
+          {/* Kachel 2: Artikel extrahiert — PROJ-20 */}
           <KPITile
             value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
-            label="Artikel extrahieren"
-            subValue={currentRun.stats.noMatchCount > 0 ? `${currentRun.stats.noMatchCount} ohne Match` : undefined}
+            label="Artikel extrahiert"
+            subValue={
+              currentRun.stats.noMatchCount > 0
+                ? `${currentRun.stats.expandedLineCount} Artikel (${currentRun.stats.noMatchCount} ohne Match)`
+                : currentRun.stats.expandedLineCount > 0
+                  ? `${currentRun.stats.expandedLineCount} Artikel`
+                  : undefined
+            }
             variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
             onClick={currentRun.stats.noMatchCount > 0 ? () => {
               setIssuesStepFilter('2');
@@ -289,10 +300,11 @@ export default function RunDetail() {
             }
             variant={currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0 ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default'}
           />
-          {/* Kachel 4: Serial parsen — klickbar wenn S/N-Issues vorhanden */}
+          {/* Kachel 4: Serials geparst — PROJ-20 */}
           <KPITile
             value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
-            label="Serial parsen"
+            label="Serials geparst"
+            icon={<Fingerprint className="w-4 h-4" />}
             subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
             variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
             onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
@@ -315,16 +327,8 @@ export default function RunDetail() {
               if (allStepsComplete) {
                 setActiveTab('export');
               } else if (currentRun && hasFailedStep && nextStep) {
-                // Manual retry: reset failed step to running and re-execute
-                if (nextStep.stepNo === 1) {
-                  // Re-trigger parsing (user must fix the PDF and retry)
-                  advanceToNextStep(currentRun.id);
-                } else if (nextStep.stepNo === 2) {
-                  // Re-trigger article matching
-                  executeMatcherCrossMatch();
-                } else {
-                  advanceToNextStep(currentRun.id);
-                }
+                // HOTFIX-2: Dedicated retry action for failed steps
+                retryStep(currentRun.id, nextStep.stepNo);
               } else if (currentRun) {
                 advanceToNextStep(currentRun.id);
               }

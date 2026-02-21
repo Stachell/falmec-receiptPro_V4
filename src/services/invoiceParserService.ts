@@ -12,7 +12,7 @@ import {
   type ParsedInvoiceResult,
   type ParsedInvoiceLine,
 } from './parsers';
-import type { InvoiceLine, InvoiceHeader } from '@/types';
+import type { InvoiceLine, InvoiceHeader, AllocatedOrder, ExpandedViewLine } from '@/types';
 import { logService } from './logService';
 
 /**
@@ -189,6 +189,8 @@ export function expandInvoiceLines(
           orderVorgang: null,
           orderOpenQty: null,
           supplierId: null,
+          serialNumbers: [],
+          allocatedOrders: [],
         });
       }
     } catch (error) {
@@ -239,6 +241,61 @@ export function generateRunId(fatturaNumber: string): string {
     now.getMinutes().toString().padStart(2, '0') +
     now.getSeconds().toString().padStart(2, '0');
   return `Fattura-${fatturaNumber.trim()}-${datePart}-${timePart}`;
+}
+
+/**
+ * PROJ-20: Expand aggregated invoice lines into flat view lines for UI display and XML export.
+ *
+ * Each aggregated position with qty=N becomes N individual ExpandedViewLine objects.
+ * Serial numbers and allocated orders are distributed across the expansion.
+ *
+ * This is a PURE VIEW TRANSFORMATION — it does NOT modify the store.
+ */
+export function expandForDisplay(aggregatedLines: InvoiceLine[]): ExpandedViewLine[] {
+  const result: ExpandedViewLine[] = [];
+
+  for (const line of aggregatedLines) {
+    const qty = Math.max(1, line.qty);
+
+    for (let i = 0; i < qty; i++) {
+      // Find the allocated order covering this expansion index
+      const allocatedOrder = findOrderForIndex(line.allocatedOrders, i);
+
+      // Destructure to omit serialNumbers and allocatedOrders from spread
+      const { serialNumbers: _sn, allocatedOrders: _ao, ...rest } = line;
+
+      result.push({
+        ...rest,
+        expansionIndex: i,
+        serialNumber: line.serialNumbers[i] ?? null,
+        allocatedOrder,
+        lineId: `${line.lineId}-exp-${i}`,
+        qty: 1,
+        unitPriceInvoice: line.unitPriceInvoice,
+        totalLineAmount: line.unitPriceInvoice, // qty=1 → total = unit
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Find the AllocatedOrder covering a specific expansion index.
+ *
+ * allocatedOrders are sequential: if orders = [{qty:7}, {qty:3}],
+ * then indices 0-6 → order[0], indices 7-9 → order[1].
+ */
+function findOrderForIndex(
+  allocatedOrders: AllocatedOrder[],
+  index: number,
+): AllocatedOrder | null {
+  let offset = 0;
+  for (const order of allocatedOrders) {
+    if (index < offset + order.qty) return order;
+    offset += order.qty;
+  }
+  return null;
 }
 
 // Export types for convenience

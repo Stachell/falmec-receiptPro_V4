@@ -47,7 +47,9 @@ export function RunLogTab({ runId, mode, compact = false }: RunLogTabProps) {
 
     const poll = () => {
       const buffer = logService.getRunBuffer(runId);
-      setEntries([...buffer]);
+      // HOTFIX-4: Fall back to localStorage if in-memory buffer is empty (e.g. after page reload)
+      const source = buffer.length > 0 ? buffer : logService.getRunLog(runId);
+      setEntries([...source]);
     };
 
     poll(); // initial

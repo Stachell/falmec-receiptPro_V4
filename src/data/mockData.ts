@@ -144,6 +144,8 @@ export const mockInvoiceLines: InvoiceLine[] = [
     positionIndex: 0, expansionIndex: 0, matchStatus: 'full-match',
     serialRequired: true, unitPriceFinal: 459.99,
     orderYear: 2025, orderCode: '12345', orderVorgang: 'Bestellung', orderOpenQty: 2, supplierId: 'SUP-FAL-001',
+    serialNumbers: [],
+    allocatedOrders: [],
   },
   {
     lineId: 'line-002',
@@ -166,6 +168,8 @@ export const mockInvoiceLines: InvoiceLine[] = [
     positionIndex: 1, expansionIndex: 0, matchStatus: 'full-match',
     serialRequired: true, unitPriceFinal: null,
     orderYear: 2025, orderCode: '12346', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
+    serialNumbers: [],
+    allocatedOrders: [],
   },
   {
     lineId: 'line-003',
@@ -188,6 +192,8 @@ export const mockInvoiceLines: InvoiceLine[] = [
     positionIndex: 2, expansionIndex: 0, matchStatus: 'code-it-only',
     serialRequired: false, unitPriceFinal: 24.99,
     orderYear: null, orderCode: null, orderVorgang: null, orderOpenQty: null, supplierId: null,
+    serialNumbers: [],
+    allocatedOrders: [],
   },
   {
     lineId: 'line-004',
@@ -210,6 +216,8 @@ export const mockInvoiceLines: InvoiceLine[] = [
     positionIndex: 3, expansionIndex: 0, matchStatus: 'ean-only',
     serialRequired: true, unitPriceFinal: 1299.00,
     orderYear: 2025, orderCode: '12347', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
+    serialNumbers: [],
+    allocatedOrders: [],
   },
   {
     lineId: 'line-005',
@@ -232,6 +240,8 @@ export const mockInvoiceLines: InvoiceLine[] = [
     positionIndex: 4, expansionIndex: 0, matchStatus: 'no-match',
     serialRequired: false, unitPriceFinal: 199.00,
     orderYear: 2025, orderCode: '12348', orderVorgang: 'Bestellung', orderOpenQty: 1, supplierId: 'SUP-FAL-001',
+    serialNumbers: [],
+    allocatedOrders: [],
   },
 ];
 
@@ -393,7 +403,7 @@ export const mockArticleMaster: ArticleMaster[] = [
 export const mockIssues: Issue[] = [
   {
     id: 'issue-001',
-    severity: 'soft-fail',
+    severity: 'warning',
     stepNo: 4,
     type: 'price-mismatch',
     message: 'Preisabweichung erkannt',
@@ -406,7 +416,7 @@ export const mockIssues: Issue[] = [
   },
   {
     id: 'issue-002',
-    severity: 'blocking',
+    severity: 'error',
     stepNo: 5,
     type: 'missing-storage-location',
     message: 'Lagerort fehlt',
@@ -419,7 +429,7 @@ export const mockIssues: Issue[] = [
   },
   {
     id: 'issue-003',
-    severity: 'soft-fail',
+    severity: 'warning',
     stepNo: 4,
     type: 'inactive-article',
     message: 'Inaktiver Artikel',

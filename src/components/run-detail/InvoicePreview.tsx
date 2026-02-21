@@ -7,12 +7,15 @@
  * @component
  */
 
-import { useState } from 'react';
-import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended } from '@/types';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useRunStore } from '@/store/runStore';
+import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended, PriceCheckStatus, InvoiceLine } from '@/types';
 
 interface InvoicePreviewProps {
   /** Parsed invoice header data */
@@ -36,6 +39,15 @@ function formatCurrency(value: number): string {
     currency: 'EUR',
   }).format(value);
 }
+
+// PROJ-20: Price badge config (mirrored from PriceCell.tsx)
+const PRICE_BADGE_CONFIG: Record<PriceCheckStatus, { text: string; className: string }> = {
+  pending:  { text: 'folgt',     className: 'bg-amber-100 text-amber-700' },
+  ok:       { text: 'OK',        className: 'bg-green-100 text-green-700' },
+  mismatch: { text: 'PRUEFEN',   className: 'bg-yellow-100 text-yellow-700' },
+  missing:  { text: 'fehlt',     className: 'bg-red-100 text-red-700' },
+  custom:   { text: 'angepasst', className: 'bg-blue-100 text-blue-700' },
+};
 
 /**
  * Get badge variant for order status
@@ -64,6 +76,32 @@ export function InvoicePreview({
   const [expandedPositions, setExpandedPositions] = useState(false);
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
+
+  // PROJ-20: Aggregated status from expanded lines per position
+  const { invoiceLines: allInvoiceLines, currentRun } = useRunStore();
+  // HOTFIX-1: Filter lines to current run only
+  const invoiceLines = currentRun
+    ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
+    : allInvoiceLines;
+  const positionStatusMap = useMemo(() => {
+    const map = new Map<number, {
+      priceCheckStatus: PriceCheckStatus;
+      serialRequired: boolean;
+      serialAssigned: boolean;
+      representativeLine: InvoiceLine;
+    }>();
+    for (const line of invoiceLines) {
+      if (!map.has(line.positionIndex)) {
+        map.set(line.positionIndex, {
+          priceCheckStatus: line.priceCheckStatus,
+          serialRequired: line.serialRequired,
+          serialAssigned: !!line.serialNumber,
+          representativeLine: line,
+        });
+      }
+    }
+    return map;
+  }, [invoiceLines]);
 
   return (
     <div className="space-y-6">
@@ -146,6 +184,9 @@ export function InvoicePreview({
                       <TableHead className="text-right w-[100px]">Einzelpreis</TableHead>
                       <TableHead className="text-right w-[100px]">Gesamtpreis</TableHead>
                       <TableHead className="w-[100px]">Bestellung</TableHead>
+                      <TableHead className="w-[70px]">Preis</TableHead>
+                      <TableHead className="w-[36px]">SN</TableHead>
+                      <TableHead className="w-[36px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -188,6 +229,73 @@ export function InvoicePreview({
                                 </span>
                               )}
                             </div>
+                          </TableCell>
+                          {/* PROJ-20: PriceCheck badge */}
+                          <TableCell className="px-1">
+                            {(() => {
+                              const posStatus = positionStatusMap.get(position.positionIndex);
+                              if (!posStatus) return null;
+                              const badge = PRICE_BADGE_CONFIG[posStatus.priceCheckStatus];
+                              return (
+                                <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
+                                  {badge.text}
+                                </span>
+                              );
+                            })()}
+                          </TableCell>
+                          {/* PROJ-20: S/N traffic light square */}
+                          <TableCell className="px-1">
+                            {(() => {
+                              const posStatus = positionStatusMap.get(position.positionIndex);
+                              if (!posStatus) return null;
+                              return (
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span
+                                        className="inline-block w-3 h-3 rounded-sm border"
+                                        style={{
+                                          backgroundColor: !posStatus.serialRequired
+                                            ? '#000000'
+                                            : posStatus.serialAssigned
+                                              ? '#22C55E'
+                                              : '#E5E7EB',
+                                          borderColor: !posStatus.serialRequired
+                                            ? '#000000'
+                                            : posStatus.serialAssigned
+                                              ? '#16A34A'
+                                              : '#9CA3AF',
+                                        }}
+                                      />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      {!posStatus.serialRequired
+                                        ? 'Keine S/N-Pflicht'
+                                        : posStatus.serialAssigned
+                                          ? 'S/N zugewiesen'
+                                          : 'S/N ausstehend'}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              );
+                            })()}
+                          </TableCell>
+                          {/* PROJ-20: Info button */}
+                          <TableCell className="px-1">
+                            {positionStatusMap.has(position.positionIndex) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => {
+                                  // Navigate to Artikelliste tab with this position focused
+                                  const { setActiveTab } = useRunStore.getState();
+                                  setActiveTab('items');
+                                }}
+                              >
+                                <Info className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       );

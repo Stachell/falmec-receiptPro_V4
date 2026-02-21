@@ -12,6 +12,7 @@ import {
   ArticleMaster,
   OpenWEPosition,
   RunStats,
+  ParsedOrderPosition,
 } from '@/types';
 import {
   mockRuns,
@@ -35,9 +36,12 @@ import { getParsingTimeoutMs } from '@/services/parsers/config';
 import type { ParserWarning } from '@/services/parsers/types';
 import { matchAllArticles } from '@/services/matching/ArticleMatcher';
 import { matchAllOrders } from '@/services/matching/OrderMatcher';
+import { mapAllOrders as mapAllOrdersWaterfall } from '@/services/matching/orderMapper';
 import { getMatcher } from '@/services/matchers';
 import { matcherRegistryService } from '@/services/matcherRegistryService';
 import type { SerialDocument } from '@/services/matchers/types';
+import type { PreFilteredSerialRow } from '@/types';
+import { validateAgainstInvoice } from '@/services/serialFinder';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -131,7 +135,7 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
   const blockingIssues: Issue[] = parserErrors.map((warning, index) => ({
     id: `issue-${runId}-step1-${warning.code || 'unknown'}-${index}-${Date.now()}`,
     runId,
-    severity: 'blocking' as const,
+    severity: 'error' as const,
     stepNo: 1,
     type: mapParserWarningToIssueType(warning.code),
     message: warning.message || 'Parserfehler ohne Meldung',
@@ -152,7 +156,7 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
   const softFailIssues: Issue[] = typeBWarnings.map((warning, index) => ({
     id: `issue-${runId}-step1-${warning.code}-${index}-${Date.now()}`,
     runId,
-    severity: 'soft-fail' as const,
+    severity: 'warning' as const,
     stepNo: 1,
     type: mapParserWarningToIssueType(warning.code),
     message: warning.message || 'Sonderbuchungs-Bestellnummer erkannt',
@@ -167,6 +171,79 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
   }));
 
   return [...blockingIssues, ...softFailIssues];
+}
+
+// ── PROJ-21 Phase 4: Auto-Resolve ────────────────────────────────────
+/**
+ * Check if an issue's error condition is still active based on current line data.
+ * Returns `true` if the issue should remain open, `false` if it can be auto-resolved.
+ */
+function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
+  // Only auto-resolve issues that reference specific lines
+  if (issue.relatedLineIds.length === 0) return true;
+
+  const related = lines.filter(l => issue.relatedLineIds.includes(l.lineId));
+  // If none of the referenced lines exist (deleted?), keep open
+  if (related.length === 0) return true;
+
+  switch (issue.type) {
+    case 'price-mismatch':
+      return related.some(l => l.priceCheckStatus === 'mismatch');
+
+    case 'no-article-match':
+    case 'match-artno-not-found':
+    case 'match-ean-not-found':
+      return related.some(l => l.matchStatus === 'no-match');
+
+    case 'match-conflict-id':
+      // Conflict resolves when all related lines have a definitive match
+      return related.some(l => l.matchStatus === 'no-match' || l.matchStatus === 'pending');
+
+    case 'serial-mismatch':
+    case 'sn-insufficient-count':
+      return related.some(l => l.serialRequired && l.serialNumbers.length < l.qty);
+
+    case 'order-no-match':
+      return related.some(l => l.orderAssignmentReason === 'not-ordered' || l.orderAssignmentReason === 'pending');
+
+    case 'order-incomplete': {
+      return related.some(l => {
+        const allocated = l.allocatedOrders.reduce((s, a) => s + a.qty, 0);
+        return allocated > 0 && allocated < l.qty;
+      });
+    }
+
+    case 'inactive-article':
+      return related.some(l => l.activeFlag === false);
+
+    // These types are not auto-resolvable (parser errors, info hints, etc.)
+    default:
+      return true;
+  }
+}
+
+/**
+ * Scan all open issues and auto-resolve those whose error condition is no longer active.
+ * Returns the original array reference if nothing changed (avoids unnecessary re-renders).
+ */
+function autoResolveIssues(issues: Issue[], lines: InvoiceLine[], runId: string): Issue[] {
+  let changed = false;
+  const result = issues.map(issue => {
+    if (issue.status !== 'open' || issue.runId !== runId) return issue;
+
+    const stillActive = checkIssueStillActive(issue, lines);
+    if (!stillActive) {
+      changed = true;
+      return {
+        ...issue,
+        status: 'resolved' as const,
+        resolvedAt: new Date().toISOString(),
+        resolutionNote: 'Automatisch gelöst durch manuelle Korrektur',
+      };
+    }
+    return issue;
+  });
+  return changed ? result : issues;
 }
 
 /**
@@ -214,7 +291,7 @@ function buildArticleMatchIssues(runId: string, lines: InvoiceLine[]): Issue[] {
   return [{
     id: `issue-${runId}-step2-no-match-${Date.now()}`,
     runId,
-    severity: 'blocking',
+    severity: 'error',
     stepNo: 2,
     type: 'no-article-match',
     message: `${noMatchLines.length} Artikel ohne Match in Stammdaten`,
@@ -244,6 +321,9 @@ interface RunState {
   // Serial document (from Step 3, PROJ-16)
   serialDocument: SerialDocument | null;
 
+  // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
+  preFilteredSerials: PreFilteredSerialRow[];
+
   // Global Config
   globalConfig: RunConfig;
 
@@ -253,11 +333,18 @@ interface RunState {
   parsingProgress: string;
   /** PROJ-17: step filter preset from KPI-Tile click navigation (null = no preset) */
   issuesStepFilter: string | null;
+  /** PROJ-21: Jump-link highlighting — lineIds to visually highlight in ItemsTable */
+  highlightedLineIds: string[];
+  /** PROJ-21: Jump-link scroll target — first lineId to scroll into view */
+  scrollToLineId: string | null;
 
   // Actions
   setCurrentRun: (run: Run | null) => void;
   setActiveTab: (tab: string) => void;
   setIssuesStepFilter: (filter: string | null) => void;
+  /** PROJ-21: Navigate from issue to affected row(s) in ItemsTable */
+  navigateToLine: (lineIds: string[]) => void;
+  clearHighlightedLines: () => void;
   setGlobalConfig: (config: Partial<RunConfig>) => void;
   addUploadedFile: (file: UploadedFile) => void;
   removeUploadedFile: (type: UploadedFile['type']) => void;
@@ -268,6 +355,8 @@ interface RunState {
   updateRunStatus: (runId: string, status: StepStatus) => void;
   updateStepStatus: (runId: string, stepNo: number, status: StepStatus) => void;
   updateInvoiceLine: (lineId: string, updates: Partial<InvoiceLine>) => void;
+  /** PROJ-20: Update ALL lines with a given positionIndex (cascading from aggregated view) */
+  updatePositionLines: (positionIndex: number, updates: Partial<InvoiceLine>) => void;
   resolveIssue: (issueId: string, resolutionNote: string) => void;
   addAuditEntry: (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) => void;
 
@@ -279,6 +368,7 @@ interface RunState {
 
   // Workflow actions
   advanceToNextStep: (runId: string) => void;
+  retryStep: (runId: string, stepNo: number) => void;  // HOTFIX-2
   deleteRun: (runId: string) => void;
 
   // PROJ-12: Archive & abort actions
@@ -297,8 +387,10 @@ interface RunState {
   executeMatcherCrossMatch: () => void;
   executeMatcherSerialExtract: () => void;
 
-  // PROJ-11 Phase C: Order matching (Step 4)
+  // PROJ-11 Phase C: Order matching (Step 4) — legacy
   executeOrderMatching: (openPositions: OpenWEPosition[]) => void;
+  // PROJ-20: 4-stage waterfall order mapping (Step 4)
+  executeOrderMapping: (parsedOrders: ParsedOrderPosition[]) => void;
   setManualOrder: (lineId: string, orderYear: number, orderCode: string) => void;
   confirmNoOrder: (lineId: string) => void;
 }
@@ -320,6 +412,9 @@ export const useRunStore = create<RunState>((set, get) => ({
   // Serial document (PROJ-16)
   serialDocument: null,
 
+  // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
+  preFilteredSerials: [],
+
   // Global Config
   globalConfig: {
     priceBasis: 'Net',
@@ -327,6 +422,8 @@ export const useRunStore = create<RunState>((set, get) => ({
     tolerance: 0.01,
     eingangsart: 'Standard',
     clickLockSeconds: 0,
+    activeSerialFinderId: 'default',
+    activeOrderMapperId: 'waterfall-4',
   },
 
   // UI State
@@ -334,6 +431,8 @@ export const useRunStore = create<RunState>((set, get) => ({
   isProcessing: false,
   parsingProgress: '',
   issuesStepFilter: null,
+  highlightedLineIds: [],
+  scrollToLineId: null,
 
   // Actions
   setCurrentRun: (run) => set({ currentRun: run }),
@@ -341,6 +440,21 @@ export const useRunStore = create<RunState>((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setIssuesStepFilter: (filter) => set({ issuesStepFilter: filter }),
+
+  // PROJ-21: Jump-link navigation — highlight + scroll + tab switch
+  navigateToLine: (lineIds) => {
+    set({
+      highlightedLineIds: lineIds,
+      scrollToLineId: lineIds[0] ?? null,
+      activeTab: 'items',
+    });
+    // Auto-clear highlight after 5 seconds
+    setTimeout(() => {
+      set({ highlightedLineIds: [], scrollToLineId: null });
+    }, 5000);
+  },
+
+  clearHighlightedLines: () => set({ highlightedLineIds: [], scrollToLineId: null }),
 
   setGlobalConfig: (config) => set((state) => ({
     globalConfig: { ...state.globalConfig, ...config }
@@ -381,6 +495,30 @@ export const useRunStore = create<RunState>((set, get) => ({
             { step: 'Stammdaten' },
           );
         });
+    }
+
+    // PROJ-20: Pre-filter serial Excel immediately on upload (Memory only, no localStorage)
+    if (file.type === 'serialList' && fileWithTimestamp.file) {
+      import('@/services/serialFinder').then(({ preFilterSerialExcel }) => {
+        preFilterSerialExcel(fileWithTimestamp.file!)
+          .then((result) => {
+            set({ preFilteredSerials: result.filteredRows });
+            logService.info(
+              `S/N Pre-Filter: ${result.regexMatchCount}/${result.totalRowsScanned} Zeilen mit gültigem S/N`,
+              { step: 'Seriennummer anfuegen' },
+            );
+            for (const w of result.warnings) {
+              logService.warn(`[SerialFinder] ${w}`, { step: 'Seriennummer anfuegen' });
+            }
+          })
+          .catch((err) => {
+            console.error('[RunStore] serialFinder preFilter failed:', err);
+            logService.error(
+              `S/N Pre-Filter fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+              { step: 'Seriennummer anfuegen' },
+            );
+          });
+      });
     }
 
     // Save to IndexedDB (async, fire and forget)
@@ -473,6 +611,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         exportReady: false,
         expandedLineCount: 0, fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
         serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
+        perfectMatchCount: 0, referenceMatchCount: 0, smartQtyMatchCount: 0, fifoFallbackCount: 0,
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
@@ -557,6 +696,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         exportReady: false,
         expandedLineCount: 0, fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
         serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0, manualOkOrderCount: 0,
+        perfectMatchCount: 0, referenceMatchCount: 0, smartQtyMatchCount: 0, fifoFallbackCount: 0,
       },
       steps: [
         { stepNo: 1, name: 'Rechnung auslesen', status: 'running', issuesCount: 0 },
@@ -1048,12 +1188,25 @@ export const useRunStore = create<RunState>((set, get) => ({
     const updateSteps = (steps: Run['steps']) =>
       steps.map(step => step.stepNo === stepNo ? { ...step, status } : step);
 
+    // HOTFIX-3: Step-Failure kaskadiert auf Run-Status
+    const runStatusOverride = status === 'failed' ? ('soft-fail' as StepStatus) : undefined;
+
     return {
       runs: state.runs.map(run =>
-        run.id === runId ? { ...run, steps: updateSteps(run.steps) } : run
+        run.id === runId
+          ? {
+              ...run,
+              steps: updateSteps(run.steps),
+              ...(runStatusOverride ? { status: runStatusOverride } : {}),
+            }
+          : run
       ),
       currentRun: state.currentRun?.id === runId
-        ? { ...state.currentRun, steps: updateSteps(state.currentRun.steps) }
+        ? {
+            ...state.currentRun,
+            steps: updateSteps(state.currentRun.steps),
+            ...(runStatusOverride ? { status: runStatusOverride } : {}),
+          }
         : state.currentRun,
     };
   }),
@@ -1117,6 +1270,69 @@ export const useRunStore = create<RunState>((set, get) => ({
           }
         }, 100);
       }
+
+      // PROJ-20: Auto-execute Step 4 (Order Mapping) after Step 3 completes
+      if (nextStep.stepNo === 4) {
+        setTimeout(() => {
+          const currentState = get();
+          if (currentState.currentRun?.id === runId) {
+            const activeMapper = currentState.globalConfig.activeOrderMapperId;
+            logService.info(`Auto-Start: Order-Mapping (Step 4, mapper=${activeMapper})`, { runId, step: 'Bestellungen mappen' });
+
+            if (activeMapper === 'waterfall-4') {
+              // Parse openWE file if available, then run waterfall mapper
+              const openWEFile = currentState.uploadedFiles.find(f => f.type === 'openWE');
+              if (openWEFile?.file) {
+                import('@/services/matching/orderParser').then(({ parseOrderFile }) => {
+                  parseOrderFile(openWEFile.file)
+                    .then((parseResult) => {
+                      for (const w of parseResult.warnings) {
+                        logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+                      }
+                      get().executeOrderMapping(parseResult.positions);
+                      // Auto-advance to Step 5
+                      setTimeout(() => {
+                        const afterOrder = get();
+                        const updatedRun = afterOrder.runs.find(r => r.id === runId);
+                        const step4 = updatedRun?.steps.find(s => s.stepNo === 4);
+                        if (step4 && (step4.status === 'ok' || step4.status === 'soft-fail')) {
+                          logService.info('Auto-Advance: Step 4 → Step 5', { runId, step: 'System' });
+                          afterOrder.advanceToNextStep(runId);
+                        }
+                      }, 100);
+                    })
+                    .catch((err) => {
+                      logService.error(`OrderParser fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Bestellungen mappen' });
+                      get().updateStepStatus(runId, 4, 'failed');
+                    });
+                });
+              } else {
+                // No openWE file → skip Step 4 with ok
+                logService.info('Keine Bestell-Datei geladen — Step 4 wird uebersprungen', { runId, step: 'Bestellungen mappen' });
+                get().updateStepStatus(runId, 4, 'ok');
+                // Auto-advance
+                setTimeout(() => {
+                  const afterOrder = get();
+                  const updatedRun = afterOrder.runs.find(r => r.id === runId);
+                  const step4 = updatedRun?.steps.find(s => s.stepNo === 4);
+                  if (step4 && (step4.status === 'ok' || step4.status === 'soft-fail')) {
+                    logService.info('Auto-Advance: Step 4 → Step 5', { runId, step: 'System' });
+                    afterOrder.advanceToNextStep(runId);
+                  }
+                }, 100);
+              }
+            } else {
+              // Legacy path: use matchAllOrders (requires OpenWEPosition[] from somewhere)
+              logService.info('Legacy OrderMatcher (3 Regeln) — manueller Start erforderlich', { runId, step: 'Bestellungen mappen' });
+              get().updateStepStatus(runId, 4, 'ok');
+              setTimeout(() => {
+                const afterOrder = get();
+                afterOrder.advanceToNextStep(runId);
+              }, 100);
+            }
+          }
+        }, 100);
+      }
     } else {
       // All steps completed → mark run as finished and auto-archive
       get().updateRunStatus(runId, 'ok');
@@ -1129,11 +1345,108 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
-  updateInvoiceLine: (lineId, updates) => set((state) => ({
-    invoiceLines: state.invoiceLines.map(line =>
-      line.lineId === lineId ? { ...line, ...updates } : line
-    ),
-  })),
+  // HOTFIX-2: Dedicated retry action for failed steps
+  retryStep: (runId: string, stepNo: number) => {
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) return;
+
+    const step = run.steps.find(s => s.stepNo === stepNo);
+    if (!step || step.status !== 'failed') return;
+
+    logService.info(`Retry: Step ${stepNo} (${step.name})`, { runId, step: step.name });
+
+    // Reset step + run status
+    get().updateStepStatus(runId, stepNo, 'running');
+    get().updateRunStatus(runId, 'running');
+
+    // Re-execute step logic
+    switch (stepNo) {
+      case 2:
+        setTimeout(() => get().executeMatcherCrossMatch(), 50);
+        break;
+      case 3:
+        setTimeout(() => get().executeMatcherSerialExtract(), 50);
+        break;
+      case 4:
+        setTimeout(() => {
+          const cs = get();
+          const activeMapper = cs.globalConfig.activeOrderMapperId;
+          if (activeMapper === 'waterfall-4') {
+            const openWEFile = cs.uploadedFiles.find(f => f.type === 'openWE');
+            if (openWEFile?.file) {
+              import('@/services/matching/orderParser').then(({ parseOrderFile }) => {
+                parseOrderFile(openWEFile.file)
+                  .then((parseResult) => {
+                    for (const w of parseResult.warnings) {
+                      logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+                    }
+                    get().executeOrderMapping(parseResult.positions);
+                  })
+                  .catch((err) => {
+                    logService.error(`OrderParser fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Bestellungen mappen' });
+                    get().updateStepStatus(runId, 4, 'failed');
+                  });
+              });
+            } else {
+              get().updateStepStatus(runId, 4, 'ok');
+            }
+          } else {
+            get().updateStepStatus(runId, 4, 'ok');
+          }
+        }, 50);
+        break;
+      default:
+        // Step 1 (Parsing) + Step 5 (Export) sind nicht retryable
+        logService.warn(`Step ${stepNo} kann nicht wiederholt werden`, { runId, step: step.name });
+        get().updateStepStatus(runId, stepNo, 'failed');
+        break;
+    }
+  },
+
+  updateInvoiceLine: (lineId, updates) => {
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId === lineId ? { ...line, ...updates } : line
+      ),
+    }));
+    // PROJ-21: Auto-resolve issues after manual line update
+    const { currentRun, invoiceLines, issues } = get();
+    if (currentRun) {
+      const resolved = autoResolveIssues(issues, invoiceLines, currentRun.id);
+      if (resolved !== issues) set({ issues: resolved });
+    }
+  },
+
+  // PROJ-20: Cascade updates from aggregated position to all expanded lines
+  updatePositionLines: (positionIndex, updates) => {
+    const { currentRun } = get();
+    if (!currentRun) return;
+    const runPrefix = `${currentRun.id}-line-`;
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.positionIndex === positionIndex && line.lineId.startsWith(runPrefix)
+          ? { ...line, ...updates }
+          : line
+      ),
+    }));
+    // Recompute stats after bulk update
+    const { invoiceLines, issues } = get();
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(runPrefix));
+    const matchStats = computeMatchStats(runLines);
+    const orderStats = computeOrderStats(runLines);
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...matchStats, ...orderStats } } : r
+      ),
+      currentRun: state.currentRun?.id === currentRun.id
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats, ...orderStats } }
+        : state.currentRun,
+    }));
+    // PROJ-21: Auto-resolve issues after position update
+    const resolved = autoResolveIssues(issues, invoiceLines, currentRun.id);
+    if (resolved !== issues) set({ issues: resolved });
+  },
 
   resolveIssue: (issueId, resolutionNote) => set((state) => ({
     issues: state.issues.map(issue =>
@@ -1169,7 +1482,10 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
 
     const lines = state.invoiceLines.filter(l => l.lineId.startsWith(runId));
-    const result = await archiveService.writeArchivePackage(run, lines);
+    const result = await archiveService.writeArchivePackage(run, lines, {
+      preFilteredSerials: state.preFilteredSerials,
+      issues: state.issues,  // PROJ-21: Include issues for run-report.json
+    });
 
     // Persist archive folder name in the run for later reference (e.g. PDF link button)
     if (result.success && result.folderName) {
@@ -1426,6 +1742,78 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
+  // PROJ-20: 4-stage waterfall order mapping on aggregated positions
+  executeOrderMapping: (parsedOrders) => {
+    const { invoiceLines, currentRun, parsedPositions } = get();
+    if (!currentRun) {
+      console.warn('[RunStore] executeOrderMapping: no currentRun');
+      return;
+    }
+
+    const runId = currentRun.id;
+
+    try {
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      if (runLines.length === 0) {
+        console.warn('[RunStore] executeOrderMapping: no invoiceLines found for run');
+        get().updateStepStatus(runId, 4, 'ok');
+        return;
+      }
+
+      console.log(`[RunStore] executeOrderMapping: ${runLines.length} lines, ${parsedOrders.length} orders (waterfall-4)`);
+
+      const result = mapAllOrdersWaterfall(runLines, parsedOrders, parsedPositions, runId);
+
+      // Determine step 4 status
+      const step4Status: StepStatus = result.stats.notOrderedCount > 0 ? 'soft-fail' : 'ok';
+
+      set((state) => {
+        const updatedRun = state.runs.find(r => r.id === runId);
+        if (!updatedRun) return state;
+
+        const newRun: Run = {
+          ...updatedRun,
+          stats: { ...updatedRun.stats, ...result.stats },
+          steps: updatedRun.steps.map(step =>
+            step.stepNo === 4
+              ? { ...step, status: step4Status, issuesCount: result.issues.length }
+              : step
+          ),
+        };
+
+        return {
+          runs: state.runs.map(r => r.id === runId ? newRun : r),
+          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+          invoiceLines: [...result.lines, ...otherLines],
+          issues: [
+            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+            ...result.issues,
+          ],
+        };
+      });
+
+      // PROJ-20: Cache cleanup after Step 4 success
+      set({ preFilteredSerials: [], serialDocument: null });
+      console.log('[RunStore] Cache cleanup: preFilteredSerials and serialDocument cleared');
+
+      logService.info(
+        `OrderMapper (waterfall-4): ${result.stats.matchedOrders} zugeordnet, ${result.stats.notOrderedCount} ohne Bestellung ` +
+        `(P:${result.stats.perfectMatchCount} R:${result.stats.referenceMatchCount} S:${result.stats.smartQtyMatchCount} F:${result.stats.fifoFallbackCount})`,
+        { runId, step: 'Bestellungen mappen' },
+      );
+    } catch (error) {
+      console.error('[RunStore] executeOrderMapping error:', error);
+      logService.error(`OrderMapper fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
+        runId,
+        step: 'Bestellungen mappen',
+      });
+      get().updateStepStatus(runId, 4, 'failed');
+    }
+  },
+
   setManualOrder: (lineId, orderYear, orderCode) => {
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
@@ -1510,7 +1898,7 @@ export const useRunStore = create<RunState>((set, get) => ({
       const blockingIssue: Issue = {
         id: `issue-${runId}-step2-no-master-${Date.now()}`,
         runId,
-        severity: 'blocking',
+        severity: 'error',
         stepNo: 2,
         type: 'no-article-match',
         message: 'Keine Stammdaten vorhanden — bitte Artikelstammdaten (Excel) hochladen',
@@ -1601,6 +1989,76 @@ export const useRunStore = create<RunState>((set, get) => ({
       const noMatchCount = result.stats.noMatchCount ?? 0;
       const step2Status: StepStatus = noMatchCount > 0 ? 'soft-fail' : 'ok';
 
+      // ── PROJ-21: Enrich result.issues with context + generate new issue types ──
+      const step2Issues: Issue[] = [...result.issues];
+      const now21 = new Date().toISOString();
+
+      // Enrich existing no-article-match issues with context
+      for (const issue of step2Issues) {
+        if (issue.type === 'no-article-match' || issue.type === 'match-artno-not-found' || issue.type === 'match-conflict-id') {
+          if (!issue.context) {
+            issue.context = { field: 'matchStatus', expectedValue: 'full-match' };
+          }
+        }
+      }
+
+      // New: price-mismatch issue (warning)
+      const priceMismatchLines = enrichedLines.filter(l => l.priceCheckStatus === 'mismatch');
+      if (priceMismatchLines.length > 0) {
+        // Deduplicate by positionIndex (enrichedLines may have multiple expansion rows per position)
+        const seenPositions = new Set<number>();
+        const uniquePriceMismatch = priceMismatchLines.filter(l => {
+          if (seenPositions.has(l.positionIndex)) return false;
+          seenPositions.add(l.positionIndex);
+          return true;
+        });
+        step2Issues.push({
+          id: `issue-${runId}-step2-price-mismatch-${Date.now()}`,
+          runId,
+          severity: 'warning',
+          stepNo: 2,
+          type: 'price-mismatch',
+          message: `${uniquePriceMismatch.length} Positionen mit Preisabweichung`,
+          details: uniquePriceMismatch.slice(0, 15).map(l =>
+            `Pos ${l.positionIndex}: ${l.unitPriceInvoice.toFixed(2)}€ vs ${(l.unitPriceSage ?? 0).toFixed(2)}€`
+          ).join(', ') + (uniquePriceMismatch.length > 15 ? ` ... (+${uniquePriceMismatch.length - 15} weitere)` : ''),
+          relatedLineIds: priceMismatchLines.map(l => l.lineId),
+          status: 'open',
+          createdAt: now21,
+          resolvedAt: null,
+          resolutionNote: null,
+          context: { field: 'priceCheckStatus', expectedValue: 'ok', actualValue: 'mismatch' },
+        });
+      }
+
+      // New: inactive-article issue (info)
+      const inactiveLines = enrichedLines.filter(l => l.activeFlag === false && l.matchStatus !== 'no-match');
+      if (inactiveLines.length > 0) {
+        const seenPositions = new Set<number>();
+        const uniqueInactive = inactiveLines.filter(l => {
+          if (seenPositions.has(l.positionIndex)) return false;
+          seenPositions.add(l.positionIndex);
+          return true;
+        });
+        step2Issues.push({
+          id: `issue-${runId}-step2-inactive-${Date.now()}`,
+          runId,
+          severity: 'info',
+          stepNo: 2,
+          type: 'inactive-article',
+          message: `${uniqueInactive.length} inaktive Artikel im Stamm`,
+          details: uniqueInactive.slice(0, 15).map(l =>
+            `Pos ${l.positionIndex}: ${l.falmecArticleNo ?? l.manufacturerArticleNo}`
+          ).join(', ') + (uniqueInactive.length > 15 ? ` ... (+${uniqueInactive.length - 15} weitere)` : ''),
+          relatedLineIds: inactiveLines.map(l => l.lineId),
+          status: 'open',
+          createdAt: now21,
+          resolvedAt: null,
+          resolutionNote: null,
+          context: { field: 'activeFlag', expectedValue: 'true', actualValue: 'false' },
+        });
+      }
+
       set((state) => {
         const updatedRun = state.runs.find(r => r.id === runId);
         if (!updatedRun) return state;
@@ -1610,7 +2068,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           stats: { ...updatedRun.stats, ...result.stats },
           steps: updatedRun.steps.map(step =>
             step.stepNo === 2
-              ? { ...step, status: step2Status, issuesCount: result.issues.length }
+              ? { ...step, status: step2Status, issuesCount: step2Issues.length }
               : step
           ),
         };
@@ -1621,7 +2079,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           invoiceLines: [...enrichedLines, ...otherLines],
           issues: [
             ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 2)),
-            ...result.issues,
+            ...step2Issues,
           ],
         };
       });
@@ -1648,7 +2106,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   // ─── PROJ-16: Matcher-based Serial Extraction (Step 3) ────────────
 
   executeMatcherSerialExtract: () => {
-    const { invoiceLines, currentRun, serialDocument } = get();
+    const { invoiceLines, currentRun, preFilteredSerials, serialDocument } = get();
     if (!currentRun) {
       console.warn('[RunStore] executeMatcherSerialExtract: no currentRun');
       return;
@@ -1657,6 +2115,123 @@ export const useRunStore = create<RunState>((set, get) => ({
     const runId = currentRun.id;
 
     try {
+      const linePrefix = `${runId}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
+      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
+
+      // PROJ-20: Use preFilteredSerials (new SerialFinder path)
+      if (preFilteredSerials.length > 0) {
+        const invoiceNumber = currentRun.invoice.fattura;
+
+        // Smart Validation: filter by invoice reference
+        const { validRows, rejectedCount } = validateAgainstInvoice(preFilteredSerials, invoiceNumber);
+
+        if (rejectedCount > 0) {
+          logService.warn(
+            `S/N Smart-Validation: ${rejectedCount} Zeilen ohne passende Rechnungsreferenz entfernt`,
+            { runId, step: 'Seriennummer anfuegen' },
+          );
+        }
+
+        // Build EAN → serial numbers map from validated rows
+        const eanToSerials = new Map<string, string[]>();
+        for (const row of validRows) {
+          const ean = row.ean.trim();
+          if (!ean) continue;
+          const list = eanToSerials.get(ean) ?? [];
+          list.push(row.serialNumber);
+          eanToSerials.set(ean, list);
+        }
+
+        // Assign serialNumbers[] to aggregated positions (by EAN, up to qty)
+        let assignedCount = 0;
+        let requiredCount = 0;
+        const updatedRunLines = runLines.map(line => {
+          if (!line.serialRequired) return line;
+          requiredCount += line.qty;
+
+          const lineEan = (line.ean ?? '').trim();
+          if (!lineEan) return line;
+
+          const available = eanToSerials.get(lineEan);
+          if (!available || available.length === 0) return line;
+
+          // Take up to qty serials from the pool
+          const take = Math.min(line.qty, available.length);
+          const assigned = available.splice(0, take);
+          assignedCount += assigned.length;
+
+          return {
+            ...line,
+            serialNumbers: assigned,
+            serialNumber: assigned[0] ?? null,
+            serialSource: 'serialList' as const,
+          };
+        });
+
+        const checksumMatch = assignedCount === requiredCount;
+        const step3Status: StepStatus = checksumMatch ? 'ok' : 'soft-fail';
+
+        // PROJ-21: Enriched serial-mismatch issue with per-position details + context
+        const step3Issues: Issue[] = [];
+        if (!checksumMatch) {
+          const underServedLines = updatedRunLines.filter(l => l.serialRequired && l.serialNumbers.length < l.qty);
+          step3Issues.push({
+            id: `issue-${runId}-step3-sn-mismatch-${Date.now()}`,
+            runId,
+            severity: 'warning',
+            stepNo: 3,
+            type: 'serial-mismatch',
+            message: `S/N Zuordnung unvollständig: ${assignedCount}/${requiredCount} zugewiesen`,
+            details: underServedLines.slice(0, 20).map(l =>
+              `Pos ${l.positionIndex}: ${l.serialNumbers.length}/${l.qty} S/N`
+            ).join(', ') + (underServedLines.length > 20 ? ` ... (+${underServedLines.length - 20} weitere)` : ''),
+            relatedLineIds: underServedLines.map(l => l.lineId),
+            status: 'open',
+            createdAt: new Date().toISOString(),
+            resolvedAt: null,
+            resolutionNote: null,
+            context: { field: 'serialNumbers', expectedValue: 'qty', actualValue: `${assignedCount}/${requiredCount}` },
+          });
+        }
+
+        set((state) => {
+          const updatedRun = state.runs.find(r => r.id === runId);
+          if (!updatedRun) return state;
+
+          const newRun: Run = {
+            ...updatedRun,
+            stats: {
+              ...updatedRun.stats,
+              serialMatchedCount: assignedCount,
+              serialRequiredCount: requiredCount,
+            },
+            steps: updatedRun.steps.map(step =>
+              step.stepNo === 3
+                ? { ...step, status: step3Status, issuesCount: step3Issues.length }
+                : step
+            ),
+          };
+
+          return {
+            runs: state.runs.map(r => r.id === runId ? newRun : r),
+            currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+            invoiceLines: [...updatedRunLines, ...otherLines],
+            issues: [
+              ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 3)),
+              ...step3Issues,
+            ],
+          };
+        });
+
+        logService.info(
+          `SerialFinder: ${assignedCount}/${requiredCount} S/N zugewiesen (Checksum: ${checksumMatch ? 'OK' : 'MISMATCH'})`,
+          { runId, step: 'Seriennummer anfuegen' },
+        );
+        return;
+      }
+
+      // ── Legacy path: Matcher-based serialExtract (PROJ-16 compat) ──────
       // Resolve active matcher module
       const matcherId = matcherRegistryService.getSelectedMatcherId();
       const matcher = getMatcher(matcherId);
@@ -1666,10 +2241,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         return;
       }
 
-      const linePrefix = `${runId}-line-`;
-      const runLines = invoiceLines.filter(l => l.lineId.startsWith(linePrefix));
-      const otherLines = invoiceLines.filter(l => !l.lineId.startsWith(linePrefix));
-
       // If no serial document is loaded, mark step as ok (no S/N data to process)
       if (!serialDocument) {
         logService.info('Keine S/N-Datei geladen — Step 3 wird uebersprungen', { runId, step: 'Seriennummer anfuegen' });
@@ -1677,14 +2248,11 @@ export const useRunStore = create<RunState>((set, get) => ({
         return;
       }
 
-      console.log(`[RunStore] executeMatcherSerialExtract: ${runLines.length} lines, ${serialDocument.rows.length} S/N rows, matcher=${matcher.moduleId}`);
+      console.log(`[RunStore] executeMatcherSerialExtract (legacy): ${runLines.length} lines, ${serialDocument.rows.length} S/N rows, matcher=${matcher.moduleId}`);
 
-      // Extract invoice number from run
       const invoiceNumber = currentRun.invoice.fattura;
-
       const result = matcher.serialExtract(runLines, serialDocument, invoiceNumber);
 
-      // Update serialMatchedCount in stats
       const step3Status: StepStatus = result.checksum.match ? 'ok' : 'soft-fail';
 
       set((state) => {
@@ -1709,7 +2277,6 @@ export const useRunStore = create<RunState>((set, get) => ({
           runs: state.runs.map(r => r.id === runId ? newRun : r),
           currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
           invoiceLines: [...result.lines, ...otherLines],
-          // PROJ-17: propagate Step-3 issues (inject runId, mirror pattern from executeMatcherCrossMatch)
           issues: [
             ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 3)),
             ...result.issues.map(issue => ({ ...issue, runId })),

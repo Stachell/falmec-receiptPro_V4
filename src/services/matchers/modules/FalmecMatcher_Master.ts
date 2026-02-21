@@ -203,7 +203,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       issues.push({
         id: `issue-${runId}-step2-no-match-${Date.now()}`,
         runId,
-        severity: 'blocking',
+        severity: 'error',
         stepNo: 2,
         type: 'no-article-match',
         message: `${allNoMatch.length} Artikel ohne Match in Stammdaten`,
@@ -221,7 +221,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       issues.push({
         id: `issue-${runId}-step2-artno-${Date.now()}`,
         runId,
-        severity: 'blocking',
+        severity: 'error',
         stepNo: 2,
         type: 'match-artno-not-found',
         message: `${noMatchNoConflict.length} Zeilen: Artikelnummer/EAN nicht im Stamm gefunden`,
@@ -240,7 +240,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       issues.push({
         id: `issue-${runId}-step2-conflict-${Date.now()}`,
         runId,
-        severity: 'blocking',
+        severity: 'error',
         stepNo: 2,
         type: 'match-conflict-id',
         message: `${conflictResults.length} Zeilen: ArtNo/EAN-Konflikt (verschiedene Artikel)`,
@@ -471,7 +471,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       // PROJ-17: Blocking issue for missing invoice reference
       issues.push({
         id: `issue-step3-ref-${Date.now()}`,
-        severity: 'blocking',
+        severity: 'error',
         stepNo: 3,
         type: 'sn-invoice-ref-missing',
         message: `Rechnungsreferenz '${invoiceRef5}' nicht im S/N-Dokument gefunden`,
@@ -548,7 +548,7 @@ export class FalmecMatcher_Master implements MatcherModule {
         .map(l => l.lineId);
       issues.push({
         id: `issue-step3-insufficient-${Date.now()}`,
-        severity: 'soft-fail',
+        severity: 'warning',
         stepNo: 3,
         type: 'sn-insufficient-count',
         message: `${mismatchCount} Zeilen ohne Seriennummer (${assignedCount}/${requiredCount} zugewiesen)`,

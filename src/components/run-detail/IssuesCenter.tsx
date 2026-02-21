@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Filter, ExternalLink, Download, Lightbulb } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Filter, ExternalLink, Download, Lightbulb, ArrowRight } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { SeverityBadge } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,10 @@ const issueTypeLabels: Record<string, string> = {
   'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
   'sn-regex-failed': 'S/N Regex kein Treffer',
   'sn-insufficient-count': 'Zu wenige Seriennummern',
+  // PROJ-21 Step 4
+  'order-incomplete': 'Bestellung unvollständig',
+  'order-multi-split': 'Mehrfach-Split (3+)',
+  'order-fifo-only': 'Nur FIFO-Zuweisung',
 };
 
 // ── Quick-Fix hints per issue type (Lightbulb banners) ────────────────
@@ -56,6 +60,13 @@ const quickFixHints: Partial<Record<IssueType, string>> = {
     'Die 5-stellige Rechnungsreferenz fehlt im Warenbegleitschein. Stimmt die Rechnungsnummer im Dokument? Format: letzte 5 Ziffern der Fattura-Nr.',
   'sn-insufficient-count':
     'Nicht genug Seriennummern im S/N-Dokument für alle Pflicht-Zeilen. Weitere Zeilen im Warenbegleitschein suchen oder S/N manuell nachtragen.',
+  // PROJ-21 Step 4
+  'order-incomplete':
+    'Position nicht vollständig zugeordnet — Restmenge prüfen. Offene Bestellungen ergänzen oder manuell zuweisen.',
+  'order-multi-split':
+    'Position wurde auf 3+ verschiedene Bestellungen aufgeteilt. Prüfen, ob die Splittung korrekt ist.',
+  'order-fifo-only':
+    'Keine Belegnummer aus dem PDF erkannt — Zuordnung erfolgte nur nach FIFO-Regel (älteste zuerst). Belegnummer im PDF prüfen.',
 };
 
 // Step labels for section headers
@@ -68,7 +79,7 @@ const stepLabels: Record<number, string> = {
 };
 
 export function IssuesCenter() {
-  const { issues, resolveIssue, currentRun, issuesStepFilter, setIssuesStepFilter } = useRunStore();
+  const { issues, resolveIssue, currentRun, issuesStepFilter, setIssuesStepFilter, navigateToLine } = useRunStore();
 
   // Sync store-driven filter (from KPI-click navigation) into local state
   const [stepFilter, setStepFilter] = useState<string>(issuesStepFilter ?? 'all');
@@ -177,8 +188,9 @@ export function IssuesCenter() {
             </SelectTrigger>
             <SelectContent className="bg-popover">
               <SelectItem value="all">Alle</SelectItem>
-              <SelectItem value="blocking">Blockierend</SelectItem>
-              <SelectItem value="soft-fail">Warnung</SelectItem>
+              <SelectItem value="error">Fehler</SelectItem>
+              <SelectItem value="warning">Warnung</SelectItem>
+              <SelectItem value="info">Info</SelectItem>
             </SelectContent>
           </Select>
 
@@ -266,9 +278,11 @@ export function IssuesCenter() {
                     <div
                       key={issue.id}
                       className={`enterprise-card p-4 border-l-4 ${
-                        issue.severity === 'blocking'
+                        issue.severity === 'error'
                           ? 'border-l-status-failed'
-                          : 'border-l-status-soft-fail'
+                          : issue.severity === 'warning'
+                          ? 'border-l-status-soft-fail'
+                          : 'border-l-blue-400'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-4">
@@ -282,15 +296,28 @@ export function IssuesCenter() {
                           <h4 className="font-medium text-foreground mb-1">{issue.message}</h4>
                           <p className="text-sm text-muted-foreground">{issue.details}</p>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1 flex-shrink-0"
-                          onClick={() => setSelectedIssue(issue)}
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          Lösen
-                        </Button>
+                        <div className="flex gap-2 flex-shrink-0">
+                          {issue.relatedLineIds.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1"
+                              onClick={() => navigateToLine(issue.relatedLineIds)}
+                            >
+                              <ArrowRight className="w-3.5 h-3.5" />
+                              Zeile anzeigen
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => setSelectedIssue(issue)}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Lösen
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}

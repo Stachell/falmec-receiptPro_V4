@@ -35,6 +35,8 @@ function makeLine(overrides: Partial<InvoiceLine> = {}): InvoiceLine {
     orderVorgang: null,
     orderOpenQty: null,
     supplierId: null,
+    serialNumbers: [],
+    allocatedOrders: [],
     ...overrides,
   };
 }

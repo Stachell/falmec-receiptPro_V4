@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Filter, Info, Barcode, Type, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
@@ -30,12 +30,37 @@ import {
 } from '@/components/ui/tooltip';
 
 export function ItemsTable() {
-  const { invoiceLines } = useRunStore();
+  const { invoiceLines: allInvoiceLines, highlightedLineIds, scrollToLineId, currentRun } = useRunStore();
+  // HOTFIX-1: Filter lines to current run only (prevents cross-run data leak)
+  const invoiceLines = currentRun
+    ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
+    : allInvoiceLines;
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [detailLine, setDetailLine] = useState<InvoiceLine | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+
+  // PROJ-21: Scroll to highlighted row when navigating from IssuesCenter
+  useEffect(() => {
+    if (!scrollToLineId) return;
+    // If table is collapsed, expand first and let DOM update
+    if (!expanded) {
+      setExpanded(true);
+      // Wait for DOM re-render after expand, then scroll
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = document.getElementById(`row-${scrollToLineId}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      });
+    } else {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`row-${scrollToLineId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }, [scrollToLineId, expanded]);
 
   const filteredLines = invoiceLines.filter(line => {
     const term = searchTerm.toLowerCase();
@@ -131,9 +156,14 @@ export function ItemsTable() {
             {filteredLines.map((line) => (
               <TableRow
                 key={line.lineId}
+                id={`row-${line.lineId}`}
                 className={`hover:bg-muted/30 ${
                   line.positionIndex % 2 === 1 ? 'bg-slate-50/50' : ''
-                } ${!line.activeFlag ? 'bg-status-soft-fail/5' : ''}`}
+                } ${!line.activeFlag ? 'bg-status-soft-fail/5' : ''} ${
+                  highlightedLineIds.includes(line.lineId)
+                    ? 'ring-2 ring-amber-400/60 bg-amber-500/10 transition-all duration-300'
+                    : ''
+                }`}
               >
                 {/* #1: Position (positionIndex is already 1-based from the parser) */}
                 <TableCell className="font-mono text-xs text-muted-foreground text-center">

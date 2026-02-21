@@ -11,14 +11,16 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ run }: ExportPanelProps) {
-  const { invoiceLines, issues } = useRunStore();
+  const { invoiceLines: allInvoiceLines, issues } = useRunStore();
+  // HOTFIX-1: Filter lines to current run only (uses run prop — always available)
+  const invoiceLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [expandedXml, setExpandedXml] = useState(false);
   const { wrap, isLocked } = useClickLock();
 
   const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
-  const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'blocking');
+  const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
   const missingLocations = invoiceLines.filter(line => !line.storageLocation);
   const isExportReady = openBlockingIssues.length === 0 && missingLocations.length === 0;
 
