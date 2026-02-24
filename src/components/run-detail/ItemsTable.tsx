@@ -263,12 +263,6 @@ export function ItemsTable() {
                 {/* Col 10: SN status */}
                 <TableCell className="text-xs whitespace-nowrap">
                   <div className="flex items-center gap-1 whitespace-nowrap">
-                    {/* S/N Text */}
-                    {!line.serialRequired ? (
-                      <span className="font-thin italic text-muted-foreground">----------</span>
-                    ) : line.serialNumber ? (
-                      <span className="font-mono whitespace-nowrap">{line.serialNumber}</span>
-                    ) : null}
                     {/* S/N Status Square */}
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
@@ -298,6 +292,10 @@ export function ItemsTable() {
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
+                    {/* S/N Text */}
+                    {line.serialRequired && line.serialNumber ? (
+                      <span className="font-mono whitespace-nowrap">{line.serialNumber}</span>
+                    ) : null}
                   </div>
                 </TableCell>
 

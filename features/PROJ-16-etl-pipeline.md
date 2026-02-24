@@ -50,6 +50,16 @@ Modulares Matcher-System (analog ParserRegistry) für Step 2 (Cross-Match) und S
 
 ---
 
+### ADD: SN-Spalte - Darstellung bei `serialRequired = false`
+- [x] In `Run-Detail > Artikelliste > Spalte SN` wurde der Vorlauftext `----------` vor dem schwarzen Status-Button entfernt.
+- [x] Bei `serialRequired = false` wird nur noch der schwarze Button dargestellt (analog zu weiss/gruen: nur Button, kein Vorlauftext).
+- [x] Keine weiteren Logik-, Farb- oder Statusaenderungen.
+
+### ADD: SN-Spalte - Linksbündige Button-Ausrichtung
+- [x] In `Run-Detail > Artikelliste > Spalte SN` wurde das Status-Quadrat linksbuendig in der Zelle ausgerichtet.
+- [x] Reihenfolge in der Darstellung angepasst: zuerst Status-Button, danach optionaler S/N-Text.
+- [x] Ergebnis: Die SN-Status-Buttons stehen spaltenweit sauber untereinander, auch wenn in Step 3 Seriennummern angezeigt werden.
+
 ## Status-Legende
 - [ ] Todo
 - [x] Done
