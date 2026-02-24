@@ -94,3 +94,49 @@ const [expanded, setExpanded] = useState(false);
 - Artikelliste: `max-h-[400px]`
 - Lagerort-Details: `max-h-[360px]`
 - XML-Vorschau: `max-h-[300px]`
+
+---
+
+## Nachtrag 2026-02-24 - Artikelliste Scroll-Verhalten + Header
+
+### Zielbild
+- Scroll-Interferenz in der Artikelliste aufloesen: collapsed = innerer Scroll, expanded = Seiten-Scroll.
+- Sticky Header nur im collapsed Zustand aktiv.
+- Header-Beschriftungen der 11 Spalten auf die neue Fachsprache angleichen.
+
+### Umsetzung (technisch)
+- `ItemsTable.tsx`: dynamische collapsed Hoehe per Viewport-Berechnung:
+  - Formel: `max(260, window.innerHeight - containerTop - toggleHeight - 16)`
+  - Fallback: `400`
+- Collapsed (`expanded === false`):
+  - `overflow-y-auto`
+  - `maxHeight: <berechneter px-Wert>`
+- Expanded (`expanded === true`):
+  - `overflow-y-hidden`
+  - `maxHeight: none`
+- Sticky Header nur collapsed:
+  - collapsed: `sticky top-0 z-10 bg-card`
+  - expanded: `bg-card` (ohne sticky)
+
+### Header-Mapping (final)
+| Spalte | Neuer Header |
+|---|---|
+| 1 | `DETAILS` |
+| 2 | `#` |
+| 3 | *(leer)* |
+| 4 | `ARTIKEL` |
+| 5 | `BESTELLNUMMER` |
+| 6 | `EAN` |
+| 7 | `BEZEICHNUNG` |
+| 8 | `MENGE` |
+| 9 | `PREIS` |
+| 10 | `SN / SERIAL` |
+| 11 | `BESTELLUNG` |
+
+### Verifikation
+- Technisch: `npx tsc --noEmit` ohne Fehler.
+- Manuelle Abnahmekriterien:
+  - collapsed: innerer Scrollbalken nur im Tabellen-Body
+  - collapsed: Header bleibt sichtbar beim inneren Scroll
+  - expanded: kein innerer Scrollbalken, Scroll ueber Seiten-Scrollbar
+  - Toggle hin/zurueck ohne Scroll-Sprung

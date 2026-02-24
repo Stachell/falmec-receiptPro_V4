@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, Filter, Info, Barcode, Type, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,9 @@ export function ItemsTable() {
   const [detailLine, setDetailLine] = useState<InvoiceLine | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const toggleContainerRef = useRef<HTMLDivElement | null>(null);
 
   // PROJ-21: Scroll to highlighted row when navigating from IssuesCenter
   useEffect(() => {
@@ -84,6 +87,28 @@ export function ItemsTable() {
 
     return matchesSearch && matchesStatus;
   });
+
+  useEffect(() => {
+    const updateCollapsedHeight = () => {
+      const containerTop = tableContainerRef.current?.getBoundingClientRect().top;
+      const toggleHeight = toggleContainerRef.current?.getBoundingClientRect().height ?? 0;
+
+      if (typeof containerTop !== 'number' || Number.isNaN(containerTop)) {
+        setCollapsedHeightPx(400);
+        return;
+      }
+
+      const nextHeight = Math.max(260, Math.floor(window.innerHeight - containerTop - toggleHeight - 16));
+      setCollapsedHeightPx(Number.isFinite(nextHeight) ? nextHeight : 400);
+    };
+
+    const rafId = window.requestAnimationFrame(updateCollapsedHeight);
+    window.addEventListener('resize', updateCollapsedHeight);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', updateCollapsedHeight);
+    };
+  }, [expanded, filteredLines.length]);
 
   // PROJ-22 B2: readOnly for ItemsTable — Preis is READ-ONLY here
   const handleSetPrice = (_lineId: string, _price: number, _source: 'invoice' | 'sage' | 'custom') => {
@@ -141,30 +166,30 @@ export function ItemsTable() {
 
       {/* Table — collapsible with sticky header */}
       <div
+        ref={tableContainerRef}
         className={`overflow-x-auto transition-all duration-500 ease-in-out ${
-          expanded
-            ? 'max-h-[5000px] overflow-y-hidden'
-            : 'max-h-[400px] overflow-y-auto'
+          expanded ? 'overflow-y-hidden' : 'overflow-y-auto'
         }`}
+        style={expanded ? { maxHeight: 'none' } : { maxHeight: `${collapsedHeightPx}px` }}
       >
         {/* PROJ-22 B2: Unified column order matching InvoicePreview
             1. Info-Icon | 2. Pos | 3. Match-Status | 4. Art.-Nr. | 5. Herstellerartikelnr.
             | 6. EAN | 7. Bezeichnung | 8. Menge | 9. Preis (READ-ONLY) | 10. SN | 11. Bestellung */}
         <Table className="table-fixed w-full">
           {/* PROJ-22 B1: sticky header */}
-          <TableHeader className="sticky top-0 z-10 bg-card">
+          <TableHeader className={expanded ? 'bg-card' : 'sticky top-0 z-10 bg-card'}>
             <TableRow className="data-table-header">
-              <TableHead className="w-10 text-center"></TableHead>
-              <TableHead className="w-9 text-center">Pos.</TableHead>
-              <TableHead className="w-10">Status</TableHead>
-              <TableHead className="w-20">Art.-Nr.</TableHead>
-              <TableHead className="w-36">Herstellerartikelnr.</TableHead>
+              <TableHead className="w-16 text-center">DETAILS</TableHead>
+              <TableHead className="w-9 text-center">#</TableHead>
+              <TableHead className="w-10 text-center"><span className="sr-only">Status</span></TableHead>
+              <TableHead className="w-20">ARTIKEL</TableHead>
+              <TableHead className="w-36">BESTELLNUMMER</TableHead>
               <TableHead className="w-28">EAN</TableHead>
-              <TableHead>Bezeichnung</TableHead>
-              <TableHead className="w-12 text-right">Menge</TableHead>
-              <TableHead className="w-36 text-right">Preis</TableHead>
-              <TableHead className="w-[120px]">SN</TableHead>
-              <TableHead className="w-24">Bestellung</TableHead>
+              <TableHead>BEZEICHNUNG</TableHead>
+              <TableHead className="w-12 text-right">MENGE</TableHead>
+              <TableHead className="w-36 text-right">PREIS</TableHead>
+              <TableHead className="w-[120px]">SN / SERIAL</TableHead>
+              <TableHead className="w-24">BESTELLUNG</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -317,7 +342,7 @@ export function ItemsTable() {
 
       {/* PROJ-22 B1: Expand / Collapse Toggle — 25% groesser (w-6 h-6) */}
       {filteredLines.length > 0 && (
-        <div className="flex justify-center py-2 border-t border-border/40 sticky bottom-0 bg-card">
+        <div ref={toggleContainerRef} className="flex justify-center py-2 border-t border-border/40 sticky bottom-0 bg-card">
           <button
             className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
             onClick={() => setExpanded((e) => !e)}

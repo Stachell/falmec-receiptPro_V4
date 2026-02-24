@@ -3,8 +3,6 @@ import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { format } from 'date-fns';
-import { de } from 'date-fns/locale';
 import { AppLayout } from '@/components/AppLayout';
 import { WorkflowStepper } from '@/components/WorkflowStepper';
 import { KPITile, KPIGrid } from '@/components/KPITile';
@@ -162,10 +160,10 @@ export default function RunDetail() {
 
   return (
     <AppLayout>
-      <div className="py-8">
+      <div className="pt-[18px] pb-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
+          <div className="flex items-start gap-3">
             <Link to="/">
               <Button
                 variant="outline"
@@ -175,13 +173,7 @@ export default function RunDetail() {
                 <ArrowLeft className="w-5 h-5" />
               </Button>
             </Link>
-            <div>
-              <p className="mb-1" style={{ color: '#D8E6E7' }}>
-                {format(new Date(currentRun.createdAt), "dd. MMMM yyyy, HH:mm 'Uhr'", { locale: de })}
-                {currentRun.invoice.deliveryDate && (
-                  <span> • Lieferung: {format(new Date(currentRun.invoice.deliveryDate), 'dd.MM.yyyy', { locale: de })}</span>
-                )}
-              </p>
+            <div className="pt-0.5">
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold" style={{ color: '#D8E6E7' }}>
                   {currentRun.id}
