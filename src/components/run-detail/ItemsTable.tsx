@@ -116,6 +116,7 @@ export function ItemsTable() {
 
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(price);
+  const packageCount = currentRun?.invoice?.packagesCount ?? invoiceLines.length;
 
   return (
     <div className="enterprise-card">
@@ -158,7 +159,7 @@ export function ItemsTable() {
             Artikel Liste
           </h3>
           <p className="text-sm text-muted-foreground">
-            /article list ({invoiceLines.length})
+            /article list ({packageCount})
           </p>
         </div>
       </div>

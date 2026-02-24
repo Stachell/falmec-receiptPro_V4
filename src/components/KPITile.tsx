@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, CheckCircle2 } from 'lucide-react';
 
 interface KPITileProps {
   value: number | string;
@@ -12,6 +12,8 @@ interface KPITileProps {
   variant?: 'default' | 'success' | 'warning' | 'error';
   /** PROJ-17: KPI-Navigation to Issues-Center */
   onClick?: () => void;
+  /** PROJ-29: True wenn alle Double-Check-Bedingungen erfüllt sind */
+  isVerified?: boolean;
 }
 
 const variantStyles = {
@@ -30,18 +32,19 @@ export function KPITile({
   className,
   variant = 'default',
   onClick,
+  isVerified = false,
 }: KPITileProps) {
   return (
     <div
-      className={cn('kpi-tile', variantStyles[variant], className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
+      className={cn('kpi-tile', variantStyles[variant], isVerified && 'bg-[#46cb78]', className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
       onClick={onClick}
     >
       <div className="flex items-center justify-between">
-        <span className="kpi-tile-value">{value}</span>
-        {icon && <span className="text-muted-foreground">{icon}</span>}
+        <span className={cn('kpi-tile-value', isVerified && 'text-white')}>{value}</span>
+        {icon && <span className={cn(isVerified ? 'text-white/70' : 'text-muted-foreground')}>{icon}</span>}
       </div>
       <div className="flex items-center gap-2">
-        <span className="kpi-tile-label">{label}</span>
+        <span className={cn('kpi-tile-label', isVerified && 'text-emerald-50')}>{label}</span>
         {trend && (
           <span className={cn(
             "flex items-center",
@@ -56,7 +59,14 @@ export function KPITile({
         )}
       </div>
       {subValue && (
-        <span className="text-xs text-muted-foreground mt-1">{subValue}</span>
+        <div className="flex items-center justify-between mt-1">
+          <span className={cn('text-xs', isVerified ? 'text-emerald-50' : 'text-muted-foreground')}>
+            {subValue}
+          </span>
+          {isVerified && (
+            <CheckCircle2 className="w-4 h-4 text-white flex-shrink-0" />
+          )}
+        </div>
       )}
     </div>
   );

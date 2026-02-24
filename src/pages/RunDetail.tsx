@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
@@ -32,6 +32,7 @@ export default function RunDetail() {
   const {
     runs,
     currentRun,
+    invoiceLines,           // PROJ-29: für Double-Check-Berechnungen
     setCurrentRun,
     activeTab,
     setActiveTab,
@@ -52,6 +53,130 @@ export default function RunDetail() {
   const getStoreState = useRunStore.getState;
   const navigate = useNavigate();
   const { wrap, isLocked } = useClickLock();
+
+  // ─── PROJ-29: Double-Check-Logik ─────────────────────────────────────────────
+  // Alle useMemo-Hooks müssen VOR dem ersten useEffect stehen (React Hook-Regeln)
+
+  // 1. InvoiceLines des aktuellen Runs (gefiltert nach Run-ID)
+  const currentRunLines = useMemo(
+    () => (currentRun ? invoiceLines.filter(l => l.lineId.startsWith(currentRun.id)) : []),
+    [invoiceLines, currentRun?.id]
+  );
+
+  // 2. Qty-Summen für Kachel 4 (qty-basiert, nicht line-count-basiert!)
+  //    Hinweis: RunStats.serialRequiredCount zählt ZEILEN — für den Check brauchen wir Qty-Summen
+  const serialRequiredQtySum = useMemo(
+    () => currentRunLines.filter(l => l.serialRequired === true).reduce((s, l) => s + l.qty, 0),
+    [currentRunLines]
+  );
+  const serialNotRequiredArticleCount = useMemo(
+    () => currentRunLines.filter(l => l.serialRequired === false).reduce((s, l) => s + l.qty, 0),
+    [currentRunLines]
+  );
+
+  // 3. Eindeutige Bestellnummern-Anzahl für Kachel 5
+  const allocatedOrderCount = useMemo(() => {
+    const seen = new Set<string>();
+    for (const line of currentRunLines) {
+      for (const ao of line.allocatedOrders) {
+        if (ao.orderNumber) seen.add(ao.orderNumber);
+      }
+    }
+    return seen.size;
+  }, [currentRunLines]);
+
+  // 4. isKachel1Verified — Zeilensummen vs. invoiceTotal (Toleranz < 0,10 €)
+  const isKachel1Verified = useMemo(() => {
+    const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
+    if (invoiceTotal == null || currentRunLines.length === 0) return false;
+    const lineSum = currentRunLines.reduce((s, l) => s + l.totalLineAmount, 0);
+    return Math.abs(lineSum - invoiceTotal) < 0.10;
+  }, [currentRunLines, currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal]);
+
+  // 5. isKachel2Verified — Qty-Summe == packagesCount
+  const isKachel2Verified = useMemo(() => {
+    const pkg = parsedInvoiceResult?.header.packagesCount ?? currentRun?.invoice.packagesCount;
+    if (pkg == null || pkg === 0 || currentRunLines.length === 0) return false;
+    return currentRunLines.reduce((s, l) => s + l.qty, 0) === pkg;
+  }, [currentRunLines, parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount]);
+
+  // 6. isKachel3Verified — 0 Preisabweichungen UND mind. 1 OK-Preis
+  const isKachel3Verified = useMemo(() => {
+    if (!currentRun) return false;
+    return currentRun.stats.priceMismatchCount === 0 && currentRun.stats.priceOkCount > 0;
+  }, [currentRun?.stats.priceMismatchCount, currentRun?.stats.priceOkCount]);
+
+  // 7. isKachel4Verified — serialNotRequired + serialRequired == totalQty
+  const isKachel4Verified = useMemo(() => {
+    if (currentRunLines.length === 0) return false;
+    const totalQty = currentRunLines.reduce((s, l) => s + l.qty, 0);
+    return (serialNotRequiredArticleCount + serialRequiredQtySum) === totalQty;
+  }, [currentRunLines, serialNotRequiredArticleCount, serialRequiredQtySum]);
+
+  // 8. isKachel5Verified — alle zugeteilt + Format YYYY-XXXXX (auf einzigartigen Nummern)
+  const isKachel5Verified = useMemo(() => {
+    if (!currentRun) return false;
+    const totalLines = currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines;
+    if (currentRun.stats.matchedOrders !== totalLines) return false;
+    if (allocatedOrderCount === 0) return false;
+
+    // Einzigartige Bestellnummern sammeln (eine Nr. darf mehrere Artikel abdecken — kein Fehler)
+    const uniqueOrderNumbers = new Set<string>();
+    for (const line of currentRunLines) {
+      for (const ao of line.allocatedOrders) {
+        if (ao.orderNumber) uniqueOrderNumbers.add(ao.orderNumber);
+      }
+    }
+
+    // Format-Prüfung NUR auf einzigartigen Nummern
+    const currentYear = new Date().getFullYear();
+    const validPrefixes = ['10', '11', '12', '20', '97', '98', '99'];
+    for (const on of uniqueOrderNumbers) {
+      const m = /^(\d{4})-(\d{5})$/.exec(on);
+      if (!m) return false;
+      const year = parseInt(m[1], 10);
+      const suffix = m[2];
+      const yearOk = year === 0 || (year >= currentYear - 20 && year <= currentYear + 100);
+      if (!yearOk) return false;
+      if (!validPrefixes.some(p => suffix.startsWith(p))) return false;
+    }
+    return true;
+  }, [currentRun, currentRunLines, allocatedOrderCount]);
+
+  // 9. SubValue-Strings (Zeile 3) für Kacheln 1, 2, 4, 5
+  const kachel1SubValue = useMemo(() => {
+    const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
+    if (invoiceTotal != null) {
+      return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Gesamtsumme`;
+    }
+    return parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+      ? 'Fehler: Anzahl stimmt nicht'
+      : (parsedInvoiceResult?.header.fatturaNumber ?? 'n/a');
+  }, [currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal,
+      parsedInvoiceResult?.header.qtyValidationStatus, parsedInvoiceResult?.header.fatturaNumber]);
+
+  const kachel2SubValue = useMemo(() => {
+    const pkg = parsedInvoiceResult?.header.packagesCount ?? currentRun?.invoice.packagesCount;
+    if (pkg != null) return `${pkg} Artikel gelistet`;
+    if (!currentRun) return undefined;
+    const { expandedLineCount, noMatchCount } = currentRun.stats;
+    return noMatchCount > 0
+      ? `${expandedLineCount} Artikel (${noMatchCount} ohne Match)`
+      : expandedLineCount > 0 ? `${expandedLineCount} Artikel` : undefined;
+  }, [parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount,
+      currentRun?.stats.expandedLineCount, currentRun?.stats.noMatchCount]);
+
+  const kachel4SubValue = useMemo(() => {
+    if (currentRun?.stats.serialRequiredCount === 0) return 'Keine SN-Pflicht';
+    return `${serialNotRequiredArticleCount} ART. ohne S/N-PFLICHT`;
+  }, [currentRun?.stats.serialRequiredCount, serialNotRequiredArticleCount]);
+
+  const kachel5SubValue = useMemo(() => {
+    if (allocatedOrderCount > 0) return `${allocatedOrderCount} Beleg-Nr. zugeteilt`;
+    if (currentRun && currentRun.stats.notOrderedCount > 0) return `${currentRun.stats.notOrderedCount} nicht bestellt`;
+    return undefined;
+  }, [allocatedOrderCount, currentRun?.stats.notOrderedCount]);
+  // ─── Ende PROJ-29 ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     // Find run by ID - first search in store runs (real runs), then fallback to mock data
@@ -271,15 +396,11 @@ export default function RunDetail() {
 
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
-          {/* Kachel 1: Positionen erhalten — PROJ-20 */}
+          {/* Kachel 1: Positionen erhalten — PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines} / ${parsedInvoiceResult?.header.pzCount ?? parsedInvoiceResult?.header.parsedPositionsCount ?? '?'}`}
             label="Positionen erhalten"
-            subValue={
-              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
-                ? 'Fehler: Anzahl stimmt nicht'
-                : parsedInvoiceResult?.header.fatturaNumber ?? 'n/a'
-            }
+            subValue={kachel1SubValue}
             variant={
               parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
                 ? 'warning'
@@ -287,25 +408,21 @@ export default function RunDetail() {
                   ? 'success'
                   : 'default'
             }
+            isVerified={isKachel1Verified}
           />
-          {/* Kachel 2: Artikel extrahiert — PROJ-20 */}
+          {/* Kachel 2: Artikel extrahiert — PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Artikel extrahiert"
-            subValue={
-              currentRun.stats.noMatchCount > 0
-                ? `${currentRun.stats.expandedLineCount} Artikel (${currentRun.stats.noMatchCount} ohne Match)`
-                : currentRun.stats.expandedLineCount > 0
-                  ? `${currentRun.stats.expandedLineCount} Artikel`
-                  : undefined
-            }
+            subValue={kachel2SubValue}
             variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
             onClick={currentRun.stats.noMatchCount > 0 ? () => {
               setIssuesStepFilter('2');
               setActiveTab('issues');
             } : undefined}
+            isVerified={isKachel2Verified}
           />
-          {/* Kachel 3: Preise checken */}
+          {/* Kachel 3: Preise checken — PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Preise checken"
@@ -317,25 +434,28 @@ export default function RunDetail() {
                   : undefined
             }
             variant={currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0 ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default'}
+            isVerified={isKachel3Verified}
           />
-          {/* Kachel 4: Serials geparst — PROJ-20 */}
+          {/* Kachel 4: Serials geparst — PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
             label="Serials geparst"
             icon={<Fingerprint className="w-4 h-4" />}
-            subValue={currentRun.stats.serialRequiredCount === 0 ? 'Keine SN-Pflicht' : undefined}
+            subValue={kachel4SubValue}
             variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
             onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
               setIssuesStepFilter('3');
               setActiveTab('issues');
             } : undefined}
+            isVerified={isKachel4Verified}
           />
-          {/* Kachel 5: Bestellungen mappen */}
+          {/* Kachel 5: Bestellungen mappen — PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.matchedOrders}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Beleg zugeteilt"
-            subValue={currentRun.stats.notOrderedCount > 0 ? `${currentRun.stats.notOrderedCount} nicht bestellt` : undefined}
+            subValue={kachel5SubValue}
             variant={currentRun.stats.notOrderedCount > 0 ? 'warning' : currentRun.stats.matchedOrders > 0 ? 'success' : 'default'}
+            isVerified={isKachel5Verified}
           />
           {/* Dynamic Next Step Button — PROJ-25: hover unified + pause badge */}
           <div
