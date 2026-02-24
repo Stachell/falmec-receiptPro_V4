@@ -36,7 +36,7 @@ export function KPITile({
 }: KPITileProps) {
   return (
     <div
-      className={cn('kpi-tile', variantStyles[variant], isVerified && 'bg-[#46cb78]', className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
+      className={cn('kpi-tile', !isVerified && variantStyles[variant], isVerified && 'kpi-tile-verified', className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
       onClick={onClick}
     >
       <div className="flex items-center justify-between">
@@ -64,7 +64,7 @@ export function KPITile({
             {subValue}
           </span>
           {isVerified && (
-            <CheckCircle2 className="w-4 h-4 text-white flex-shrink-0" />
+            <CheckCircle2 className="w-[22px] h-[22px] text-[#46cb78] flex-shrink-0" />
           )}
         </div>
       )}

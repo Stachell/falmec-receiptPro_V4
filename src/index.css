@@ -171,6 +171,14 @@
     @apply text-sm text-muted-foreground;
   }
 
+  /* PROJ-29 Add-On: Relief-Effekt für verified Kacheln (gedrückter Button) */
+  .kpi-tile-verified {
+    background-color: hsl(193 32% 36% / 0.6);
+    box-shadow: inset 2px 2px 6px rgba(0, 0, 0, 0.35),
+                inset -1px -1px 3px rgba(255, 255, 255, 0.08);
+    border-color: hsl(193 32% 30%);
+  }
+
   .stepper-step {
     @apply flex items-center gap-3;
   }

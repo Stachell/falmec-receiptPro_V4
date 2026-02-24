@@ -95,12 +95,13 @@ Die Double-Check-Logik ist **ausschließlich UI-Validierung** — sie hat keinen
   4. Die Format-Prüfung läuft nur auf **einzigartigen** Nummern (eine Bestellnummer darf für mehrere Artikel genutzt werden — das ist kein Fehler)
 
 ### AC-6: UI-Verhalten bei isVerified = true
-- [ ] Äußerer Container der Kachel erhält `bg-[#46cb78]` — exakter Farbton des Stepper-Erfolgskreises bei 70% Opacity (`--status-ok` + `opacity-70` = `#46cb78`)
+- [ ] Äußerer Container erhält CSS-Klasse `kpi-tile-verified`: Relief-Effekt (inset box-shadow) + Seitenhintergrund mit 40% Grau-Overlay (`hsl(193 32% 36% / 0.6)`), dunklerer Rand (`hsl(193 32% 30%)`)
 - [ ] Zeile 1 (Counter/Nenner) wird `text-white` (weiße Schrift auf grünem Grund)
 - [ ] Icon neben Zeile 1 wird `text-white/70` (dezent weiß)
 - [ ] Label (Zeile 2) erhält `text-emerald-50` (helles Grau/fast-weiß für gute Lesbarkeit)
 - [ ] Zeile 3 Text erhält `text-emerald-50` (helles Grau/fast-weiß)
-- [ ] `CheckCircle2` Icon (w-4 h-4, `text-white`) erscheint rechts-bündig in Zeile 3
+- [ ] `CheckCircle2` Icon (22x22px, `text-[#46cb78]`) erscheint rechts-bündig in Zeile 3
+- [ ] Bei `isVerified = true` wird die variant-Border unterdrückt (kein `border-l-4` Restrand)
 - [ ] Kein Layout-Shift wenn `isVerified = false`
 
 ### AC-7: Reaktivität
@@ -139,7 +140,7 @@ Die Double-Check-Logik ist **ausschließlich UI-Validierung** — sie hat keinen
 - **useMemo-Platzierung:** Alle Hooks müssen NACH `useClickLock()` und VOR dem ersten `useEffect` stehen
 - **Dependency `currentRun?.id`** (String-Primitiv) statt `currentRun` (Objekt-Referenz) für optimales Memoizing
 - **KPITile-Erweiterung:** Neues Prop `isVerified?: boolean`, subValue-Row wird von `<span>` zu flex `<div>` geändert
-- **Deckkraft-Add-On:** Hintergrundfarbe final auf `bg-[#46cb78]` — exakter visueller Farbton des WorkflowStepper-Erfolgskreises (`--status-ok` bei `opacity-70`)
+- **Relief-Add-On:** CSS-Klasse `.kpi-tile-verified` in `src/index.css` — Seitenhintergrund `hsl(193 32% 36% / 0.6)` + inset box-shadow für "gedrückter Button"-Effekt + dunklerer Rand `hsl(193 32% 30%)`
 - **Schrift-Add-On:** Bei verified wird Counter/Nenner (Zeile 1) weiß, Zeilen 2+3 helles Grau (`text-emerald-50`), CheckCircle2-Icon weiß
 
 ## Changelog
@@ -151,6 +152,9 @@ Die Double-Check-Logik ist **ausschließlich UI-Validierung** — sie hat keinen
 | 2026-02-24 | Add-On: Schrift-Einfärbung bei verified — Counter/Nenner weiß, Zeilen 2+3 helles Grau (`text-emerald-50`), CheckCircle2 weiß |
 | 2026-02-24 | Add-On: Hintergrundfarbe `bg-emerald-300` → `bg-[hsl(var(--status-ok))]` |
 | 2026-02-25 | Fix: Hintergrundfarbe `bg-[hsl(var(--status-ok))]` → `bg-[#46cb78]` — Stepper-Kreis hat visuell `#46cb78` durch `opacity-70` auf Parent-Button |
+| 2026-02-25 | Add-On: Relief-Effekt — `bg-[#46cb78]` → CSS-Klasse `.kpi-tile-verified` (Seitenhintergrund + 40% Grau + inset box-shadow für gedrückten Button-Look) |
+| 2026-02-25 | Add-On: CheckCircle2-Icon auf 22x22px (137.5%) vergrößert, Farbe `#46cb78` (Stepper-Grün) |
+| 2026-02-25 | Fix: variant-Border bei isVerified unterdrückt — kein `border-l-4` Restrand bei verified Kacheln |
 
 ## Status
 
