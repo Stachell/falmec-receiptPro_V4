@@ -259,6 +259,7 @@ const Index = () => {
                   <SelectItem value="soft-fail">Warnung</SelectItem>
                   <SelectItem value="failed">Fehlgeschlagen</SelectItem>
                   <SelectItem value="running">In Bearbeitung</SelectItem>
+                  <SelectItem value="paused">Pausiert</SelectItem>
                   <SelectItem value="not-started">Nicht gestartet</SelectItem>
                 </SelectContent>
               </Select>

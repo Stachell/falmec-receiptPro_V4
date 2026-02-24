@@ -179,8 +179,8 @@ export function InvoicePreview({
             />
           </div>
           <div className="ml-auto text-right">
-            <CardTitle>Rechnungspositionen ({positions.length})</CardTitle>
-            <CardDescription>Alle extrahierten Positionen</CardDescription>
+            <CardTitle>Rechnungspositionen</CardTitle>
+            <CardDescription>/invoicelines ({positions.length})</CardDescription>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
@@ -381,8 +381,11 @@ export function InvoicePreview({
 
       {/* Summary Footer */}
       <div className="flex justify-between items-center text-sm text-muted-foreground">
-        <span>
+        <span className="text-white">
           {positions.length} Positionen • Gesamtmenge: {header.totalQty ?? 0}
+          {typeof header.invoiceTotal === 'number'
+            ? ` • Rechnungssumme: ${formatCurrency(header.invoiceTotal)}`
+            : ''}
         </span>
         <span>
           {errorCount > 0 && (

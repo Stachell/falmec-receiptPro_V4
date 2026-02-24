@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Filter, ExternalLink, Download, Lightbulb, ArrowRight } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { SeverityBadge } from '@/components/StatusChip';
@@ -21,7 +21,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import type { Issue, IssueType } from '@/types';
 
-// ── Label map (existing + PROJ-17 new subtypes) ────────────────────────
+// â”€â”€ Label map (existing + PROJ-17 new subtypes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const issueTypeLabels: Record<string, string> = {
   'order-assignment': 'Bestellzuordnung',
   'serial-mismatch': 'Seriennummer-Fehler',
@@ -43,39 +43,39 @@ const issueTypeLabels: Record<string, string> = {
   'sn-regex-failed': 'S/N Regex kein Treffer',
   'sn-insufficient-count': 'Zu wenige Seriennummern',
   // PROJ-21 Step 4
-  'order-incomplete': 'Bestellung unvollständig',
+  'order-incomplete': 'Bestellung unvollstÃ¤ndig',
   'order-multi-split': 'Mehrfach-Split (3+)',
   'order-fifo-only': 'Nur FIFO-Zuweisung',
 };
 
-// ── Quick-Fix hints per issue type (Lightbulb banners) ────────────────
+// â”€â”€ Quick-Fix hints per issue type (Lightbulb banners) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const quickFixHints: Partial<Record<IssueType, string>> = {
   'match-artno-not-found':
-    'Artikelstamm aktualisieren oder Artikelnummer in der Rechnung prüfen. Der Stamm muss die Lieferanten-ArtNo enthalten.',
+    'Artikelstamm aktualisieren oder Artikelnummer in der Rechnung prÃ¼fen. Der Stamm muss die Lieferanten-ArtNo enthalten.',
   'match-ean-not-found':
-    'EAN im Artikelstamm fehlt oder weicht von der Rechnung ab. Stammdaten ergänzen.',
+    'EAN im Artikelstamm fehlt oder weicht von der Rechnung ab. Stammdaten ergÃ¤nzen.',
   'match-conflict-id':
-    'ArtNo und EAN zeigen auf unterschiedliche Artikel im Stamm — Stammdaten bereinigen, damit ArtNo und EAN denselben Artikel referenzieren.',
+    'ArtNo und EAN zeigen auf unterschiedliche Artikel im Stamm â€” Stammdaten bereinigen, damit ArtNo und EAN denselben Artikel referenzieren.',
   'sn-invoice-ref-missing':
     'Die 5-stellige Rechnungsreferenz fehlt im Warenbegleitschein. Stimmt die Rechnungsnummer im Dokument? Format: letzte 5 Ziffern der Fattura-Nr.',
   'sn-insufficient-count':
-    'Nicht genug Seriennummern im S/N-Dokument für alle Pflicht-Zeilen. Weitere Zeilen im Warenbegleitschein suchen oder S/N manuell nachtragen.',
+    'Nicht genug Seriennummern im S/N-Dokument fÃ¼r alle Pflicht-Zeilen. Weitere Zeilen im Warenbegleitschein suchen oder S/N manuell nachtragen.',
   // PROJ-21 Step 4
   'order-incomplete':
-    'Position nicht vollständig zugeordnet — Restmenge prüfen. Offene Bestellungen ergänzen oder manuell zuweisen.',
+    'Position nicht vollstÃ¤ndig zugeordnet â€” Restmenge prÃ¼fen. Offene Bestellungen ergÃ¤nzen oder manuell zuweisen.',
   'order-multi-split':
-    'Position wurde auf 3+ verschiedene Bestellungen aufgeteilt. Prüfen, ob die Splittung korrekt ist.',
+    'Position wurde auf 3+ verschiedene Bestellungen aufgeteilt. PrÃ¼fen, ob die Splittung korrekt ist.',
   'order-fifo-only':
-    'Keine Belegnummer aus dem PDF erkannt — Zuordnung erfolgte nur nach FIFO-Regel (älteste zuerst). Belegnummer im PDF prüfen.',
+    'Keine Belegnummer aus dem PDF erkannt â€” Zuordnung erfolgte nur nach FIFO-Regel (Ã¤lteste zuerst). Belegnummer im PDF prÃ¼fen.',
 };
 
 // Step labels for section headers
 const stepLabels: Record<number, string> = {
-  1: 'Schritt 1 — Rechnung auslesen',
-  2: 'Schritt 2 — Artikel extrahieren',
-  3: 'Schritt 3 — Seriennummer anfügen',
-  4: 'Schritt 4 — Bestellungen mappen',
-  5: 'Schritt 5 — Export',
+  1: 'Schritt 1 - Rechnung auslesen',
+  2: 'Schritt 2 - Artikel extrahieren',
+  3: 'Schritt 3 - Seriennummer anfuegen',
+  4: 'Schritt 4 - Bestellungen mappen',
+  5: 'Schritt 5 - Export',
 };
 
 export function IssuesCenter() {
@@ -221,17 +221,17 @@ export function IssuesCenter() {
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-status-soft-fail" />
-          <span className="text-lg font-semibold">{openIssues.length}</span>
-          <span className="text-muted-foreground">Offen</span>
+          <span className="text-lg font-semibold text-[#fff3e6]">{openIssues.length}</span>
+          <span className="text-white">Offen</span>
         </div>
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-5 h-5 text-status-ok" />
-          <span className="text-lg font-semibold">{resolvedIssues.length}</span>
-          <span className="text-muted-foreground">Gelöst</span>
+          <span className="text-lg font-semibold text-[#eaffef]">{resolvedIssues.length}</span>
+          <span className="text-white">Erledigt</span>
         </div>
       </div>
 
-      {/* Quick-Fix Banners (Lightbulb) — shown when relevant issue types are open */}
+      {/* Quick-Fix Banners (Lightbulb) â€” shown when relevant issue types are open */}
       {presentQuickFixTypes.length > 0 && (
         <div className="space-y-2">
           {presentQuickFixTypes.map(type => (
@@ -263,15 +263,15 @@ export function IssuesCenter() {
           </div>
         ) : (
           <>
-            {/* Open issues — grouped by step */}
+            {/* Open issues â€” grouped by step */}
             {stepNos.map(stepNo => {
               const stepIssues = issuesByStep.get(stepNo) ?? [];
               return (
                 <div key={stepNo} className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-white">
                     {stepLabels[stepNo] ?? `Schritt ${stepNo}`}
-                    <span className="ml-2 text-xs font-normal normal-case px-1.5 py-0.5 rounded bg-muted">
-                      {stepIssues.length} Issue{stepIssues.length !== 1 ? 's' : ''}
+                    <span className="ml-2 text-xs font-normal normal-case px-1.5 py-0.5 rounded bg-status-soft-fail/20 text-status-soft-fail border border-status-soft-fail/40">
+                      {stepIssues.length} Problem{stepIssues.length !== 1 ? 'e' : ''}
                     </span>
                   </h3>
                   {stepIssues.map(issue => (
@@ -289,7 +289,7 @@ export function IssuesCenter() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <SeverityBadge severity={issue.severity} />
-                            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                            <span className="text-xs text-white bg-muted px-2 py-0.5 rounded">
                               {issueTypeLabels[issue.type] ?? issue.type}
                             </span>
                           </div>
@@ -315,7 +315,7 @@ export function IssuesCenter() {
                             onClick={() => setSelectedIssue(issue)}
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
-                            Lösen
+                            Senden
                           </Button>
                         </div>
                       </div>
@@ -328,8 +328,8 @@ export function IssuesCenter() {
             {/* Resolved issues */}
             {resolvedIssues.length > 0 && (
               <div className="mt-8">
-                <h3 className="text-sm font-medium text-muted-foreground mb-3">
-                  Gelöste Issues ({resolvedIssues.length})
+                <h3 className="text-sm font-medium text-white mb-3">
+                  Erledigte Probleme ({resolvedIssues.length})
                 </h3>
                 {resolvedIssues.map(issue => (
                   <div key={issue.id} className="enterprise-card p-4 opacity-60 mb-3">
@@ -339,7 +339,7 @@ export function IssuesCenter() {
                         <h4 className="font-medium text-foreground line-through">{issue.message}</h4>
                         {issue.resolutionNote && (
                           <p className="text-sm text-muted-foreground mt-1">
-                            Lösung: {issue.resolutionNote}
+                            LÃ¶sung: {issue.resolutionNote}
                           </p>
                         )}
                       </div>
@@ -356,13 +356,13 @@ export function IssuesCenter() {
       <Dialog open={!!selectedIssue} onOpenChange={() => setSelectedIssue(null)}>
         <DialogContent className="bg-card">
           <DialogHeader>
-            <DialogTitle>Issue lösen</DialogTitle>
+            <DialogTitle>Issue lÃ¶sen</DialogTitle>
             <DialogDescription>{selectedIssue?.message}</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-muted-foreground mb-4">{selectedIssue?.details}</p>
             <Textarea
-              placeholder="Lösungsnotiz (optional)..."
+              placeholder="LÃ¶sungsnotiz (optional)..."
               value={resolutionNote}
               onChange={e => setResolutionNote(e.target.value)}
               className="bg-surface-elevated"
@@ -372,10 +372,12 @@ export function IssuesCenter() {
             <Button variant="outline" onClick={() => setSelectedIssue(null)}>
               Abbrechen
             </Button>
-            <Button onClick={handleResolve}>Als gelöst markieren</Button>
+            <Button onClick={handleResolve}>Als gelÃ¶st markieren</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
+
+

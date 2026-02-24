@@ -4,13 +4,6 @@ import { useClickLock } from '@/hooks/useClickLock';
 import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, CheckCircle, Settings } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { fileSystemService } from '@/services/fileSystemService';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
 import { matcherRegistryService, type MatcherRegistryModule } from '@/services/matcherRegistryService';
@@ -25,23 +18,27 @@ const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 const HOVER_BORDER = '#D8E6E7';
+type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'overview' | 'misc';
 
 export function AppFooter() {
   const [isOpen, setIsOpen] = useState(false);
   const [dataPath, setDataPath] = useState(DEFAULT_DATA_PATH);
   const [hasWarning, setHasWarning] = useState(false);
   const [isConfigured, setIsConfigured] = useState(false);
-  const [isSelectingFolder, setIsSelectingFolder] = useState(false);
+  const [, setIsSelectingFolder] = useState(false);
   const [isToggleHovered, setIsToggleHovered] = useState(false);
   const [isSettingsHovered, setIsSettingsHovered] = useState(false);
+  const [isDataPathHovered, setIsDataPathHovered] = useState(false);
+  const [hoveredStatusKey, setHoveredStatusKey] = useState<null | 'parser' | 'matcher' | 'serial' | 'ordermapper'>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabKey>('overview');
   const [selectedParserId, setSelectedParserId] = useState('auto');
   const [registryModules, setRegistryModules] = useState<ParserRegistryModule[]>([]);
   const [parserReady, setParserReady] = useState(false);
   const [selectedMatcherId, setSelectedMatcherId] = useState('auto');
   const [matcherModules, setMatcherModules] = useState<MatcherRegistryModule[]>([]);
   const [matcherReady, setMatcherReady] = useState(false);
-  const { globalConfig, setGlobalConfig } = useRunStore();
+  const globalConfig = useRunStore((state) => state.globalConfig);
   const { wrap, isLocked } = useClickLock();
 
   // Initialize data path from fileSystemService
@@ -121,6 +118,11 @@ export function AppFooter() {
     }
   };
 
+  const openSettingsAtTab = (tab: SettingsTabKey) => {
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
+  };
+
   const closeFooter = useCallback(() => {
     setIsOpen(false);
   }, []);
@@ -142,9 +144,27 @@ export function AppFooter() {
     };
   }, [isOpen, closeFooter]);
 
-  // Determine dropdown display: if only 1 module, hide "Auto" option
-  const showAutoOption = registryModules.length > 1;
-  const showMatcherAutoOption = matcherModules.length > 1;
+  const activeParserDisplayName = selectedParserId === 'auto'
+    ? 'Auto'
+    : registryModules.find((p) => p.moduleId === selectedParserId)?.moduleName || selectedParserId;
+  const activeMatcherDisplayName = selectedMatcherId === 'auto'
+    ? 'Auto'
+    : matcherModules.find((m) => m.moduleId === selectedMatcherId)?.moduleName || selectedMatcherId;
+  const activeSerialFinderId = globalConfig.activeSerialFinderId ?? 'default';
+  const serialFinderOptions: Array<{ id: string; label: string }> = [
+    { id: 'default', label: 'Standard' },
+  ];
+  const serialFinderReady = serialFinderOptions.some((option) => option.id === activeSerialFinderId);
+  const activeSerialFinderDisplayName = serialFinderOptions.find((option) => option.id === activeSerialFinderId)?.label
+    || activeSerialFinderId;
+  const activeOrderMapperId = globalConfig.activeOrderMapperId ?? 'engine-proj-23';
+  const orderMapperOptions: Array<{ id: string; label: string }> = [
+    { id: 'legacy-waterfall-4', label: 'Legacy (Veraltet)' },
+    { id: 'engine-proj-23', label: 'PROJ-23 (3-Run Engine)' },
+  ];
+  const orderMapperReady = orderMapperOptions.some((option) => option.id === activeOrderMapperId);
+  const activeOrderMapperDisplayName = orderMapperOptions.find((option) => option.id === activeOrderMapperId)?.label
+    || activeOrderMapperId;
 
   return (
     <>
@@ -178,7 +198,7 @@ export function AppFooter() {
       <div
         className={cn(
           "fixed right-2 z-50 p-3 rounded-lg transition-all duration-300",
-          isOpen ? "bottom-[calc(66px+0.5rem)]" : "bottom-2"
+          isOpen ? "bottom-[calc(73px+0.5rem)]" : "bottom-2"
         )}
         title="System Status"
       >
@@ -195,145 +215,159 @@ export function AppFooter() {
       <footer
         className={cn(
           "fixed bottom-0 left-0 right-0 z-40 bg-sidebar border-t border-sidebar-border transition-all duration-300 ease-in-out",
-          isOpen ? "h-[66px] opacity-100" : "h-0 opacity-0 overflow-hidden border-t-0"
+          isOpen ? "h-[73px] opacity-100" : "h-0 opacity-0 overflow-hidden border-t-0"
         )}
       >
         <div className="h-full px-6 flex items-center justify-end gap-6">
-          {/* [1] Parser-Dropdown (NEU - erstes Element) */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="footer-parser" className="text-xs text-sidebar-foreground whitespace-nowrap flex items-center gap-1">
-              Parser-Regex
+          <div className="flex items-center gap-[1.05rem]">
+            {/* [1] PDF-Parser (Statusfeld) */}
+            <div className="flex flex-col gap-0.5">
+            <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              PDF-Parser
               {parserReady && (
                 <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
               )}
             </Label>
-            <Select
-              value={selectedParserId}
-              onValueChange={handleParserChange}
+            <button
+              type="button"
+              onClick={() => openSettingsAtTab('parser')}
+              onMouseEnter={() => setHoveredStatusKey('parser')}
+              onMouseLeave={() => setHoveredStatusKey(null)}
+              className="h-7 w-40 text-xs border rounded-md px-2 flex items-center transition-colors"
+              style={{
+                backgroundColor: hoveredStatusKey === 'parser' ? HOVER_BG : '#FFFFFF',
+                color: hoveredStatusKey === 'parser' ? HOVER_TEXT : '#666666',
+                borderColor: hoveredStatusKey === 'parser' ? HOVER_BORDER : '#666666',
+              }}
+              title="Klicken, um Einstellungen > PDF-Parser zu oeffnen"
             >
-              <SelectTrigger
-                id="footer-parser"
-                className="h-7 w-56 text-xs border rounded-md transition-colors"
-                style={{
-                  backgroundColor: 'var(--sidebar)',
-                  borderColor: 'var(--input)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c9c3b6';
-                  e.currentTarget.style.borderColor = '#666666';
-                  e.currentTarget.style.color = '#666666';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--sidebar)';
-                  e.currentTarget.style.borderColor = 'var(--input)';
-                  e.currentTarget.style.color = '';
-                }}
-              >
-                <SelectValue placeholder="Parser waehlen..." />
-              </SelectTrigger>
-              <SelectContent className="bg-popover">
-                {showAutoOption && (
-                  <SelectItem value="auto">Auto</SelectItem>
-                )}
-                {registryModules.map((parser) => (
-                  <SelectItem key={parser.moduleId} value={parser.moduleId}>
-                    {parser.moduleName} v{parser.version}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <span className="truncate">{activeParserDisplayName}</span>
+            </button>
+            </div>
 
-          {/* [1b] Matcher-Dropdown (PROJ-16) */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="footer-matcher" className="text-xs text-sidebar-foreground whitespace-nowrap flex items-center gap-1">
-              Matcher
+            {/* [1b] Art.-Matcher (Statusfeld) */}
+            <div className="flex flex-col gap-0.5">
+            <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              Art.-Matcher
               {matcherReady && (
                 <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
               )}
             </Label>
-            <Select
-              value={selectedMatcherId}
-              onValueChange={handleMatcherChange}
+            <button
+              type="button"
+              onClick={() => openSettingsAtTab('matcher')}
+              onMouseEnter={() => setHoveredStatusKey('matcher')}
+              onMouseLeave={() => setHoveredStatusKey(null)}
+              className="h-7 w-40 text-xs border rounded-md px-2 flex items-center transition-colors"
+              style={{
+                backgroundColor: hoveredStatusKey === 'matcher' ? HOVER_BG : '#FFFFFF',
+                color: hoveredStatusKey === 'matcher' ? HOVER_TEXT : '#666666',
+                borderColor: hoveredStatusKey === 'matcher' ? HOVER_BORDER : '#666666',
+              }}
+              title="Klicken, um Einstellungen > Artikel extrahieren zu oeffnen"
             >
-              <SelectTrigger
-                id="footer-matcher"
-                className="h-7 w-56 text-xs border rounded-md transition-colors"
-                style={{
-                  backgroundColor: 'var(--sidebar)',
-                  borderColor: 'var(--input)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c9c3b6';
-                  e.currentTarget.style.borderColor = '#666666';
-                  e.currentTarget.style.color = '#666666';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--sidebar)';
-                  e.currentTarget.style.borderColor = 'var(--input)';
-                  e.currentTarget.style.color = '';
-                }}
-              >
-                <SelectValue placeholder="Matcher waehlen..." />
-              </SelectTrigger>
-              <SelectContent className="bg-popover">
-                {showMatcherAutoOption && (
-                  <SelectItem value="auto">Auto</SelectItem>
-                )}
-                {matcherModules.map((matcher) => (
-                  <SelectItem key={matcher.moduleId} value={matcher.moduleId}>
-                    {matcher.moduleName} v{matcher.version}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <span className="truncate">{activeMatcherDisplayName}</span>
+            </button>
+            </div>
 
-          {/* [2] Datenverzeichnis — PROJ-22 B4: Schwarzer klickbarer Link-Text */}
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-sidebar-foreground whitespace-nowrap">
-              Datenverzeichnis
+            {/* [1c] Serial-Finder (Statusfeld) */}
+            <div className="flex flex-col gap-0.5">
+            <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              Serial-Finder
+              {serialFinderReady && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
             </Label>
             <button
-              onClick={handleDataPathChange}
-              className="h-7 px-2 text-xs flex items-center gap-1.5 transition-colors"
+              type="button"
+              onClick={() => openSettingsAtTab('serial')}
+              onMouseEnter={() => setHoveredStatusKey('serial')}
+              onMouseLeave={() => setHoveredStatusKey(null)}
+              className="h-7 w-40 text-xs border rounded-md px-2 flex items-center transition-colors"
               style={{
-                color: '#000000',
-                textDecoration: isSelectingFolder ? 'none' : 'underline',
-                textDecorationColor: '#000000',
-                textUnderlineOffset: '2px',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
+                backgroundColor: hoveredStatusKey === 'serial' ? HOVER_BG : '#FFFFFF',
+                color: hoveredStatusKey === 'serial' ? HOVER_TEXT : '#666666',
+                borderColor: hoveredStatusKey === 'serial' ? HOVER_BORDER : '#666666',
               }}
-              title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwaehlen'}
+              title="Klicken, um Einstellungen > Serial parsen zu oeffnen"
             >
-              <FolderOpen className="w-3.5 h-3.5" style={{ color: '#000000' }} />
-              <span className="truncate max-w-[200px]" style={{ color: '#000000' }}>
-                {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner waehlen...'}
-              </span>
+              <span className="truncate">{activeSerialFinderDisplayName}</span>
+            </button>
+            </div>
+
+            {/* [1d] OrderMapper (Statusfeld) */}
+            <div className="flex flex-col gap-0.5">
+            <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              OrderMapper
+              {orderMapperReady && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
+            </Label>
+            <button
+              type="button"
+              onClick={() => openSettingsAtTab('ordermapper')}
+              onMouseEnter={() => setHoveredStatusKey('ordermapper')}
+              onMouseLeave={() => setHoveredStatusKey(null)}
+              className="h-7 w-40 text-xs border rounded-md px-2 flex items-center transition-colors"
+              style={{
+                backgroundColor: hoveredStatusKey === 'ordermapper' ? HOVER_BG : '#FFFFFF',
+                color: hoveredStatusKey === 'ordermapper' ? HOVER_TEXT : '#666666',
+                borderColor: hoveredStatusKey === 'ordermapper' ? HOVER_BORDER : '#666666',
+              }}
+              title="Klicken, um Einstellungen > Bestellung mappen zu oeffnen"
+            >
+              <span className="truncate">{activeOrderMapperDisplayName}</span>
+            </button>
+            </div>
+          </div>
+          {/* [2] Datenverzeichnis — PROJ-22 B4: Schwarzer klickbarer Link-Text */}
+          <div className="flex flex-col gap-0.5">
+            <Label className="w-56 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              Datenverzeichnis:
               {isConfigured && (
                 <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
               )}
+            </Label>
+            <button
+              onClick={handleDataPathChange}
+              onMouseEnter={() => setIsDataPathHovered(true)}
+              onMouseLeave={() => setIsDataPathHovered(false)}
+              className="h-7 w-56 text-xs border rounded-md transition-colors px-2 flex items-center gap-1.5"
+              style={{
+                backgroundColor: isDataPathHovered ? HOVER_BG : '#c9c3b6',
+                color: isDataPathHovered ? HOVER_TEXT : '#666666',
+                borderColor: isDataPathHovered ? HOVER_BORDER : '#666666',
+              }}
+              title={isConfigured ? `${dataPath}/falmec receiptPro` : 'Klicken um Ordner auszuwaehlen'}
+            >
+              <FolderOpen className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">
+                {isConfigured ? `${dataPath}/falmec receiptPro` : 'Ordner waehlen...'}
+              </span>
             </button>
           </div>
 
           {/* [3] Einstellungen Button — Logfile wurde in SettingsPopup Tab 1 verschoben */}
-          <button
-            onClick={() => setSettingsOpen(true)}
-            onMouseEnter={() => setIsSettingsHovered(true)}
-            onMouseLeave={() => setIsSettingsHovered(false)}
-            className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
-            style={{
-              backgroundColor: isSettingsHovered ? HOVER_BG : '#c9c3b6',
-              color: isSettingsHovered ? HOVER_TEXT : '#666666',
-              borderColor: isSettingsHovered ? HOVER_BORDER : '#666666',
-            }}
-            title="Einstellungen"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Einstellungen</span>
-          </button>
+          <div className="flex flex-col gap-0.5">
+            <Label className="text-xs text-sidebar-foreground text-left">
+              Einstellungen:
+            </Label>
+            <button
+              onClick={() => openSettingsAtTab('general')}
+              onMouseEnter={() => setIsSettingsHovered(true)}
+              onMouseLeave={() => setIsSettingsHovered(false)}
+              className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
+              style={{
+                backgroundColor: isSettingsHovered ? HOVER_BG : '#c9c3b6',
+                color: isSettingsHovered ? HOVER_TEXT : '#666666',
+                borderColor: isSettingsHovered ? HOVER_BORDER : '#666666',
+              }}
+              title="Einstellungen"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Settings</span>
+            </button>
+          </div>
         </div>
       </footer>
 
@@ -341,6 +375,9 @@ export function AppFooter() {
       <SettingsPopup
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        initialTab={settingsInitialTab}
+        onParserChange={handleParserChange}
+        onMatcherChange={handleMatcherChange}
         activeParser={{
           parserId: selectedParserId,
           modules: registryModules,
@@ -355,3 +392,4 @@ export function AppFooter() {
     </>
   );
 }
+

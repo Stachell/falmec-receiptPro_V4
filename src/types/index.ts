@@ -1,4 +1,4 @@
-export type StepStatus = 'not-started' | 'running' | 'ok' | 'soft-fail' | 'failed';
+export type StepStatus = 'not-started' | 'running' | 'ok' | 'soft-fail' | 'failed' | 'paused';
 
 // PROJ-21: 3-tier severity (migrated from 'blocking'|'soft-fail')
 export type IssueSeverity = 'error' | 'warning' | 'info';
@@ -26,7 +26,9 @@ export type IssueType =
   // PROJ-21: Step 4 deep-logging subtypes
   | 'order-incomplete'
   | 'order-multi-split'
-  | 'order-fifo-only';
+  | 'order-fifo-only'
+  // PROJ-23 ADDON: Pool-empty guard
+  | 'pool-empty-mismatch';
 
 export type MatchStatus =
   | 'pending'
@@ -61,6 +63,82 @@ export interface AllocatedOrder {
   reason: OrderAssignmentReason;
 }
 
+export type OrderParserConfidence = 'high' | 'medium' | 'low';
+
+export interface OrderParserFieldAliases {
+  orderNumberCandidates: string[];
+  orderYear: string[];
+  openQuantity: string[];
+  artNoDE: string[];
+  artNoIT: string[];
+  ean: string[];
+  supplierId: string[];
+  belegnummer: string[];
+}
+
+export interface OrderParserProfile {
+  id: string;
+  label: string;
+  description?: string;
+  aliases: OrderParserFieldAliases;
+  orderNumberRegex: string;
+  orderYearRegex: string;
+  orderNumberTieBreakPriority?: string[];
+}
+
+export interface OrderParserProfileOverrides extends Partial<Omit<OrderParserProfile, 'aliases'>> {
+  aliases?: Partial<OrderParserFieldAliases>;
+}
+
+export interface OrderParserCandidateScore {
+  columnIndex: number;
+  header: string;
+  validCount: number;
+  validRatio: number;
+  nonEmptyCount: number;
+  tieBreakRank: number;
+}
+
+export interface OrderParserSelectionDiagnostics {
+  profileId: string;
+  selectedColumnIndex: number;
+  selectedHeader: string;
+  confidence: OrderParserConfidence;
+  candidates: OrderParserCandidateScore[];
+}
+
+// PROJ-28: Unified step diagnostics (all 4 steps, stored in RunState.latestDiagnostics)
+export interface StepDiagnostics {
+  stepNo: 1 | 2 | 3 | 4;
+  moduleName: string;
+  confidence: 'high' | 'medium' | 'low';
+  /** Free-text summary, e.g. "14/15 Positionen gematcht" */
+  summary: string;
+  /** Optional detail lines for expandable display */
+  detailLines?: string[];
+  timestamp: string; // ISO
+}
+
+// PROJ-28: Field aliases for the Matcher (Step 2), analogous to OrderParserFieldAliases
+export interface MatcherFieldAliases {
+  artNoDE: string[];
+  artNoIT: string[];
+  ean: string[];
+  falmecArticleNo: string[];
+}
+
+// PROJ-28: Runtime overrides for the Matcher module (Step 2)
+export interface MatcherProfileOverrides {
+  enabled: boolean;
+  aliases?: Partial<MatcherFieldAliases>;
+  /** Regex to match Falmec Art-Nr (DE) values */
+  artNoDeRegex?: string;
+  /** Regex to match EAN values */
+  eanRegex?: string;
+  /** Regex to match manufacturer/supplier article numbers */
+  manufacturerNoRegex?: string;
+}
+
 export interface RunConfig {
   priceBasis: 'Net' | 'Gross';
   priceType: 'EK' | 'VK';
@@ -69,7 +147,17 @@ export interface RunConfig {
   clickLockSeconds: number;
   // PROJ-20: Active module selection
   activeSerialFinderId: string;   // Default: 'default'
-  activeOrderMapperId: string;    // Default: 'waterfall-4'
+  activeOrderMapperId: string;    // Default: 'engine-proj-23'
+  activeOrderParserProfileId: string; // Default: 'sage-openwe-v1'
+  orderParserProfileOverrides?: OrderParserProfileOverrides;
+  strictSerialRequiredFailure: boolean; // Default: true
+  // PROJ-28: Block-Step toggles
+  /** If true, completing Step 2 is blocked while open price-mismatch errors exist */
+  blockStep2OnPriceMismatch: boolean; // Default: false
+  /** If true, completing Step 4 is blocked while open order-assignment errors exist */
+  blockStep4OnMissingOrder: boolean;  // Default: false
+  // PROJ-28: Matcher override config (Step 2)
+  matcherProfileOverrides?: MatcherProfileOverrides;
 }
 
 export interface RunStats {
@@ -115,6 +203,8 @@ export interface InvoiceHeader {
   deliveryDate: string | null;
   /** Number of packages (from invoice) */
   packagesCount?: number | null;
+  /** Invoice total amount in EUR (from parser footer) */
+  invoiceTotal?: number | null;
   /** Total quantity sum from all positions */
   totalQty?: number;
   /** Number of parsed positions */
@@ -339,6 +429,7 @@ export interface OrderParseResult {
   positions: ParsedOrderPosition[];
   rowCount: number;
   warnings: string[];
+  diagnostics?: OrderParserSelectionDiagnostics;
 }
 
 // PROJ-20: Pre-filtered serial row (from serialFinder pre-filter step)

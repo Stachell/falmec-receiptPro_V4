@@ -9,10 +9,11 @@
  * - Logfile-Button moved here from AppFooter
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -37,17 +38,27 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle, FileText } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAllParsers } from '@/services/parsers';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
-import { getMatcher } from '@/services/matchers';
 import type { MatcherRegistryModule } from '@/services/matcherRegistryService';
 import { logService } from '@/services/logService';
+import type { OrderParserFieldAliases, OrderParserProfile, StepDiagnostics, MatcherProfileOverrides, OrderParserProfileOverrides } from '@/types';
+import {
+  DEFAULT_ORDER_PARSER_PROFILE_ID,
+  ORDER_PARSER_PROFILES,
+  getOrderParserProfileById,
+  resolveOrderParserProfile,
+} from '@/services/matching/orderParserProfiles';
+import { OverrideEditorModal } from '@/components/OverrideEditorModal';
 
 interface SettingsPopupProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialTab?: SettingsTabKey;
+  onParserChange?: (parserId: string) => void;
+  onMatcherChange?: (matcherId: string) => void;
   activeParser?: {
     parserId: string;
     modules: ParserRegistryModule[];
@@ -60,17 +71,21 @@ interface SettingsPopupProps {
   };
 }
 
+type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'overview';
+
 /** Hover-style helper button (matching app design) */
 function FooterButton({
   onClick,
   children,
   danger = false,
   disabled = false,
+  className = '',
 }: {
   onClick: () => void;
   children: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  className?: string;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -79,7 +94,7 @@ function FooterButton({
       disabled={disabled}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="h-9 px-4 text-sm rounded-md flex items-center justify-center gap-2 transition-colors border disabled:opacity-40 disabled:cursor-not-allowed"
+      className={`h-9 px-4 text-sm rounded-md flex items-center justify-center gap-2 transition-colors border disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
       style={{
         backgroundColor: hovered ? (danger ? '#dc2626' : '#008C99') : '#c9c3b6',
         borderColor: hovered ? (danger ? '#dc2626' : '#D8E6E7') : '#666666',
@@ -91,11 +106,84 @@ function FooterButton({
   );
 }
 
-export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher }: SettingsPopupProps) {
-  const { globalConfig, setGlobalConfig } = useRunStore();
+const ORDER_ALIAS_INPUTS: Array<{ field: keyof OrderParserFieldAliases; label: string }> = [
+  { field: 'orderNumberCandidates', label: 'Ordernummer Kandidaten' },
+  { field: 'orderYear', label: 'Order-Jahr' },
+  { field: 'openQuantity', label: 'Offene Menge' },
+  { field: 'artNoDE', label: 'Art-# (DE)' },
+  { field: 'artNoIT', label: 'Art-# (IT)' },
+  { field: 'ean', label: 'EAN' },
+];
+
+function toCsvValue(values: string[] | undefined): string {
+  return Array.isArray(values) ? values.join(', ') : '';
+}
+
+function fromCsvValue(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+// PROJ-28 Phase D: read-only diagnostics display for all 4 step tabs
+function DiagnosticsBlock({ diag }: { diag: StepDiagnostics | undefined }) {
+  const confidenceColor: Record<string, string> = {
+    high:   'text-green-700',
+    medium: 'text-amber-700',
+    low:    'text-red-700',
+  };
+  return (
+    <div className="rounded-md border border-border bg-white/60 p-2 space-y-1">
+      <Label className="text-xs font-semibold">Letzte Diagnose (read-only)</Label>
+      {diag ? (
+        <>
+          <p className="text-xs">Modul: <span className="font-semibold">{diag.moduleName}</span></p>
+          <p className="text-xs">
+            Confidence:{' '}
+            <span className={`font-semibold ${confidenceColor[diag.confidence] ?? ''}`}>
+              {diag.confidence}
+            </span>
+          </p>
+          <p className="text-xs text-muted-foreground">{diag.summary}</p>
+          {diag.detailLines?.map((line, i) => (
+            <p key={i} className="text-xs text-muted-foreground">• {line}</p>
+          ))}
+          <p className="text-[10px] text-muted-foreground">
+            {new Date(diag.timestamp).toLocaleString('de-DE')}
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">Noch keine Diagnose vorhanden.</p>
+      )}
+    </div>
+  );
+}
+
+export function SettingsPopup({
+  open,
+  onOpenChange,
+  initialTab = 'overview',
+  onParserChange,
+  onMatcherChange,
+  activeParser,
+  activeMatcher,
+}: SettingsPopupProps) {
+  const globalConfig = useRunStore((state) => state.globalConfig);
+  const setGlobalConfig = useRunStore((state) => state.setGlobalConfig);
+  const latestDiagnostics = useRunStore((state) => state.latestDiagnostics);
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const [overrideModalStep, setOverrideModalStep] = useState<2 | 4>(4);
   const [importSuccessOpen, setImportSuccessOpen] = useState(false);
   const [importedFileName, setImportedFileName] = useState('');
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab(initialTab);
+    }
+  }, [open, initialTab]);
 
   // Parser-Verwaltung state
   const [parserToDelete, setParserToDelete] = useState('');
@@ -203,17 +291,97 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
 
   // Display helpers
   const selectedParserName = parsers.find(p => p.moduleId === parserToDelete)?.moduleName || parserToDelete;
-  const activeParserDisplayName = activeParser?.parserId === 'auto'
-    ? 'Auto'
-    : activeParser?.modules.find(m => m.moduleId === activeParser.parserId)?.moduleName
-      || activeParser?.parserId || '–';
-  const activeMatcherDisplayName = activeMatcher?.matcherId === 'auto'
-    ? 'Auto'
-    : activeMatcher?.modules.find(m => m.moduleId === activeMatcher.matcherId)?.moduleName
-      || activeMatcher?.matcherId || '–';
-  const resolvedMatcher = activeMatcher?.matcherId
-    ? getMatcher(activeMatcher.matcherId)
-    : undefined;
+  const activeOrderParserProfileId = globalConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID;
+  const selectedOrderParserProfile = useMemo(
+    () => getOrderParserProfileById(activeOrderParserProfileId)
+      || getOrderParserProfileById(DEFAULT_ORDER_PARSER_PROFILE_ID)
+      || ORDER_PARSER_PROFILES[0]
+      || resolveOrderParserProfile(DEFAULT_ORDER_PARSER_PROFILE_ID),
+    [activeOrderParserProfileId],
+  );
+
+  const effectiveOrderParserProfile = useMemo(
+    () => resolveOrderParserProfile(
+      activeOrderParserProfileId,
+      globalConfig.orderParserProfileOverrides,
+      selectedOrderParserProfile,
+    ),
+    [activeOrderParserProfileId, globalConfig.orderParserProfileOverrides, selectedOrderParserProfile],
+  );
+
+  const customOrderParserOverrideEnabled = !!globalConfig.orderParserProfileOverrides;
+  const strictSerialRequiredFailure = globalConfig.strictSerialRequiredFailure ?? true;
+  const showParserAutoOption = (activeParser?.modules.length ?? 0) > 1;
+  const showMatcherAutoOption = (activeMatcher?.modules.length ?? 0) > 1;
+  const activeSerialFinderId = globalConfig.activeSerialFinderId ?? 'default';
+  const serialFinderOptions: Array<{ id: string; label: string }> = [
+    { id: 'default', label: 'Standard' },
+  ];
+  const serialFinderReady = serialFinderOptions.some((option) => option.id === activeSerialFinderId);
+  const activeOrderMapperId = globalConfig.activeOrderMapperId ?? 'engine-proj-23';
+  const orderMapperOptions: Array<{ id: string; label: string }> = [
+    { id: 'legacy-waterfall-4', label: 'Legacy (Veraltet)' },
+    { id: 'engine-proj-23', label: 'PROJ-23 (3-Run Engine)' },
+  ];
+  const orderMapperReady = orderMapperOptions.some((option) => option.id === activeOrderMapperId);
+
+  const updateOrderParserAliasOverride = (field: keyof OrderParserFieldAliases, csvValue: string) => {
+    const existingOverrides = globalConfig.orderParserProfileOverrides ?? {};
+    const existingAliases = existingOverrides.aliases ?? {};
+    const nextAliases: OrderParserProfile['aliases'] = {
+      ...effectiveOrderParserProfile.aliases,
+      ...existingAliases,
+      [field]: fromCsvValue(csvValue),
+    };
+
+    setGlobalConfig({
+      orderParserProfileOverrides: {
+        ...existingOverrides,
+        aliases: nextAliases,
+      },
+    });
+  };
+
+  const toggleCustomOrderParserOverrides = (enabled: boolean) => {
+    if (enabled) {
+      setGlobalConfig({
+        orderParserProfileOverrides: globalConfig.orderParserProfileOverrides ?? {
+          aliases: {
+            orderNumberCandidates: [...effectiveOrderParserProfile.aliases.orderNumberCandidates],
+            orderYear: [...effectiveOrderParserProfile.aliases.orderYear],
+            openQuantity: [...effectiveOrderParserProfile.aliases.openQuantity],
+            artNoDE: [...effectiveOrderParserProfile.aliases.artNoDE],
+            artNoIT: [...effectiveOrderParserProfile.aliases.artNoIT],
+            ean: [...effectiveOrderParserProfile.aliases.ean],
+            supplierId: [...effectiveOrderParserProfile.aliases.supplierId],
+            belegnummer: [...effectiveOrderParserProfile.aliases.belegnummer],
+          },
+        },
+      });
+      return;
+    }
+    setGlobalConfig({ orderParserProfileOverrides: undefined });
+  };
+
+  // PROJ-28 Phase D: computed values for override toggles
+  const matcherOverrideEnabled = !!globalConfig.matcherProfileOverrides?.enabled;
+  const matcherProfileOverrides = globalConfig.matcherProfileOverrides;
+  const blockStep2OnPriceMismatch = globalConfig.blockStep2OnPriceMismatch ?? false;
+  const blockStep4OnMissingOrder = globalConfig.blockStep4OnMissingOrder ?? false;
+
+  // PROJ-28 Phase D: handlers for OverrideEditorModal
+  const openOverrideModal = (stepNo: 2 | 4) => {
+    setOverrideModalStep(stepNo);
+    setOverrideModalOpen(true);
+  };
+
+  const handleSaveMatcherOverrides = (overrides: MatcherProfileOverrides) => {
+    setGlobalConfig({ matcherProfileOverrides: overrides });
+  };
+
+  const handleSaveOrderParserOverrides = (overrides: OrderParserProfileOverrides) => {
+    setGlobalConfig({ orderParserProfileOverrides: overrides });
+  };
 
   return (
     <>
@@ -227,55 +395,33 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
             <DialogTitle>Einstellungen</DialogTitle>
           </DialogHeader>
 
-          {/* PROJ-22 B4: Vertikales Tab-Menu mit 6 Tabs */}
-          <Tabs defaultValue="overview" orientation="vertical" className="flex gap-4 mt-2">
+          {/* PROJ-22 B4: Vertikales Tab-Menu */}
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as SettingsTabKey)}
+            orientation="vertical"
+            className="flex gap-4 mt-2"
+          >
             <TabsList
               className="flex flex-col h-auto items-start justify-start gap-0.5 p-1 w-44 shrink-0"
               style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
             >
-              <TabsTrigger value="overview"    className="w-full justify-start text-left text-sm px-3 py-2">Uebersicht</TabsTrigger>
               <TabsTrigger value="general"     className="w-full justify-start text-left text-sm px-3 py-2">Allgemein</TabsTrigger>
               <TabsTrigger value="parser"      className="w-full justify-start text-left text-sm px-3 py-2">PDF-Parser</TabsTrigger>
               <TabsTrigger value="matcher"     className="w-full justify-start text-left text-sm px-3 py-2">Artikel extrahieren</TabsTrigger>
               <TabsTrigger value="serial"      className="w-full justify-start text-left text-sm px-3 py-2">Serial parsen</TabsTrigger>
               <TabsTrigger value="ordermapper" className="w-full justify-start text-left text-sm px-3 py-2">Bestellung mappen</TabsTrigger>
+              <TabsTrigger value="overview"    className="w-full justify-start text-left text-sm px-3 py-2">Speicher/Cache</TabsTrigger>
             </TabsList>
 
             <div className="flex-1 min-h-[280px]">
-              {/* Tab 1: Uebersicht */}
+              {/* Tab 1: Speicher/Cache */}
               <TabsContent value="overview" className="mt-0 space-y-3">
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Uebersicht</div>
-
-                {/* Logfile-Button (moved from AppFooter) */}
-                <FooterButton onClick={handleShowLogfile}>
-                  <FileText className="w-4 h-4" />
-                  Logfile oeffnen
-                </FooterButton>
-
-                {/* Aktiver Parser */}
-                {activeParser?.ready && (
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span>Aktiver Parser</span>
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      <span>{activeParserDisplayName}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Aktiver Matcher */}
-                {activeMatcher?.ready && (
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span>Aktiver Matcher</span>
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      <span>{activeMatcherDisplayName}</span>
-                    </div>
-                  </div>
-                )}
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Speicher/Cache</div>
 
                 {/* Speicher/Cache leeren */}
-                <div className="border-t border-border pt-3">
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Local-Storge / Cache leeren</Label>
                   <FooterButton onClick={() => setCacheConfirmOpen(true)} danger>
                     <Trash2 className="w-4 h-4" />
                     Speicher / Cache leeren
@@ -284,78 +430,97 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
                     Loescht alle localStorage-Daten und laedt die Seite neu.
                   </p>
                 </div>
+
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Archiv leeren</Label>
+                  <FooterButton onClick={() => toast.info('Archiv-Synchronisation - kommt in PROJ-23 A2')}>
+                    Archiv synchronisieren
+                  </FooterButton>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Exportiert alle Runs als JSON in einen lokalen Ordner (PROJ-23).
+                  </p>
+                </div>
               </TabsContent>
 
               {/* Tab 2: Allgemein */}
               <TabsContent value="general" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Allgemein</div>
 
-                {/* Maussperre */}
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Maussperre (SEK.)</Label>
-                  <Select
-                    value={(globalConfig.clickLockSeconds ?? 0).toFixed(1)}
-                    onValueChange={(v) => setGlobalConfig({ clickLockSeconds: parseFloat(v) })}
-                  >
-                    <SelectTrigger className="h-8 w-28 text-sm bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      {Array.from({ length: 31 }, (_, i) => {
-                        const val = (i * 0.1).toFixed(1);
-                        return (
-                          <SelectItem key={val} value={val}>
-                            {val.replace('.', ',')}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
+                <div className="border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap text-left">Logfile (global) anzeigen:</Label>
+                    <FooterButton onClick={handleShowLogfile} className="h-8 w-28 justify-start px-3">
+                      Logfile
+                    </FooterButton>
+                  </div>
                 </div>
 
-                {/* Preisbasis */}
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Preisbasis</Label>
-                  <Select
-                    value={globalConfig.priceBasis}
-                    onValueChange={(value: 'Net' | 'Gross') => setGlobalConfig({ priceBasis: value })}
-                  >
-                    <SelectTrigger className="h-8 w-28 text-sm bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      <SelectItem value="Net">Netto</SelectItem>
-                      <SelectItem value="Gross">Brutto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <div className="border-t border-border pt-3 space-y-3">
+                  <Label className="text-sm font-semibold">Feineinstellung</Label>
 
-                {/* Waehrung */}
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Waehrung</Label>
-                  <Select value="EUR" onValueChange={() => {}}>
-                    <SelectTrigger className="h-8 w-28 text-sm bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      <SelectItem value="EUR">Euro</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap">Maussperre (SEK.)</Label>
+                    <Select
+                      value={(globalConfig.clickLockSeconds ?? 0).toFixed(1)}
+                      onValueChange={(v) => setGlobalConfig({ clickLockSeconds: parseFloat(v) })}
+                    >
+                      <SelectTrigger className="h-8 w-28 text-sm bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        {Array.from({ length: 31 }, (_, i) => {
+                          const val = (i * 0.1).toFixed(1);
+                          return (
+                            <SelectItem key={val} value={val}>
+                              {val.replace('.', ',')}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                {/* Toleranz */}
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Toleranz (EUR)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={globalConfig.tolerance}
-                    onChange={(e) =>
-                      setGlobalConfig({ tolerance: Math.max(0, parseFloat(e.target.value) || 0) })
-                    }
-                    className="h-8 w-28 text-sm bg-white"
-                  />
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap">Preisbasis</Label>
+                    <Select
+                      value={globalConfig.priceBasis}
+                      onValueChange={(value: 'Net' | 'Gross') => setGlobalConfig({ priceBasis: value })}
+                    >
+                      <SelectTrigger className="h-8 w-28 text-sm bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="Net">Netto</SelectItem>
+                        <SelectItem value="Gross">Brutto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap">Waehrung</Label>
+                    <Select value="EUR" onValueChange={() => {}}>
+                      <SelectTrigger className="h-8 w-28 text-sm bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="EUR">Euro</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap">Toleranz (EUR)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={globalConfig.tolerance}
+                      onChange={(e) =>
+                        setGlobalConfig({ tolerance: Math.max(0, parseFloat(e.target.value) || 0) })
+                      }
+                      className="h-8 w-28 text-sm bg-white"
+                    />
+                  </div>
                 </div>
               </TabsContent>
 
@@ -363,8 +528,40 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
               <TabsContent value="parser" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">PDF-Parser</div>
 
-                {/* Parser importieren */}
-                <div className="flex flex-col gap-2">
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1">
+                    Parser-Regex
+                    {activeParser?.ready && (
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                    )}
+                  </Label>
+                  <Select
+                    value={activeParser?.parserId ?? 'auto'}
+                    onValueChange={(value) => onParserChange?.(value)}
+                  >
+                    <SelectTrigger className="h-9 text-sm bg-white" style={{ borderColor: '#666666' }}>
+                      <SelectValue placeholder="Parser waehlen..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {showParserAutoOption && (
+                        <SelectItem value="auto">Auto</SelectItem>
+                      )}
+                      {(activeParser?.modules ?? []).map((parser) => (
+                        <SelectItem key={parser.moduleId} value={parser.moduleId}>
+                          {parser.moduleName} v{parser.version}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* [D] Letzte Diagnose Step 1 */}
+                <div className="border-t border-border pt-3">
+                  <DiagnosticsBlock diag={latestDiagnostics[1]} />
+                </div>
+
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Parser-Import</Label>
                   <FooterButton onClick={handleImportClick}>
                     <Upload className="w-4 h-4" />
                     Parser importieren
@@ -421,67 +618,122 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
               <TabsContent value="matcher" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Artikel extrahieren</div>
 
-                {/* Aktiver Matcher read-only display */}
-                {activeMatcher?.ready && (
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span>Aktiver Matcher</span>
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      <span>{activeMatcherDisplayName}</span>
-                    </div>
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1">
+                    Matcher
+                    {activeMatcher?.ready && (
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                    )}
+                  </Label>
+                  <Select
+                    value={activeMatcher?.matcherId ?? 'auto'}
+                    onValueChange={(value) => onMatcherChange?.(value)}
+                  >
+                    <SelectTrigger className="h-9 text-sm bg-white" style={{ borderColor: '#666666' }}>
+                      <SelectValue placeholder="Matcher waehlen..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {showMatcherAutoOption && (
+                        <SelectItem value="auto">Auto</SelectItem>
+                      )}
+                      {(activeMatcher?.modules ?? []).map((matcher) => (
+                        <SelectItem key={matcher.moduleId} value={matcher.moduleId}>
+                          {matcher.moduleName} v{matcher.version}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* [C] Custom Override Toggle + Anpassen-Button */}
+                <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                  <div className="space-y-1">
+                    <Label className="text-sm whitespace-nowrap">Custom Override aktiv</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Alias-Listen und Regex-Felder fuer geaenderte Stammdaten-Strukturen anpassen.
+                    </p>
                   </div>
+                  <Switch
+                    checked={matcherOverrideEnabled}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setGlobalConfig({ matcherProfileOverrides: { enabled: true, ...matcherProfileOverrides } });
+                      } else {
+                        setGlobalConfig({ matcherProfileOverrides: { ...matcherProfileOverrides, enabled: false } });
+                      }
+                    }}
+                  />
+                </div>
+                {matcherOverrideEnabled && (
+                  <FooterButton onClick={() => openOverrideModal(2)}>
+                    Anpassen
+                  </FooterButton>
                 )}
 
-                {/* Matcher Schema */}
-                {resolvedMatcher && (
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-sm font-semibold">Schema: {resolvedMatcher.schemaDefinition.name}</Label>
-                    <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto">
-                      {resolvedMatcher.schemaDefinition.fields.map((field) => (
-                        <div key={field.fieldId} className="flex items-start gap-2">
-                          <span className="text-xs font-medium min-w-[90px]">{field.label}:</span>
-                          <div className="flex flex-wrap gap-1">
-                            {field.aliases.map((alias) => (
-                              <span
-                                key={alias}
-                                className="inline-block px-1.5 py-0.5 text-[10px] rounded bg-white/70 border border-border"
-                              >
-                                {alias}
-                              </span>
-                            ))}
-                            {field.validationPattern && (
-                              <span
-                                title={`Validierung: /${field.validationPattern}/`}
-                                className="inline-block px-1.5 py-0.5 text-[10px] rounded bg-amber-100 border border-amber-300 text-amber-700 font-mono"
-                              >
-                                /{field.validationPattern}/
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                {/* [D] Letzte Diagnose Step 2 */}
+                <div className="border-t border-border pt-3">
+                  <DiagnosticsBlock diag={latestDiagnostics[2]} />
+                </div>
+
+                {/* [F] Block-Toggle Step 2 */}
+                <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                  <div className="space-y-1">
+                    <Label className="text-sm whitespace-nowrap">Preisabweichungen blockieren Step 2</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Wenn aktiv: Step 2 kann nicht abgeschlossen werden, solange Preis-Fehler offen sind.
+                    </p>
                   </div>
-                )}
+                  <Switch
+                    checked={blockStep2OnPriceMismatch}
+                    onCheckedChange={(checked) => setGlobalConfig({ blockStep2OnPriceMismatch: checked })}
+                  />
+                </div>
               </TabsContent>
 
               {/* Tab 5: Serial parsen */}
               <TabsContent value="serial" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Serial parsen</div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Aktiver Serial-Finder</Label>
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1">
+                    Aktiver Serial-Finder
+                    {serialFinderReady && (
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                    )}
+                  </Label>
                   <Select
-                    value={globalConfig.activeSerialFinderId ?? 'default'}
+                    value={activeSerialFinderId}
                     onValueChange={(v) => setGlobalConfig({ activeSerialFinderId: v })}
                   >
-                    <SelectTrigger className="h-8 w-36 text-sm bg-white">
-                      <SelectValue />
+                    <SelectTrigger className="h-9 text-sm bg-white" style={{ borderColor: '#666666' }}>
+                      <SelectValue placeholder="Serial-Finder waehlen..." />
                     </SelectTrigger>
                     <SelectContent className="bg-popover">
-                      <SelectItem value="default">Standard</SelectItem>
+                      {serialFinderOptions.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* [D] Letzte Diagnose Step 3 */}
+                <div className="border-t border-border pt-3">
+                  <DiagnosticsBlock diag={latestDiagnostics[3]} />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                  <div className="space-y-1">
+                    <Label className="text-sm whitespace-nowrap">Pflicht-S/N blockiert Step 3</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Wenn aktiv: bei fehlenden Pflicht-Seriennummern wird Step 3 auf failed gesetzt.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={strictSerialRequiredFailure}
+                    onCheckedChange={(checked) => setGlobalConfig({ strictSerialRequiredFailure: checked })}
+                  />
                 </div>
               </TabsContent>
 
@@ -489,32 +741,91 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
               <TabsContent value="ordermapper" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Bestellung mappen</div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm whitespace-nowrap">Aktiver OrderMapper</Label>
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1">
+                    Aktiver OrderMapper
+                    {orderMapperReady && (
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                    )}
+                  </Label>
                   <Select
-                    value={globalConfig.activeOrderMapperId ?? 'waterfall-4'}
+                    value={activeOrderMapperId}
                     onValueChange={(v) => setGlobalConfig({ activeOrderMapperId: v })}
                   >
-                    <SelectTrigger className="h-8 w-40 text-sm bg-white">
-                      <SelectValue />
+                    <SelectTrigger className="h-9 text-sm bg-white" style={{ borderColor: '#666666' }}>
+                      <SelectValue placeholder="OrderMapper waehlen..." />
                     </SelectTrigger>
                     <SelectContent className="bg-popover">
-                      <SelectItem value="legacy-3">Legacy (3 Regeln)</SelectItem>
-                      <SelectItem value="waterfall-4">Wasserfall (4 Stufen)</SelectItem>
+                      {orderMapperOptions.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* Archiv synchronisieren placeholder */}
-                <div className="border-t border-border pt-3">
-                  <FooterButton onClick={() => toast.info('Archiv-Synchronisation — kommt in PROJ-23 A2')}>
-                    Archiv synchronisieren
-                  </FooterButton>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Exportiert alle Runs als JSON in einen lokalen Ordner (PROJ-23).
-                  </p>
+                <div className="border-t border-border pt-3 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm whitespace-nowrap">Order-Parser-Profil</Label>
+                    <Select
+                      value={activeOrderParserProfileId}
+                      onValueChange={(value) => setGlobalConfig({ activeOrderParserProfileId: value })}
+                    >
+                      <SelectTrigger className="h-8 w-44 text-sm bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        {ORDER_PARSER_PROFILES.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            {profile.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-sm whitespace-nowrap">Custom Override aktiv</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Aliaslisten fuer geaenderte Excel-/CSV-Strukturen manuell anpassen.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={customOrderParserOverrideEnabled}
+                      onCheckedChange={toggleCustomOrderParserOverrides}
+                    />
+                  </div>
+
+                  {customOrderParserOverrideEnabled && (
+                    <FooterButton onClick={() => openOverrideModal(4)}>
+                      Anpassen
+                    </FooterButton>
+                  )}
+
+                  {/* [D] Letzte Diagnose Step 4 — migrated to latestDiagnostics */}
+                  <div className="border-t border-border pt-3">
+                    <DiagnosticsBlock diag={latestDiagnostics[4]} />
+                  </div>
+
+                  {/* [F] Block-Toggle Step 4 */}
+                  <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                    <div className="space-y-1">
+                      <Label className="text-sm whitespace-nowrap">Fehlende Bestellzuweisung blockiert Step 4</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Wenn aktiv: Step 4 kann nicht abgeschlossen werden, solange Bestellzuordnungen fehlen.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={blockStep4OnMissingOrder}
+                      onCheckedChange={(checked) => setGlobalConfig({ blockStep4OnMissingOrder: checked })}
+                    />
+                  </div>
                 </div>
+
               </TabsContent>
+
             </div>
           </Tabs>
 
@@ -530,6 +841,18 @@ export function SettingsPopup({ open, onOpenChange, activeParser, activeMatcher 
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* PROJ-28 Phase C: Override Editor Modal (Step 2 + Step 4) */}
+      <OverrideEditorModal
+        open={overrideModalOpen}
+        onOpenChange={setOverrideModalOpen}
+        stepNo={overrideModalStep}
+        matcherOverrides={globalConfig.matcherProfileOverrides}
+        onSaveMatcherOverrides={handleSaveMatcherOverrides}
+        orderParserProfile={effectiveOrderParserProfile}
+        orderParserOverrides={globalConfig.orderParserProfileOverrides}
+        onSaveOrderParserOverrides={handleSaveOrderParserOverrides}
+      />
 
       {/* Import Success AlertDialog */}
       <AlertDialog open={importSuccessOpen}>

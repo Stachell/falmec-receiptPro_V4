@@ -311,6 +311,7 @@ export function convertToInvoiceHeader(
     fattura: parsedResult.header.fatturaNumber,
     invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
     deliveryDate: null,
+    invoiceTotal: parsedResult.header.invoiceTotal ?? null,
   };
 }
 

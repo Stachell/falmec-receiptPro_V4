@@ -1,8 +1,10 @@
 /**
- * OrderPool — PROJ-23 Phase A3
+ * OrderPool — PROJ-23 Phase A3 (ADDON: 2-of-3 Per-Article Scoring)
  *
- * Article-First order filtering: only orders whose artNoDE matches
- * an invoice article enter the pool. Supports consume/return for
+ * Orders enter the pool only if they score >= 2 on the 3-field
+ * cross-reference check (artNoDE, artNoIT, EAN) against a SINGLE
+ * invoice article. Pool key = falmecArticleNo of the matched invoice
+ * article (not the Excel artNoDE). Supports consume/return for
  * bidirectional manual reassignment.
  *
  * Composite key enforcement: All order references use YYYY-XXXXX format.
@@ -27,7 +29,7 @@ export interface OrderPoolEntry {
 }
 
 export interface OrderPool {
-  /** artNoDE → entries (sorted oldest-first: orderYear ASC, belegnummer ASC) */
+  /** falmecArticleNo → entries (sorted oldest-first: orderYear ASC, belegnummer ASC) */
   byArticle: Map<string, OrderPoolEntry[]>;
   /** position.id → entry (O(1) lookup for consume/return) */
   byId: Map<string, OrderPoolEntry>;
@@ -58,8 +60,13 @@ export interface BuildOrderPoolResult {
 }
 
 /**
- * Build an OrderPool from parsed orders, filtering to only those whose
- * artNoDE matches an invoice article's falmecArticleNo.
+ * Build an OrderPool from parsed orders using the "2 of 3" per-article
+ * scoring filter. For each Excel order, we compare artNoDE/artNoIT/ean
+ * against each unique invoice article's falmecArticleNo/manufacturerArticleNo/ean.
+ * All 2+ points must come from the SAME invoice article (no Frankenstein matches).
+ *
+ * Pool key = falmecArticleNo of the matched invoice article (original case).
+ * order.artNoDE is auto-healed to this key so MatchingEngine Run 1/2/3 work correctly.
  *
  * @param parsedOrders - All parsed order positions from orderParser
  * @param invoiceLines - Current invoice lines (after Step 2 matching)
@@ -72,14 +79,42 @@ export function buildOrderPool(
   masterArticles: ArticleMaster[],
   runId: string,
 ): BuildOrderPoolResult {
-  // 1. Collect all falmecArticleNo values from invoice lines (from Step 2 matching)
-  const invoiceArticleNos = new Set<string>();
-  for (const line of invoiceLines) {
-    const artNo = (line.falmecArticleNo ?? '').trim();
-    if (artNo) invoiceArticleNos.add(artNo);
+  // ── 1. Build unique invoice article reference list ──────────────────
+  // Each ref has all 3 fields for per-article scoring.
+  // falmecOriginalCase preserves the original case for Map keys.
+
+  interface InvoiceArticleRef {
+    falmecNorm: string;              // lowercase for comparison
+    manufacturerArticleNoNorm: string; // lowercase for comparison
+    eanNorm: string;                 // lowercase for comparison
   }
 
-  // 2. Filter parsedOrders: only those where artNoDE matches an invoice article
+  const invoiceArticleRefs: InvoiceArticleRef[] = [];
+  const seenFalmec = new Set<string>();
+  const falmecOriginalCase = new Map<string, string>(); // lowercase → original
+
+  for (const line of invoiceLines) {
+    const falmecOrig = (line.falmecArticleNo ?? '').trim();
+    const falmecNorm = falmecOrig.toLowerCase();
+    if (!falmecNorm) continue;
+
+    // Store original case mapping
+    if (!falmecOriginalCase.has(falmecNorm)) {
+      falmecOriginalCase.set(falmecNorm, falmecOrig);
+    }
+
+    // Deduplicate by falmecArticleNo
+    if (seenFalmec.has(falmecNorm)) continue;
+    seenFalmec.add(falmecNorm);
+
+    invoiceArticleRefs.push({
+      falmecNorm,
+      manufacturerArticleNoNorm: (line.manufacturerArticleNo ?? '').trim().toLowerCase(),
+      eanNorm: (line.ean ?? '').trim().toLowerCase(),
+    });
+  }
+
+  // ── 2. Score each Excel order against invoice articles ─────────────
   const byArticle = new Map<string, OrderPoolEntry[]>();
   const byId = new Map<string, OrderPoolEntry>();
   const issues: Issue[] = [];
@@ -98,15 +133,38 @@ export function buildOrderPool(
   const missingIdOrders: string[] = [];
 
   for (const order of parsedOrders) {
-    const artNoDE = (order.artNoDE ?? '').trim();
+    const orderArtNoDENorm = (order.artNoDE ?? '').trim().toLowerCase();
+    const orderArtNoITNorm = (order.artNoIT ?? '').trim().toLowerCase();
+    const orderEanNorm     = (order.ean ?? '').trim().toLowerCase();
 
-    // Article-First filter: skip orders not matching any invoice article
-    if (!artNoDE || !invoiceArticleNos.has(artNoDE)) {
+    // Per-article scoring: find FIRST invoice article with score >= 2
+    let matchedFalmecNorm: string | null = null;
+
+    for (const ref of invoiceArticleRefs) {
+      let score = 0;
+      if (orderArtNoDENorm && orderArtNoDENorm === ref.falmecNorm)              score++;
+      if (orderArtNoITNorm && orderArtNoITNorm === ref.manufacturerArticleNoNorm) score++;
+      if (orderEanNorm     && orderEanNorm === ref.eanNorm)                     score++;
+
+      if (score >= 2) {
+        matchedFalmecNorm = ref.falmecNorm;
+        break;
+      }
+    }
+
+    if (!matchedFalmecNorm) {
       filteredOutCount++;
       continue;
     }
 
     filteredInCount++;
+
+    // Resolve original-case pool key from the matched invoice article
+    const groupKey = falmecOriginalCase.get(matchedFalmecNorm) ?? matchedFalmecNorm;
+
+    // Auto-heal: update order.artNoDE to the matched falmecArticleNo
+    // so MatchingEngine Run 1/2/3 find this order under the correct key
+    order.artNoDE = groupKey;
 
     // Validation: check if order has at least EAN or ArtNoIT
     const hasEan = !!(order.ean ?? '').trim();
@@ -122,10 +180,10 @@ export function buildOrderPool(
       remainingQty: order.openQuantity,
     };
 
-    // Add to byArticle map
-    const existing = byArticle.get(artNoDE) ?? [];
+    // Add to byArticle map (key = falmecArticleNo original case)
+    const existing = byArticle.get(groupKey) ?? [];
     existing.push(entry);
-    byArticle.set(artNoDE, existing);
+    byArticle.set(groupKey, existing);
 
     // Add to byId map
     byId.set(order.id, entry);
@@ -165,8 +223,9 @@ export function buildOrderPool(
   const pool: OrderPool = { byArticle, byId, totalRemaining };
 
   console.debug(
-    `[OrderPool] Built pool: ${filteredInCount} orders in, ${filteredOutCount} filtered out, ` +
-    `${byArticle.size} articles, ${totalRemaining} total remaining qty`
+    `[OrderPool] 2-of-3 per-article filter: ${filteredInCount} in, ${filteredOutCount} out, ` +
+    `${byArticle.size} articles, ${totalRemaining} total remaining qty | ` +
+    `Invoice refs: ${invoiceArticleRefs.length} unique articles`
   );
 
   return { pool, issues, filteredInCount, filteredOutCount };

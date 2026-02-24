@@ -128,9 +128,14 @@ export function ItemsTable() {
         <div className="text-sm text-muted-foreground">
           {filteredLines.length} von {invoiceLines.length} Positionen
         </div>
-        {/* Right: label */}
-        <div className="ml-auto text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          Einzelartikel Listung
+        {/* Right: label (matches RE-Positionen title + subtitle typography) */}
+        <div className="ml-auto text-right">
+          <h3 className="text-2xl font-semibold leading-none tracking-tight">
+            Artikel Liste
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            /article list ({invoiceLines.length})
+          </p>
         </div>
       </div>
 
@@ -158,7 +163,7 @@ export function ItemsTable() {
               <TableHead>Bezeichnung</TableHead>
               <TableHead className="w-12 text-right">Menge</TableHead>
               <TableHead className="w-36 text-right">Preis</TableHead>
-              <TableHead className="w-14">SN</TableHead>
+              <TableHead className="w-[120px]">SN</TableHead>
               <TableHead className="w-24">Bestellung</TableHead>
             </TableRow>
           </TableHeader>
@@ -256,13 +261,13 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* Col 10: SN status */}
-                <TableCell className="text-xs">
-                  <div className="flex items-center gap-1">
+                <TableCell className="text-xs whitespace-nowrap">
+                  <div className="flex items-center gap-1 whitespace-nowrap">
                     {/* S/N Text */}
                     {!line.serialRequired ? (
                       <span className="font-thin italic text-muted-foreground">----------</span>
                     ) : line.serialNumber ? (
-                      <span className="font-mono break-all">{line.serialNumber}</span>
+                      <span className="font-mono whitespace-nowrap">{line.serialNumber}</span>
                     ) : null}
                     {/* S/N Status Square */}
                     <TooltipProvider delayDuration={200}>

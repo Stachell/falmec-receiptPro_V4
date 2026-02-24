@@ -11,6 +11,7 @@ interface OverviewPanelProps {
 
 export function OverviewPanel({ run }: OverviewPanelProps) {
   const { parsedInvoiceResult } = useRunStore();
+  const invoiceTotal = run.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal ?? null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -60,6 +61,14 @@ export function OverviewPanel({ run }: OverviewPanelProps) {
                 {run.invoice.totalQty ??
                  parsedInvoiceResult?.header.totalQty ??
                  run.stats.parsedInvoiceLines}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted-foreground">Rechnungssumme</dt>
+              <dd className="text-sm font-medium">
+                {typeof invoiceTotal === 'number'
+                  ? new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(invoiceTotal)
+                  : <span className="text-muted-foreground">n/a</span>}
               </dd>
             </div>
           </div>

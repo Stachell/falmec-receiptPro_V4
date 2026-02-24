@@ -1,5 +1,5 @@
 import { StepStatus } from '@/types';
-import { Check, X, AlertTriangle, Loader2 } from 'lucide-react';
+import { Check, X, AlertTriangle, Loader2, Pause } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface WorkflowStepperProps {
@@ -11,9 +11,11 @@ interface WorkflowStepperProps {
   }[];
   currentStep?: number;
   onStepClick?: (stepNo: number) => void;
+  /** PROJ-25: When true, the currently running step shows a Pause icon instead of spinner */
+  isPaused?: boolean;
 }
 
-const getStepIcon = (status: StepStatus) => {
+const getStepIcon = (status: StepStatus, isRunPaused: boolean = false) => {
   switch (status) {
     case 'ok':
       return <Check className="w-4 h-4" />;
@@ -22,13 +24,15 @@ const getStepIcon = (status: StepStatus) => {
     case 'soft-fail':
       return <AlertTriangle className="w-4 h-4" />;
     case 'running':
-      return <Loader2 className="w-4 h-4 animate-spin" />;
+      return isRunPaused
+        ? <Pause className="w-4 h-4" />
+        : <Loader2 className="w-4 h-4 animate-spin" />;
     default:
       return null;
   }
 };
 
-const getStepCircleClass = (status: StepStatus) => {
+const getStepCircleClass = (status: StepStatus, isRunPaused: boolean = false) => {
   switch (status) {
     case 'ok':
       return 'stepper-circle-ok';
@@ -37,15 +41,15 @@ const getStepCircleClass = (status: StepStatus) => {
     case 'soft-fail':
       return 'stepper-circle-soft-fail';
     case 'running':
-      return 'stepper-circle-running';
+      return isRunPaused ? 'stepper-circle-paused' : 'stepper-circle-running';
     default:
       return 'stepper-circle-pending';
   }
 };
 
-export function WorkflowStepper({ steps, currentStep, onStepClick }: WorkflowStepperProps) {
+export function WorkflowStepper({ steps, currentStep, onStepClick, isPaused = false }: WorkflowStepperProps) {
   return (
-    <div className="enterprise-card p-6">
+    <div className="enterprise-card workflow-stepper-card p-5">
       <div className="flex items-center justify-between">
         {steps.map((step, index) => (
           <div key={step.stepNo} className="flex items-center flex-1 last:flex-none">
@@ -57,8 +61,8 @@ export function WorkflowStepper({ steps, currentStep, onStepClick }: WorkflowSte
                 currentStep !== step.stepNo && "opacity-70"
               )}
             >
-              <div className={cn("stepper-circle flex-shrink-0", getStepCircleClass(step.status))}>
-                {getStepIcon(step.status) || step.stepNo}
+              <div className={cn("stepper-circle flex-shrink-0", getStepCircleClass(step.status, isPaused))}>
+                {getStepIcon(step.status, isPaused) || step.stepNo}
               </div>
               <div className="flex flex-col items-start">
                 <span className="text-sm font-medium text-foreground">

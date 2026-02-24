@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileWarning, RefreshCw, Play, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
+import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -46,6 +46,9 @@ export default function RunDetail() {
     createNewRunWithParsing,
     executeMatcherCrossMatch,
     isProcessing,
+    isPaused,
+    pauseRun,
+    resumeRun,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
   const getStoreState = useRunStore.getState;
@@ -155,6 +158,7 @@ export default function RunDetail() {
   const parseErrorCount = parsedInvoiceResult
     ? parsedInvoiceResult.warnings.filter(w => w.severity === 'error').length
     : 0;
+  const canPause = currentRun.status === 'running' || currentRun.status === 'paused';
 
   return (
     <AppLayout>
@@ -166,8 +170,7 @@ export default function RunDetail() {
               <Button
                 variant="outline"
                 size="icon"
-                className="hover:bg-accent hover:text-accent-foreground hover:border-accent"
-                style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+                className="bg-[#c9c3b6] text-[#666666] border-[#666666] hover:bg-[#008C99] hover:text-[#E3E0CF] hover:border-[#008C99] transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
               </Button>
@@ -201,12 +204,14 @@ export default function RunDetail() {
                     className="w-1.5 h-1.5 rounded-full"
                     style={{
                       backgroundColor: currentRun.status === 'running' ? '#3b82f6' :
+                        currentRun.status === 'paused' ? '#FD7C6E' :
                         currentRun.status === 'ok' ? '#22c55e' :
                         currentRun.status === 'failed' ? '#ef4444' :
                         currentRun.status === 'soft-fail' ? '#f59e0b' : '#6b7280'
                     }}
                   />
                   {currentRun.status === 'running' ? 'In Bearbeitung' :
+                   currentRun.status === 'paused' ? 'Pausiert' :
                    currentRun.status === 'ok' ? 'Erfolgreich' :
                    currentRun.status === 'failed' ? 'Fehlgeschlagen' :
                    currentRun.status === 'soft-fail' ? 'Warnung' : 'Nicht gestartet'}
@@ -215,11 +220,32 @@ export default function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* PROJ-25: Pause/Fortfahren-Button — immer sichtbar, disabled wenn Run nicht läuft */}
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border hover:bg-accent hover:text-accent-foreground hover:border-accent"
-              style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+              disabled={!canPause}
+              className={
+                !canPause
+                  ? 'gap-2 border opacity-40 cursor-not-allowed bg-[#c9c3b6] text-[#666666] border-[#666666]'
+                  : isPaused
+                    ? 'gap-2 border'
+                    : 'gap-2 border bg-[#c9c3b6] text-[#666666] border-[#666666] hover:bg-[#008C99] hover:text-[#E3E0CF] hover:border-[#008C99] transition-colors'
+              }
+              style={
+                isPaused && canPause
+                  ? { backgroundColor: '#FD7C6E', borderColor: '#FD7C6E', color: 'white' }
+                  : undefined
+              }
+              onClick={() => isPaused ? resumeRun(currentRun.id) : pauseRun(currentRun.id)}
+            >
+              {isPaused && canPause ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+              {isPaused && canPause ? 'Fortfahren' : 'Pause'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border bg-[#c9c3b6] text-[#666666] border-[#666666] hover:bg-[#008C99] hover:text-[#E3E0CF] hover:border-[#008C99] transition-colors"
               disabled={isProcessing || isLocked('reprocess')}
               onClick={wrap('reprocess', () => {
                 const parsingPromise = createNewRunWithParsing();
@@ -248,7 +274,7 @@ export default function RunDetail() {
 
         {/* Workflow Stepper */}
         <div className="mb-6">
-          <WorkflowStepper steps={currentRun.steps} />
+          <WorkflowStepper steps={currentRun.steps} isPaused={isPaused} />
         </div>
 
         {/* KPI Tiles */}
@@ -315,15 +341,19 @@ export default function RunDetail() {
           {/* Kachel 5: Bestellungen mappen */}
           <KPITile
             value={`${currentRun.stats.matchedOrders}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
-            label="Bestellungen mappen"
+            label="Beleg zugeteilt"
             subValue={currentRun.stats.notOrderedCount > 0 ? `${currentRun.stats.notOrderedCount} nicht bestellt` : undefined}
             variant={currentRun.stats.notOrderedCount > 0 ? 'warning' : currentRun.stats.matchedOrders > 0 ? 'success' : 'default'}
           />
-          {/* Dynamic Next Step Button */}
+          {/* Dynamic Next Step Button — PROJ-25: hover unified + pause badge */}
           <div
-            className="kpi-tile flex flex-col justify-center items-center cursor-pointer hover:opacity-90 transition-opacity"
-            style={{ backgroundColor: '#c9c3b6' }}
+            className={
+              isPaused
+                ? 'kpi-tile flex flex-col justify-center items-center cursor-not-allowed bg-[#FD7C6E] text-white transition-colors'
+                : 'kpi-tile group flex flex-col justify-center items-center cursor-pointer bg-[#c9c3b6] hover:bg-[#008C99] transition-colors'
+            }
             onClick={wrap('next-step', () => {
+              if (isPaused) return;
               if (allStepsComplete) {
                 setActiveTab('export');
               } else if (currentRun && hasFailedStep && nextStep) {
@@ -334,21 +364,34 @@ export default function RunDetail() {
               }
             })}
           >
-            <div className="flex flex-col items-center">
-              {allStepsComplete ? (
-                <Download style={{ width: '42px', height: '42px', color: '#666666' }} />
+            <div className="grid grid-rows-[2fr_1fr] h-full w-full items-stretch">
+              {isPaused ? (
+                <div className="row-span-2 flex items-center justify-center gap-2">
+                  <Pause className="w-[42px] h-[42px] text-white" />
+                  <span className="text-base font-semibold leading-none translate-y-[1px] text-white">
+                    pausiert
+                  </span>
+                </div>
               ) : (
-                <Play style={{ width: '42px', height: '42px', color: '#666666' }} />
+                <>
+                  <div className="flex items-center justify-center gap-2">
+                    {allStepsComplete ? (
+                      <Download className="w-[42px] h-[42px] text-[#666666] group-hover:text-[#E3E0CF] transition-colors" />
+                    ) : (
+                      <Play className="w-[42px] h-[42px] text-[#666666] group-hover:text-[#E3E0CF] transition-colors" />
+                    )}
+                    <span className="text-base font-semibold leading-none translate-y-[1px] text-[#666666] group-hover:text-[#E3E0CF] transition-colors">
+                      {allStepsComplete ? 'Export' : hasFailedStep ? 'Retry' : 'Start'}
+                    </span>
+                  </div>
+                  <span className="text-xs text-center mt-0.5 text-[#666666] group-hover:text-[#E3E0CF] transition-colors opacity-80">
+                    {allStepsComplete
+                      ? (totalIssues > 0 ? `${totalIssues} Issues offen` : 'Keine offenen Issues')
+                      : (nextStep?.name ?? '')}
+                  </span>
+                </>
               )}
-              <span className="text-base font-semibold mt-1" style={{ color: '#666666' }}>
-                {allStepsComplete ? 'Export' : hasFailedStep ? 'Retry' : 'Start'}
-              </span>
             </div>
-            {!allStepsComplete && nextStep && (
-              <span className="text-xs mt-0.5" style={{ color: '#666666', opacity: 0.8 }}>
-                {nextStep.name}
-              </span>
-            )}
           </div>
         </KPIGrid>
 
@@ -358,37 +401,66 @@ export default function RunDetail() {
           <div className="flex items-center gap-4">
             {/* PROJ-22 B1: TabsList bg-[#c9c3b6] */}
             <TabsList className="bg-[#c9c3b6] border border-border">
-              <TabsTrigger value="invoice-preview">
+              <TabsTrigger
+                value="invoice-preview"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
                 RE-Positionen
                 {parsedInvoiceResult && (
                   <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded ${
                     parsedInvoiceResult.success
-                      ? 'bg-green-100 text-green-700'
+                      ? 'bg-green-100 text-[#14532d]'
                       : 'bg-status-soft-fail/20 text-status-soft-fail'
                   }`}>
                     {parsedInvoiceResult.lines.length}
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="items">
+              <TabsTrigger
+                value="items"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
                 Artikelliste
                 {/* PROJ-22 B1: Artikelliste-Badge bg-[#008c99] white text */}
                 <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: '#008c99', color: '#ffffff' }}>
                   {parsedInvoiceResult?.header.packagesCount ?? currentRun.invoice.packagesCount ?? currentRun.stats.parsedInvoiceLines}
                 </span>
               </TabsTrigger>
-              <TabsTrigger value="issues">
+              <TabsTrigger
+                value="issues"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
                 Fehler
                 {totalIssues > 0 && (
-                  <span className="ml-1.5 text-xs bg-status-soft-fail/20 text-status-soft-fail px-1.5 py-0.5 rounded">
+                  <span className="ml-1.5 text-xs bg-[#d6b8ab] text-[#7a1f12] px-1.5 py-0.5 rounded">
                     {totalIssues}
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="warehouse">Lagerorte</TabsTrigger>
-              <TabsTrigger value="overview">Details</TabsTrigger>
-              <TabsTrigger value="export">Export</TabsTrigger>
-              <TabsTrigger value="log">Log</TabsTrigger>
+              <TabsTrigger
+                value="warehouse"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
+                Lagerorte
+              </TabsTrigger>
+              <TabsTrigger
+                value="overview"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
+                Details
+              </TabsTrigger>
+              <TabsTrigger
+                value="export"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
+                Export
+              </TabsTrigger>
+              <TabsTrigger
+                value="log"
+                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+              >
+                Log
+              </TabsTrigger>
             </TabsList>
 
             {/* Ereignisfeld – rechtsbuendig, auto-dismiss nach 4 s */}
@@ -438,6 +510,7 @@ export default function RunDetail() {
                   invoiceDate: parsedInvoiceResult.header.fatturaDate,
                   deliveryDate: null,
                   packagesCount: parsedInvoiceResult.header.packagesCount,
+                  invoiceTotal: parsedInvoiceResult.header.invoiceTotal ?? null,
                   totalQty: parsedInvoiceResult.header.totalQty,
                 }}
                 positions={parsedPositions}

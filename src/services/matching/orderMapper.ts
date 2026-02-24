@@ -2,7 +2,7 @@
  * orderMapper — PROJ-20
  *
  * 4-stage waterfall order mapper operating on AGGREGATED invoice positions.
- * Replaces the legacy 3-rule OrderMatcher for the 'waterfall-4' config.
+ * Replaces the legacy 3-rule OrderMatcher (now 'legacy-waterfall-4' config).
  *
  * Stages (priority order):
  *   1. Perfect Match   — orderCandidate from PDF + openQuantity === position.qty

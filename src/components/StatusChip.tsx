@@ -10,6 +10,7 @@ interface StatusChipProps {
 const statusConfig: Record<string, { class: string; label: string }> = {
   'not-started': { class: 'status-chip-pending', label: 'Nicht gestartet' },
   'running': { class: 'status-chip-running', label: 'In Bearbeitung' },
+  'paused': { class: 'status-chip-paused', label: 'Pausiert' },
   'ok': { class: 'status-chip-ok', label: 'Erfolgreich' },
   'soft-fail': { class: 'status-chip-soft-fail', label: 'Warnung' },
   'failed': { class: 'status-chip-failed', label: 'Fehlgeschlagen' },

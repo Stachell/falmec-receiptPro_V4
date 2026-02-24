@@ -1,8 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -141,6 +140,11 @@
     @apply bg-[hsl(var(--status-running)/0.15)] text-[hsl(var(--status-running))];
   }
 
+  .status-chip-paused {
+    background-color: rgba(253, 124, 110, 0.15);
+    color: #FD7C6E;
+  }
+
   .status-chip-ok {
     @apply bg-[hsl(var(--status-ok)/0.15)] text-[hsl(var(--status-ok))];
   }
@@ -171,6 +175,12 @@
     @apply flex items-center gap-3;
   }
 
+  /* PROJ-26: 80%-Hoehenziel fuer Stepper-Basis, auto-grow bleibt aktiv */
+  .workflow-stepper-card {
+    min-height: 4.8rem;
+    height: auto;
+  }
+
   .stepper-circle {
     @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors;
   }
@@ -181,6 +191,12 @@
 
   .stepper-circle-running {
     @apply border-primary bg-primary text-primary-foreground animate-pulse;
+  }
+
+  .stepper-circle-paused {
+    border-color: #FD7C6E;
+    background-color: #FD7C6E;
+    color: white;
   }
 
   .stepper-circle-ok {

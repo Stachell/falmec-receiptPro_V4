@@ -13,6 +13,8 @@ import {
   OpenWEPosition,
   RunStats,
   ParsedOrderPosition,
+  OrderParserSelectionDiagnostics,
+  StepDiagnostics,
 } from '@/types';
 import {
   mockRuns,
@@ -55,6 +57,7 @@ import {
   returnToPool,
 } from '@/services/matching/orderPool';
 import { executeMatchingEngine } from '@/services/matching/matchingEngine';
+import { DEFAULT_ORDER_PARSER_PROFILE_ID } from '@/services/matching/orderParserProfiles';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -317,6 +320,44 @@ function buildArticleMatchIssues(runId: string, lines: InvoiceLine[]): Issue[] {
   }];
 }
 
+function formatOrderParserDiagnostics(diagnostics?: OrderParserSelectionDiagnostics): string {
+  if (!diagnostics) return 'Keine Diagnosedaten vorhanden';
+  const topCandidates = diagnostics.candidates
+    .slice(0, 3)
+    .map((candidate) => {
+      const ratioPercent = (candidate.validRatio * 100).toFixed(1);
+      return `${candidate.header} [valid=${candidate.validCount}, ratio=${ratioPercent}%, nonEmpty=${candidate.nonEmptyCount}]`;
+    });
+
+  return [
+    `Profil: ${diagnostics.profileId}`,
+    `Gewaehlt: ${diagnostics.selectedHeader || 'n/a'} (Spalte ${diagnostics.selectedColumnIndex})`,
+    `Confidence: ${diagnostics.confidence}`,
+    `Kandidaten: ${topCandidates.join(' | ') || 'n/a'}`,
+  ].join(' | ');
+}
+
+function buildOrderParserFailureIssue(
+  runId: string,
+  diagnostics: OrderParserSelectionDiagnostics | undefined,
+  detailsPrefix: string,
+): Issue {
+  return {
+    id: `issue-${runId}-step4-order-parser-${Date.now()}`,
+    runId,
+    severity: 'error',
+    stepNo: 4,
+    type: 'parser-error',
+    message: 'Order-Parser Qualitaetsgate blockiert Step 4',
+    details: `${detailsPrefix}. ${formatOrderParserDiagnostics(diagnostics)}`,
+    relatedLineIds: [],
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    resolvedAt: null,
+    resolutionNote: null,
+  };
+}
+
 interface RunState {
   // Data
   runs: Run[];
@@ -330,6 +371,10 @@ interface RunState {
   parsedInvoiceResult: ParsedInvoiceResult | null;
   parsedPositions: ParsedInvoiceLineExtended[];
   parserWarnings: InvoiceParserWarning[];
+  /** @deprecated Use latestDiagnostics[4] instead (PROJ-28 migration) */
+  lastOrderParserDiagnostics: OrderParserSelectionDiagnostics | null;
+  // PROJ-28: Unified step diagnostics — one entry per step (1..4), set after each step completes
+  latestDiagnostics: Partial<Record<1 | 2 | 3 | 4, StepDiagnostics>>;
 
   // Serial document (from Step 3, PROJ-16)
   serialDocument: SerialDocument | null;
@@ -356,6 +401,10 @@ interface RunState {
   highlightedLineIds: string[];
   /** PROJ-21: Jump-link scroll target — first lineId to scroll into view */
   scrollToLineId: string | null;
+  /** PROJ-25: Pause-Flag — true while run is paused by user */
+  isPaused: boolean;
+  /** PROJ-25: Handle for the active auto-advance timer — cleared on pause to prevent deadlock */
+  autoAdvanceTimer: ReturnType<typeof setTimeout> | null;
 
   // Actions
   setCurrentRun: (run: Run | null) => void;
@@ -365,6 +414,8 @@ interface RunState {
   navigateToLine: (lineIds: string[]) => void;
   clearHighlightedLines: () => void;
   setGlobalConfig: (config: Partial<RunConfig>) => void;
+  /** PROJ-28: Write step diagnostics after a step completes (replaces lastOrderParserDiagnostics for Step 4) */
+  setStepDiagnostics: (stepNo: 1 | 2 | 3 | 4, diag: StepDiagnostics) => void;
   addUploadedFile: (file: UploadedFile) => void;
   removeUploadedFile: (type: UploadedFile['type']) => void;
   clearUploadedFiles: () => void;
@@ -389,6 +440,10 @@ interface RunState {
   advanceToNextStep: (runId: string) => void;
   retryStep: (runId: string, stepNo: number) => void;  // HOTFIX-2
   deleteRun: (runId: string) => void;
+  /** PROJ-25: Pause a running run — clears auto-advance timer to prevent deadlock */
+  pauseRun: (runId: string) => void;
+  /** PROJ-25: Resume a paused run — resets isPaused and re-triggers advanceToNextStep */
+  resumeRun: (runId: string) => void;
 
   // PROJ-12: Archive & abort actions
   archiveRun: (runId: string) => Promise<{ success: boolean; folderName: string }>;
@@ -437,6 +492,8 @@ export const useRunStore = create<RunState>((set, get) => ({
   parsedInvoiceResult: loadParsedInvoice(),
   parsedPositions: [],
   parserWarnings: [],
+  lastOrderParserDiagnostics: null,
+  latestDiagnostics: {},
 
   // Serial document (PROJ-16)
   serialDocument: null,
@@ -458,7 +515,14 @@ export const useRunStore = create<RunState>((set, get) => ({
     eingangsart: 'Standard',
     clickLockSeconds: 0,
     activeSerialFinderId: 'default',
-    activeOrderMapperId: 'waterfall-4',
+    activeOrderMapperId: 'engine-proj-23',
+    activeOrderParserProfileId: DEFAULT_ORDER_PARSER_PROFILE_ID,
+    orderParserProfileOverrides: undefined,
+    strictSerialRequiredFailure: true,
+    // PROJ-28: Block-Step toggles (default: off)
+    blockStep2OnPriceMismatch: false,
+    blockStep4OnMissingOrder: false,
+    matcherProfileOverrides: undefined,
   },
 
   // UI State
@@ -468,6 +532,8 @@ export const useRunStore = create<RunState>((set, get) => ({
   issuesStepFilter: null,
   highlightedLineIds: [],
   scrollToLineId: null,
+  isPaused: false,
+  autoAdvanceTimer: null,
 
   // Actions
   setCurrentRun: (run) => set({ currentRun: run }),
@@ -493,6 +559,10 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   setGlobalConfig: (config) => set((state) => ({
     globalConfig: { ...state.globalConfig, ...config }
+  })),
+
+  setStepDiagnostics: (stepNo, diag) => set((state) => ({
+    latestDiagnostics: { ...state.latestDiagnostics, [stepNo]: diag },
   })),
 
   addUploadedFile: (file) => {
@@ -690,6 +760,8 @@ export const useRunStore = create<RunState>((set, get) => ({
     set((state) => ({
       runs: [newRun, ...state.runs],
       currentRun: newRun,
+      // PROJ-28: Reset diagnostics for new run
+      latestDiagnostics: {},
     }));
 
     return newRun;
@@ -1009,6 +1081,14 @@ export const useRunStore = create<RunState>((set, get) => ({
           step: 'Rechnung auslesen',
           details: `Fattura: ${result.header.fatturaNumber}`,
         });
+        // PROJ-28: Step 1 diagnostics
+        get().setStepDiagnostics(1, {
+          stepNo: 1,
+          moduleName: result.parserModule ?? 'FatturaParser',
+          confidence: 'high',
+          summary: `${result.lines.length} Positionen aus ${result.header.fatturaNumber || 'n/a'}`,
+          timestamp: new Date().toISOString(),
+        });
         setParsingProgress('Parsing abgeschlossen');
         return true;
       } else {
@@ -1016,6 +1096,15 @@ export const useRunStore = create<RunState>((set, get) => ({
           runId,
           step: 'Rechnung auslesen',
           details: `${result.warnings.filter(w => w.severity === 'error').length} Fehler`,
+        });
+        // PROJ-28: Step 1 diagnostics (partial success)
+        get().setStepDiagnostics(1, {
+          stepNo: 1,
+          moduleName: result.parserModule ?? 'FatturaParser',
+          confidence: 'low',
+          summary: `${result.lines.length} Positionen (mit Fehlern)`,
+          detailLines: result.warnings.filter(w => w.severity === 'error').map(w => w.message),
+          timestamp: new Date().toISOString(),
         });
         setParsingProgress('Parsing mit Warnungen abgeschlossen');
         // Return true if we at least got partial data (fattura number)
@@ -1150,6 +1239,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           invoice: {
             ...invoiceHeader,
             packagesCount: result.header.packagesCount,
+            invoiceTotal: result.header.invoiceTotal ?? null,
             totalQty: result.header.totalQty,
           },
           // PROJ-23: invoiceLines are now aggregated (qty>1), so expandedLineCount
@@ -1254,13 +1344,48 @@ export const useRunStore = create<RunState>((set, get) => ({
   }),
 
   advanceToNextStep: (runId: string) => {
+    // PROJ-25: Pause-Guard — do not advance if run is paused
+    if (get().isPaused) return;
+
     const state = get();
     const run = state.runs.find(r => r.id === runId);
     if (!run) return;
 
     // Find current running step
     const runningStep = run.steps.find(s => s.status === 'running');
+
+    // PROJ-28: Block-Step Guard — checked at completion of the running step
     if (runningStep) {
+      const { globalConfig, issues } = get();
+
+      // Block leaving Step 2 when price-mismatch errors are unresolved
+      if (runningStep.stepNo === 2 && globalConfig.blockStep2OnPriceMismatch) {
+        const openPriceErrors = issues.filter(
+          i => i.type === 'price-mismatch' && i.status === 'open' && i.severity === 'error' && i.runId === runId,
+        );
+        if (openPriceErrors.length > 0) {
+          logService.warn(
+            `Block-Guard: Step 2 → Step 3 blockiert (${openPriceErrors.length} offene Preisabweichungen)`,
+            { runId, step: 'Artikel extrahieren' },
+          );
+          return;
+        }
+      }
+
+      // Block leaving Step 4 when order-assignment errors are unresolved
+      if (runningStep.stepNo === 4 && globalConfig.blockStep4OnMissingOrder) {
+        const openOrderErrors = issues.filter(
+          i => i.type === 'order-assignment' && i.status === 'open' && i.severity === 'error' && i.runId === runId,
+        );
+        if (openOrderErrors.length > 0) {
+          logService.warn(
+            `Block-Guard: Step 4 → Step 5 blockiert (${openOrderErrors.length} offene Bestellzuordnungen)`,
+            { runId, step: 'Bestellungen mappen' },
+          );
+          return;
+        }
+      }
+
       // Set current step to 'ok'
       get().updateStepStatus(runId, runningStep.stepNo, 'ok');
     }
@@ -1273,13 +1398,15 @@ export const useRunStore = create<RunState>((set, get) => ({
 
       // Auto-execute Step 2 (Cross-Match via Matcher Module) after Step 1 completes
       if (nextStep.stepNo === 2) {
-        setTimeout(() => {
+        const t2 = setTimeout(() => {
+          if (get().isPaused) return; // PROJ-25: Guard
           const currentState = get();
           if (currentState.currentRun?.id === runId) {
             logService.info('Auto-Start: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
             currentState.executeMatcherCrossMatch();
             // Auto-advance to Step 3 after matching completes
-            setTimeout(() => {
+            const t2adv = setTimeout(() => {
+              if (get().isPaused) return; // PROJ-25: Guard
               const afterMatch = get();
               const updatedRun = afterMatch.runs.find(r => r.id === runId);
               const step2 = updatedRun?.steps.find(s => s.stepNo === 2);
@@ -1288,19 +1415,23 @@ export const useRunStore = create<RunState>((set, get) => ({
                 afterMatch.advanceToNextStep(runId);
               }
             }, 100);
+            set({ autoAdvanceTimer: t2adv });
           }
         }, 100);
+        set({ autoAdvanceTimer: t2 });
       }
 
       // Auto-execute Step 3 (Serial Extraction via Matcher Module) after Step 2 completes
       if (nextStep.stepNo === 3) {
-        setTimeout(() => {
+        const t3 = setTimeout(() => {
+          if (get().isPaused) return; // PROJ-25: Guard
           const currentState = get();
           if (currentState.currentRun?.id === runId) {
             logService.info('Auto-Start: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
             currentState.executeMatcherSerialExtract();
             // Auto-advance to Step 4 after serial extraction completes
-            setTimeout(() => {
+            const t3adv = setTimeout(() => {
+              if (get().isPaused) return; // PROJ-25: Guard
               const afterSerial = get();
               const updatedRun = afterSerial.runs.find(r => r.id === runId);
               const step3 = updatedRun?.steps.find(s => s.stepNo === 3);
@@ -1309,31 +1440,94 @@ export const useRunStore = create<RunState>((set, get) => ({
                 afterSerial.advanceToNextStep(runId);
               }
             }, 100);
+            set({ autoAdvanceTimer: t3adv });
           }
         }, 100);
+        set({ autoAdvanceTimer: t3 });
       }
 
       // PROJ-20: Auto-execute Step 4 (Order Mapping) after Step 3 completes
       if (nextStep.stepNo === 4) {
-        setTimeout(() => {
+        const t4 = setTimeout(() => {
+          if (get().isPaused) return; // PROJ-25: Guard
           const currentState = get();
           if (currentState.currentRun?.id === runId) {
             const activeMapper = currentState.globalConfig.activeOrderMapperId;
             logService.info(`Auto-Start: Order-Mapping (Step 4, mapper=${activeMapper})`, { runId, step: 'Bestellungen mappen' });
 
-            if (activeMapper === 'waterfall-4') {
-              // Parse openWE file if available, then run waterfall mapper
+            if (activeMapper === 'engine-proj-23') {
+              // Parse openWE file if available, then run PROJ-23 3-Run Engine
               const openWEFile = currentState.uploadedFiles.find(f => f.type === 'openWE');
               if (openWEFile?.file) {
                 import('@/services/matching/orderParser').then(({ parseOrderFile }) => {
-                  parseOrderFile(openWEFile.file)
+                  const runConfig = currentState.currentRun?.config ?? currentState.globalConfig;
+                  parseOrderFile(openWEFile.file, {
+                    profileId: runConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID,
+                    overrides: runConfig.orderParserProfileOverrides,
+                  })
                     .then((parseResult) => {
                       for (const w of parseResult.warnings) {
                         logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
                       }
+
+                      set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
+                      // PROJ-28: Step 4 diagnostics
+                      if (parseResult.diagnostics) {
+                        get().setStepDiagnostics(4, {
+                          stepNo: 4,
+                          moduleName: parseResult.diagnostics.profileId,
+                          confidence: parseResult.diagnostics.confidence,
+                          summary: `${parseResult.positions.length} Bestellpositionen, Spalte: ${parseResult.diagnostics.selectedHeader || 'n/a'}`,
+                          timestamp: new Date().toISOString(),
+                        });
+                      }
+
+                      const lowConfidence = parseResult.diagnostics?.confidence === 'low';
+                      if (parseResult.positions.length === 0 || lowConfidence) {
+                        const detailsPrefix = parseResult.positions.length === 0
+                          ? 'Keine gueltigen offenen Bestellungen erkannt'
+                          : 'Spaltenauswahl mit niedriger Confidence erkannt';
+                        const parserIssue = buildOrderParserFailureIssue(
+                          runId,
+                          parseResult.diagnostics,
+                          detailsPrefix,
+                        );
+
+                        set((state) => {
+                          const updatedRun = state.runs.find(r => r.id === runId);
+                          if (!updatedRun) return state;
+
+                          const newRun: Run = {
+                            ...updatedRun,
+                            status: 'soft-fail',
+                            steps: updatedRun.steps.map((step) =>
+                              step.stepNo === 4
+                                ? { ...step, status: 'failed', issuesCount: 1 }
+                                : step,
+                            ),
+                          };
+
+                          return {
+                            runs: state.runs.map(r => r.id === runId ? newRun : r),
+                            currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+                            issues: [
+                              ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+                              parserIssue,
+                            ],
+                          };
+                        });
+
+                        logService.error(
+                          `Order-Parser Gate blockiert Step 4: ${detailsPrefix}`,
+                          { runId, step: 'Bestellungen mappen' },
+                        );
+                        return;
+                      }
+
                       get().executeOrderMapping(parseResult.positions);
                       // Auto-advance to Step 5
-                      setTimeout(() => {
+                      const t4adv1 = setTimeout(() => {
+                        if (get().isPaused) return; // PROJ-25: Guard
                         const afterOrder = get();
                         const updatedRun = afterOrder.runs.find(r => r.id === runId);
                         const step4 = updatedRun?.steps.find(s => s.stepNo === 4);
@@ -1342,6 +1536,7 @@ export const useRunStore = create<RunState>((set, get) => ({
                           afterOrder.advanceToNextStep(runId);
                         }
                       }, 100);
+                      set({ autoAdvanceTimer: t4adv1 });
                     })
                     .catch((err) => {
                       logService.error(`OrderParser fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Bestellungen mappen' });
@@ -1353,7 +1548,8 @@ export const useRunStore = create<RunState>((set, get) => ({
                 logService.info('Keine Bestell-Datei geladen — Step 4 wird uebersprungen', { runId, step: 'Bestellungen mappen' });
                 get().updateStepStatus(runId, 4, 'ok');
                 // Auto-advance
-                setTimeout(() => {
+                const t4adv2 = setTimeout(() => {
+                  if (get().isPaused) return; // PROJ-25: Guard
                   const afterOrder = get();
                   const updatedRun = afterOrder.runs.find(r => r.id === runId);
                   const step4 = updatedRun?.steps.find(s => s.stepNo === 4);
@@ -1362,18 +1558,22 @@ export const useRunStore = create<RunState>((set, get) => ({
                     afterOrder.advanceToNextStep(runId);
                   }
                 }, 100);
+                set({ autoAdvanceTimer: t4adv2 });
               }
             } else {
               // Legacy path: use matchAllOrders (requires OpenWEPosition[] from somewhere)
               logService.info('Legacy OrderMatcher (3 Regeln) — manueller Start erforderlich', { runId, step: 'Bestellungen mappen' });
               get().updateStepStatus(runId, 4, 'ok');
-              setTimeout(() => {
+              const t4legacy = setTimeout(() => {
+                if (get().isPaused) return; // PROJ-25: Guard
                 const afterOrder = get();
                 afterOrder.advanceToNextStep(runId);
               }, 100);
+              set({ autoAdvanceTimer: t4legacy });
             }
           }
         }, 100);
+        set({ autoAdvanceTimer: t4 });
       }
     } else {
       // All steps completed → mark run as finished and auto-archive
@@ -1414,14 +1614,68 @@ export const useRunStore = create<RunState>((set, get) => ({
         setTimeout(() => {
           const cs = get();
           const activeMapper = cs.globalConfig.activeOrderMapperId;
-          if (activeMapper === 'waterfall-4') {
+          if (activeMapper === 'engine-proj-23') {
             const openWEFile = cs.uploadedFiles.find(f => f.type === 'openWE');
             if (openWEFile?.file) {
               import('@/services/matching/orderParser').then(({ parseOrderFile }) => {
-                parseOrderFile(openWEFile.file)
+                const runConfig = cs.currentRun?.config ?? cs.globalConfig;
+                parseOrderFile(openWEFile.file, {
+                  profileId: runConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID,
+                  overrides: runConfig.orderParserProfileOverrides,
+                })
                   .then((parseResult) => {
                     for (const w of parseResult.warnings) {
                       logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+                    }
+                    set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
+                    // PROJ-28: Step 4 diagnostics
+                    if (parseResult.diagnostics) {
+                      get().setStepDiagnostics(4, {
+                        stepNo: 4,
+                        moduleName: parseResult.diagnostics.profileId,
+                        confidence: parseResult.diagnostics.confidence,
+                        summary: `${parseResult.positions.length} Bestellpositionen, Spalte: ${parseResult.diagnostics.selectedHeader || 'n/a'}`,
+                        timestamp: new Date().toISOString(),
+                      });
+                    }
+
+                    const lowConfidence = parseResult.diagnostics?.confidence === 'low';
+                    if (parseResult.positions.length === 0 || lowConfidence) {
+                      const detailsPrefix = parseResult.positions.length === 0
+                        ? 'Keine gueltigen offenen Bestellungen erkannt'
+                        : 'Spaltenauswahl mit niedriger Confidence erkannt';
+                      const parserIssue = buildOrderParserFailureIssue(
+                        runId,
+                        parseResult.diagnostics,
+                        detailsPrefix,
+                      );
+                      set((state) => {
+                        const updatedRun = state.runs.find(r => r.id === runId);
+                        if (!updatedRun) return state;
+
+                        const newRun: Run = {
+                          ...updatedRun,
+                          status: 'soft-fail',
+                          steps: updatedRun.steps.map((s) =>
+                            s.stepNo === 4
+                              ? { ...s, status: 'failed', issuesCount: 1 }
+                              : s,
+                          ),
+                        };
+                        return {
+                          runs: state.runs.map(r => r.id === runId ? newRun : r),
+                          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+                          issues: [
+                            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+                            parserIssue,
+                          ],
+                        };
+                      });
+                      logService.error(
+                        `Order-Parser Gate blockiert Step 4: ${detailsPrefix}`,
+                        { runId, step: 'Bestellungen mappen' },
+                      );
+                      return;
                     }
                     get().executeOrderMapping(parseResult.positions);
                   })
@@ -1512,6 +1766,187 @@ export const useRunStore = create<RunState>((set, get) => ({
       invoiceLines: state.invoiceLines.filter(l => !l.lineId.startsWith(runId)),
       issues: state.issues.filter(i => i.runId !== runId),
     }));
+  },
+
+  // PROJ-25: Pause — cancel active timer, set paused state
+  pauseRun: (runId) => {
+    const { autoAdvanceTimer } = get();
+    if (autoAdvanceTimer !== null) {
+      clearTimeout(autoAdvanceTimer);
+      set({ autoAdvanceTimer: null });
+    }
+    set({ isPaused: true });
+    get().updateRunStatus(runId, 'paused');
+    logService.info('Run pausiert', { runId, step: 'System' });
+  },
+
+  // PROJ-25: Resume — clear pause, restore run status, re-trigger the currently running step's logic
+  // BUGFIX: do NOT call advanceToNextStep() — that would mark the current step as 'ok' and skip it.
+  // Instead, re-fire the auto-execution block for whichever step is currently 'running'.
+  resumeRun: (runId) => {
+    set({ isPaused: false });
+    get().updateRunStatus(runId, 'running');
+    logService.info('Run fortgesetzt', { runId, step: 'System' });
+
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) return;
+    const runningStep = run.steps.find(s => s.status === 'running');
+    if (!runningStep) return;
+
+    // Re-trigger Step 2 (Cross-Match)
+    if (runningStep.stepNo === 2) {
+      const t2 = setTimeout(() => {
+        if (get().isPaused) return;
+        const cs = get();
+        if (cs.currentRun?.id === runId) {
+          logService.info('Resume: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
+          cs.executeMatcherCrossMatch();
+          const t2adv = setTimeout(() => {
+            if (get().isPaused) return;
+            const afterMatch = get();
+            const updatedRun = afterMatch.runs.find(r => r.id === runId);
+            const step2 = updatedRun?.steps.find(s => s.stepNo === 2);
+            if (step2 && (step2.status === 'ok' || step2.status === 'soft-fail')) {
+              logService.info('Resume Auto-Advance: Step 2 → Step 3', { runId, step: 'System' });
+              afterMatch.advanceToNextStep(runId);
+            }
+          }, 100);
+          set({ autoAdvanceTimer: t2adv });
+        }
+      }, 100);
+      set({ autoAdvanceTimer: t2 });
+    }
+
+    // Re-trigger Step 3 (Serial Extraction)
+    if (runningStep.stepNo === 3) {
+      const t3 = setTimeout(() => {
+        if (get().isPaused) return;
+        const cs = get();
+        if (cs.currentRun?.id === runId) {
+          logService.info('Resume: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+          cs.executeMatcherSerialExtract();
+          const t3adv = setTimeout(() => {
+            if (get().isPaused) return;
+            const afterSerial = get();
+            const updatedRun = afterSerial.runs.find(r => r.id === runId);
+            const step3 = updatedRun?.steps.find(s => s.stepNo === 3);
+            if (step3 && (step3.status === 'ok' || step3.status === 'soft-fail')) {
+              logService.info('Resume Auto-Advance: Step 3 → Step 4', { runId, step: 'System' });
+              afterSerial.advanceToNextStep(runId);
+            }
+          }, 100);
+          set({ autoAdvanceTimer: t3adv });
+        }
+      }, 100);
+      set({ autoAdvanceTimer: t3 });
+    }
+
+    // Re-trigger Step 4 (Order Mapping)
+    if (runningStep.stepNo === 4) {
+      const t4 = setTimeout(() => {
+        if (get().isPaused) return;
+        const cs = get();
+        if (cs.currentRun?.id === runId) {
+          const activeMapper = cs.globalConfig.activeOrderMapperId;
+          logService.info(`Resume: Order-Mapping (Step 4, mapper=${activeMapper})`, { runId, step: 'Bestellungen mappen' });
+
+          if (activeMapper === 'engine-proj-23') {
+            const openWEFile = cs.uploadedFiles.find(f => f.type === 'openWE');
+            if (openWEFile?.file) {
+              import('@/services/matching/orderParser').then(({ parseOrderFile }) => {
+                const runConfig = cs.currentRun?.config ?? cs.globalConfig;
+                parseOrderFile(openWEFile.file, {
+                  profileId: runConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID,
+                  overrides: runConfig.orderParserProfileOverrides,
+                })
+                  .then((parseResult) => {
+                    for (const w of parseResult.warnings) {
+                      logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+                    }
+                    set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
+                    // PROJ-28: Step 4 diagnostics
+                    if (parseResult.diagnostics) {
+                      get().setStepDiagnostics(4, {
+                        stepNo: 4,
+                        moduleName: parseResult.diagnostics.profileId,
+                        confidence: parseResult.diagnostics.confidence,
+                        summary: `${parseResult.positions.length} Bestellpositionen, Spalte: ${parseResult.diagnostics.selectedHeader || 'n/a'}`,
+                        timestamp: new Date().toISOString(),
+                      });
+                    }
+                    const lowConfidence = parseResult.diagnostics?.confidence === 'low';
+                    if (parseResult.positions.length === 0 || lowConfidence) {
+                      const detailsPrefix = parseResult.positions.length === 0
+                        ? 'Keine gueltigen offenen Bestellungen erkannt'
+                        : 'Spaltenauswahl mit niedriger Confidence erkannt';
+                      const parserIssue = buildOrderParserFailureIssue(runId, parseResult.diagnostics, detailsPrefix);
+                      set((s) => {
+                        const ur = s.runs.find(r => r.id === runId);
+                        if (!ur) return s;
+                        const newRun: Run = {
+                          ...ur,
+                          status: 'soft-fail',
+                          steps: ur.steps.map((step) =>
+                            step.stepNo === 4 ? { ...step, status: 'failed', issuesCount: 1 } : step
+                          ),
+                        };
+                        return {
+                          runs: s.runs.map(r => r.id === runId ? newRun : r),
+                          currentRun: s.currentRun?.id === runId ? newRun : s.currentRun,
+                          issues: [...s.issues.filter(i => !(i.runId === runId && i.stepNo === 4)), parserIssue],
+                        };
+                      });
+                      logService.error(`Order-Parser Gate blockiert Step 4: ${detailsPrefix}`, { runId, step: 'Bestellungen mappen' });
+                      return;
+                    }
+                    get().executeOrderMapping(parseResult.positions);
+                    const t4adv1 = setTimeout(() => {
+                      if (get().isPaused) return;
+                      const afterOrder = get();
+                      const ur = afterOrder.runs.find(r => r.id === runId);
+                      const s4 = ur?.steps.find(s => s.stepNo === 4);
+                      if (s4 && (s4.status === 'ok' || s4.status === 'soft-fail')) {
+                        logService.info('Resume Auto-Advance: Step 4 → Step 5', { runId, step: 'System' });
+                        afterOrder.advanceToNextStep(runId);
+                      }
+                    }, 100);
+                    set({ autoAdvanceTimer: t4adv1 });
+                  })
+                  .catch((err) => {
+                    logService.error(`OrderParser fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Bestellungen mappen' });
+                    get().updateStepStatus(runId, 4, 'failed');
+                  });
+              });
+            } else {
+              logService.info('Keine Bestell-Datei geladen — Step 4 wird uebersprungen', { runId, step: 'Bestellungen mappen' });
+              get().updateStepStatus(runId, 4, 'ok');
+              const t4adv2 = setTimeout(() => {
+                if (get().isPaused) return;
+                const afterOrder = get();
+                const ur = afterOrder.runs.find(r => r.id === runId);
+                const s4 = ur?.steps.find(s => s.stepNo === 4);
+                if (s4 && (s4.status === 'ok' || s4.status === 'soft-fail')) {
+                  logService.info('Resume Auto-Advance: Step 4 → Step 5', { runId, step: 'System' });
+                  afterOrder.advanceToNextStep(runId);
+                }
+              }, 100);
+              set({ autoAdvanceTimer: t4adv2 });
+            }
+          } else {
+            logService.info('Legacy OrderMatcher — manueller Start erforderlich', { runId, step: 'Bestellungen mappen' });
+            get().updateStepStatus(runId, 4, 'ok');
+            const t4legacy = setTimeout(() => {
+              if (get().isPaused) return;
+              get().advanceToNextStep(runId);
+            }, 100);
+            set({ autoAdvanceTimer: t4legacy });
+          }
+        }
+      }, 100);
+      set({ autoAdvanceTimer: t4 });
+    }
+    // Steps 1 and 5 have no auto-execution logic to re-trigger
   },
 
   // PROJ-12: Write archive package to disk
@@ -1784,7 +2219,7 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
-  // PROJ-23: 3-Run Matching Engine on aggregated positions (replaces PROJ-20 waterfall-4)
+  // PROJ-23: 3-Run Matching Engine on aggregated positions (replaces PROJ-20 legacy waterfall)
   executeOrderMapping: (parsedOrders) => {
     const { invoiceLines, currentRun, parsedPositions } = get();
     if (!currentRun) {
@@ -1805,16 +2240,72 @@ export const useRunStore = create<RunState>((set, get) => ({
         return;
       }
 
-      // Phase A3: Build Article-First OrderPool
+      // Phase A3: Build Article-First OrderPool (2-of-3 per-article scoring)
       const masterArticles = useMasterDataStore.getState().articles;
       const poolResult = buildOrderPool(parsedOrders, runLines, masterArticles, runId);
-      console.log(
-        `[RunStore] OrderPool built: ${poolResult.filteredInCount} in, ${poolResult.filteredOutCount} out, ` +
-        `${poolResult.pool.totalRemaining} total remaining`
+
+      // PROJ-23 ADDON: Telemetry logging
+      logService.info(
+        `OrderPool: ${parsedOrders.length} Excel-Pos → ${poolResult.filteredInCount} bestehen 2-von-3 ` +
+        `(${poolResult.filteredOutCount} gefiltert) → Pool: ${poolResult.pool.totalRemaining} offene Menge`,
+        { runId, step: 'Bestellungen mappen' },
       );
 
+      // PROJ-23 ADDON: Anti-silent-failure — empty pool guard
+      if (poolResult.pool.totalRemaining === 0 && parsedOrders.length > 0) {
+        const emptyPoolIssue: Issue = {
+          id: `issue-${runId}-pool-empty-${Date.now()}`,
+          runId,
+          severity: 'error',
+          stepNo: 4,
+          type: 'pool-empty-mismatch',
+          message: 'Excel gelesen, aber keine Position erreicht den 2-von-3 Match-Score zu den Rechnungsdaten.',
+          details: `${parsedOrders.length} Bestellpositionen gelesen, 0 bestanden den Pool-Filter. ` +
+            `Pruefe artNoDE, artNoIT und EAN in der Excel-Datei gegen die Rechnungsdaten.`,
+          relatedLineIds: [],
+          status: 'open',
+          createdAt: new Date().toISOString(),
+          resolvedAt: null,
+          resolutionNote: null,
+        };
+
+        set((state) => {
+          const updatedRun = state.runs.find(r => r.id === runId);
+          if (!updatedRun) return state;
+
+          const newRun: Run = {
+            ...updatedRun,
+            status: 'soft-fail',
+            steps: updatedRun.steps.map((step) =>
+              step.stepNo === 4
+                ? { ...step, status: 'failed' as StepStatus, issuesCount: 1 }
+                : step,
+            ),
+          };
+
+          return {
+            runs: state.runs.map(r => r.id === runId ? newRun : r),
+            currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+            issues: [
+              ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+              ...poolResult.issues,
+              emptyPoolIssue,
+            ],
+          };
+        });
+
+        logService.error(
+          `OrderPool LEER: ${parsedOrders.length} Excel-Positionen, 0 bestanden 2-von-3 Filter`,
+          { runId, step: 'Bestellungen mappen' },
+        );
+        return; // STOP — do NOT run MatchingEngine with empty pool
+      }
+
       // Phase A4: Execute 3-Run Matching Engine
-      console.log(`[RunStore] executeOrderMapping (3-Run Engine): ${runLines.length} aggregated lines, ${parsedOrders.length} orders`);
+      logService.info(
+        `MatchingEngine Start: ${runLines.length} aggregierte Rechnungszeilen, Pool: ${poolResult.pool.totalRemaining}`,
+        { runId, step: 'Bestellungen mappen' },
+      );
       const result = executeMatchingEngine(runLines, poolResult.pool, parsedPositions, runId);
 
       // Merge pool-build issues with engine issues
@@ -2238,6 +2729,16 @@ export const useRunStore = create<RunState>((set, get) => ({
         { runId, step: 'Artikel extrahieren' },
       );
 
+      // PROJ-28: Step 2 diagnostics
+      get().setStepDiagnostics(2, {
+        stepNo: 2,
+        moduleName: matcher.moduleId,
+        confidence: noMatchCount === 0 ? 'high' : noMatchCount < enrichedLines.length / 2 ? 'medium' : 'low',
+        summary: `${result.stats.articleMatchedCount}/${enrichedLines.length} Artikel gematcht`,
+        detailLines: noMatchCount > 0 ? [`${noMatchCount} Artikel ohne Match`] : undefined,
+        timestamp: new Date().toISOString(),
+      });
+
       for (const w of result.warnings) {
         const logFn = w.severity === 'error' ? logService.error.bind(logService) : logService.warn.bind(logService);
         logFn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Artikel extrahieren' });
@@ -2318,8 +2819,10 @@ export const useRunStore = create<RunState>((set, get) => ({
           };
         });
 
+        const strictSerialRequiredFailure = currentRun.config.strictSerialRequiredFailure ?? true;
         const checksumMatch = assignedCount === requiredCount;
-        const step3Status: StepStatus = checksumMatch ? 'ok' : 'soft-fail';
+        const shouldHardFail = strictSerialRequiredFailure && !checksumMatch;
+        const step3Status: StepStatus = checksumMatch ? 'ok' : (shouldHardFail ? 'failed' : 'soft-fail');
 
         // PROJ-21: Enriched serial-mismatch issue with per-position details + context
         const step3Issues: Issue[] = [];
@@ -2328,10 +2831,12 @@ export const useRunStore = create<RunState>((set, get) => ({
           step3Issues.push({
             id: `issue-${runId}-step3-sn-mismatch-${Date.now()}`,
             runId,
-            severity: 'warning',
+            severity: shouldHardFail ? 'error' : 'warning',
             stepNo: 3,
             type: 'serial-mismatch',
-            message: `S/N Zuordnung unvollständig: ${assignedCount}/${requiredCount} zugewiesen`,
+            message: shouldHardFail
+              ? `Pflicht-S/N fehlen: ${assignedCount}/${requiredCount} zugewiesen`
+              : `S/N Zuordnung unvollständig: ${assignedCount}/${requiredCount} zugewiesen`,
             details: underServedLines.slice(0, 20).map(l =>
               `Pos ${l.positionIndex}: ${l.serialNumbers.length}/${l.qty} S/N`
             ).join(', ') + (underServedLines.length > 20 ? ` ... (+${underServedLines.length - 20} weitere)` : ''),
@@ -2374,7 +2879,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         });
 
         logService.info(
-          `SerialFinder: ${assignedCount}/${requiredCount} S/N zugewiesen (Checksum: ${checksumMatch ? 'OK' : 'MISMATCH'})`,
+          `SerialFinder: ${assignedCount}/${requiredCount} S/N zugewiesen (Checksum: ${checksumMatch ? 'OK' : 'MISMATCH'}, strict=${strictSerialRequiredFailure})`,
           { runId, step: 'Seriennummer anfuegen' },
         );
         return;
@@ -2402,7 +2907,16 @@ export const useRunStore = create<RunState>((set, get) => ({
       const invoiceNumber = currentRun.invoice.fattura;
       const result = matcher.serialExtract(runLines, serialDocument, invoiceNumber);
 
-      const step3Status: StepStatus = result.checksum.match ? 'ok' : 'soft-fail';
+      const strictSerialRequiredFailure = currentRun.config.strictSerialRequiredFailure ?? true;
+      const shouldHardFail = strictSerialRequiredFailure && !result.checksum.match;
+      const normalizedIssues = shouldHardFail
+        ? result.issues.map((issue) => (
+            issue.type === 'serial-mismatch' || issue.type === 'sn-insufficient-count'
+              ? { ...issue, severity: 'error' as const }
+              : issue
+          ))
+        : result.issues;
+      const step3Status: StepStatus = result.checksum.match ? 'ok' : (shouldHardFail ? 'failed' : 'soft-fail');
 
       set((state) => {
         const updatedRun = state.runs.find(r => r.id === runId);
@@ -2417,7 +2931,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           },
           steps: updatedRun.steps.map(step =>
             step.stepNo === 3
-              ? { ...step, status: step3Status, issuesCount: result.issues.length }
+              ? { ...step, status: step3Status, issuesCount: normalizedIssues.length }
               : step
           ),
         };
@@ -2428,7 +2942,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           invoiceLines: [...result.lines, ...otherLines],
           issues: [
             ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 3)),
-            ...result.issues.map(issue => ({ ...issue, runId })),
+            ...normalizedIssues.map(issue => ({ ...issue, runId })),
           ],
         };
       });
@@ -2437,6 +2951,20 @@ export const useRunStore = create<RunState>((set, get) => ({
         `Matcher Serial-Extraktion abgeschlossen: ${result.stats.assignedCount}/${result.stats.requiredCount} S/N zugewiesen (${matcher.moduleId})`,
         { runId, step: 'Seriennummer anfuegen' },
       );
+
+      // PROJ-28: Step 3 diagnostics
+      const assignedCount = result.stats.assignedCount ?? 0;
+      const requiredCount = result.stats.requiredCount ?? 0;
+      const allAssigned = requiredCount === 0 || assignedCount >= requiredCount;
+      get().setStepDiagnostics(3, {
+        stepNo: 3,
+        moduleName: matcher.moduleId,
+        confidence: allAssigned ? 'high' : assignedCount > 0 ? 'medium' : 'low',
+        summary: requiredCount === 0
+          ? 'Keine S/N-Pflicht'
+          : `${assignedCount}/${requiredCount} S/N zugewiesen`,
+        timestamp: new Date().toISOString(),
+      });
 
       for (const w of result.warnings) {
         const logFn = w.severity === 'error' ? logService.error.bind(logService) : logService.warn.bind(logService);
