@@ -10,7 +10,7 @@
  * @component
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info, Search } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -71,6 +71,9 @@ export function InvoicePreview({
 }: InvoicePreviewProps) {
   const [expandedPositions, setExpandedPositions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const toggleContainerRef = useRef<HTMLDivElement | null>(null);
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
 
@@ -118,6 +121,29 @@ export function InvoicePreview({
       (pos.orderCandidatesText?.toLowerCase().includes(term))
     );
   });
+
+  useEffect(() => {
+    const updateCollapsedHeight = () => {
+      const containerTop = tableContainerRef.current?.getBoundingClientRect().top;
+      const toggleHeight = toggleContainerRef.current?.getBoundingClientRect().height ?? 0;
+
+      if (typeof containerTop !== 'number' || Number.isNaN(containerTop)) {
+        setCollapsedHeightPx(400);
+        return;
+      }
+
+      const nextHeight = Math.max(260, Math.floor(window.innerHeight - containerTop - toggleHeight - 8));
+      setCollapsedHeightPx(Number.isFinite(nextHeight) ? nextHeight : 400);
+    };
+
+    const rafId = window.requestAnimationFrame(updateCollapsedHeight);
+    window.addEventListener('resize', updateCollapsedHeight);
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', updateCollapsedHeight);
+    };
+  }, [expandedPositions, filteredPositions.length]);
 
   return (
     <div className="space-y-6">
@@ -183,7 +209,7 @@ export function InvoicePreview({
             <CardDescription>/invoicelines ({positions.length})</CardDescription>
           </div>
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="pt-0 pb-0">
           {positions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -197,28 +223,30 @@ export function InvoicePreview({
             <>
               {/* PROJ-22 B1: 5-row default max-h + sticky header */}
               <div
-                className={`overflow-y-auto overflow-x-hidden transition-all duration-500 ease-in-out ${
-                  expandedPositions ? 'max-h-[5000px]' : 'max-h-[400px]'
+                ref={tableContainerRef}
+                className={`overflow-x-hidden transition-all duration-500 ease-in-out ${
+                  expandedPositions ? 'overflow-y-hidden' : 'overflow-y-auto'
                 }`}
+                style={expandedPositions ? { maxHeight: 'none' } : { maxHeight: `${collapsedHeightPx}px` }}
               >
                 {/* PROJ-22 B2: Unified column order matching ItemsTable:
                     1. Info | 2. Pos | 3. Status | 4. Art.-Nr. | 5. Herstellerartikelnr.
                     | 6. EAN | 7. Bezeichnung | 8. Menge | 9. Preis (ACTIVE) | 10. SN | 11. Bestellung */}
-                <Table>
+                <Table className="table-fixed w-full">
                   {/* PROJ-22 B1: sticky header */}
-                  <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableHeader className={expandedPositions ? 'bg-card' : 'sticky top-0 z-10 bg-card'}>
                     <TableRow className="bg-muted/50">
-                      <TableHead className="w-[36px]"></TableHead>
-                      <TableHead className="w-[50px]">Pos.</TableHead>
-                      <TableHead className="w-[70px]">Status</TableHead>
-                      <TableHead className="w-[90px]">Art.-Nr.</TableHead>
-                      <TableHead>Herstellerartikelnr.</TableHead>
+                      <TableHead className="w-[36px]">DETAILS</TableHead>
+                      <TableHead className="w-[50px]">#</TableHead>
+                      <TableHead className="w-[90px]">ARTIKEL</TableHead>
+                      <TableHead className="w-[8ch] whitespace-nowrap">- MATCH</TableHead>
+                      <TableHead className="w-[200px]">BESTELLNUMMER</TableHead>
                       <TableHead className="w-[130px]">EAN</TableHead>
-                      <TableHead className="w-[160px]">Bezeichnung</TableHead>
-                      <TableHead className="text-right w-[60px]">Menge</TableHead>
-                      <TableHead className="text-right w-[130px]">Preis</TableHead>
-                      <TableHead className="w-[36px]">SN</TableHead>
-                      <TableHead className="w-[120px]">Bestellung</TableHead>
+                      <TableHead>BEZEICHNUNG</TableHead>
+                      <TableHead className="text-right w-[60px]">MENGE</TableHead>
+                      <TableHead className="text-right w-[130px]">PREIS</TableHead>
+                      <TableHead className="w-[36px]">SN / SERIAL</TableHead>
+                      <TableHead className="w-[120px]">BESTELLUNG</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -249,23 +277,25 @@ export function InvoicePreview({
                             {position.positionIndex}
                           </TableCell>
 
-                          {/* Col 3: Status (order badge) */}
-                          <TableCell>
-                            <Badge variant={orderBadge.variant} className="text-[10px] px-1 py-0">
-                              {orderBadge.label}
-                            </Badge>
-                          </TableCell>
-
-                          {/* Col 4: Art.-Nr. (DE from positionStatusMap) */}
+                          {/* Col 3: Art.-Nr. (DE from positionStatusMap) */}
                           <TableCell className="font-mono text-xs">
                             {posStatus?.representativeLine?.falmecArticleNo ?? (
                               <span className="text-muted-foreground">--</span>
                             )}
                           </TableCell>
 
+                          {/* Col 4: Status (order badge) */}
+                          <TableCell className="text-center">
+                            <div className="flex justify-center">
+                              <Badge variant={orderBadge.variant} className="text-[10px] px-1 py-0">
+                                {orderBadge.label}
+                              </Badge>
+                            </div>
+                          </TableCell>
+
                           {/* Col 5: Herstellerartikelnr. */}
-                          <TableCell>
-                            <div className="max-w-[200px] truncate font-mono text-xs" title={position.manufacturerArticleNo}>
+                          <TableCell className="font-mono text-xs">
+                            <div className="truncate w-full" title={position.manufacturerArticleNo}>
                               {position.manufacturerArticleNo || (
                                 <span className="text-destructive">Fehlt</span>
                               )}
@@ -279,14 +309,13 @@ export function InvoicePreview({
                             )}
                           </TableCell>
 
-                          {/* Col 7: Bezeichnung — max 35 chars */}
-                          <TableCell>
+                          {/* Col 7: Bezeichnung — dynamic width, truncate by available space */}
+                          <TableCell className="min-w-0">
                             <div
-                              className="text-xs truncate max-w-[150px]"
+                              className="text-xs truncate w-full"
                               title={position.descriptionIT || position.manufacturerArticleNo}
                             >
-                              {(position.descriptionIT || position.manufacturerArticleNo || '')?.substring(0, 35)}
-                              {((position.descriptionIT || position.manufacturerArticleNo || '')?.length ?? 0) > 35 ? '…' : ''}
+                              {position.descriptionIT || position.manufacturerArticleNo || ''}
                             </div>
                           </TableCell>
 
@@ -361,16 +390,19 @@ export function InvoicePreview({
                 </Table>
               </div>
               {/* PROJ-22 B1: Expand / Collapse Toggle — sticky bottom, 25% groesser */}
-              <div className="flex justify-center pt-1 pb-1 border-t border-border/40 sticky bottom-0 bg-card">
+              <div
+                ref={toggleContainerRef}
+                className="flex justify-center items-center h-[50px] border-t border-border/40 sticky bottom-0 bg-card"
+              >
                 <button
                   className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
                   onClick={() => setExpandedPositions((e) => !e)}
                   aria-label={expandedPositions ? 'Einklappen' : 'Ausklappen'}
                 >
                   {expandedPositions ? (
-                    <ChevronsUp className="w-6 h-6" />
+                    <ChevronsUp className="w-7 h-7 text-muted-foreground/85" />
                   ) : (
-                    <ChevronsDown className="w-6 h-6 animate-pulse" />
+                    <ChevronsDown className="w-7 h-7 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
                   )}
                 </button>
               </div>
@@ -379,23 +411,6 @@ export function InvoicePreview({
         </CardContent>
       </Card>
 
-      {/* Summary Footer */}
-      <div className="flex justify-between items-center text-sm text-muted-foreground">
-        <span className="text-white">
-          {positions.length} Positionen • Gesamtmenge: {header.totalQty ?? 0}
-          {typeof header.invoiceTotal === 'number'
-            ? ` • Rechnungssumme: ${formatCurrency(header.invoiceTotal)}`
-            : ''}
-        </span>
-        <span>
-          {errorCount > 0 && (
-            <span className="text-destructive mr-4">{errorCount} Fehler</span>
-          )}
-          {warningCount > 0 && (
-            <span className="text-amber-600">{warningCount} Warnungen</span>
-          )}
-        </span>
-      </div>
     </div>
   );
 }

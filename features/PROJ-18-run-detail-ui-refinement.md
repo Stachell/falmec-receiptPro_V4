@@ -140,3 +140,133 @@ const [expanded, setExpanded] = useState(false);
   - collapsed: Header bleibt sichtbar beim inneren Scroll
   - expanded: kein innerer Scrollbalken, Scroll ueber Seiten-Scrollbar
   - Toggle hin/zurueck ohne Scroll-Sprung
+
+---
+
+## Nachtrag 2026-02-24 - ADD: Dynamische Breite Spalte `BEZEICHNUNG`
+
+### Job / Location
+- Job: Anpassung der Breite einer Tabelle zu einem dynamischen Wert.
+- Location: Run-Detail-Site > Tab `Artikelliste` > Body > Tabelle `Bezeichnung`.
+
+### Zielbild
+- Nur die Spalte `BEZEICHNUNG` soll dynamisch auf die verbleibende Tabellenbreite reagieren.
+- Alle anderen Spalten behalten feste Breiten.
+- Bei kleinerer Bildschirmauflösung wird in `BEZEICHNUNG` entsprechend weniger Text sichtbar, bei größerer mehr.
+
+### Umsetzung (technisch)
+- Datei: `src/components/run-detail/ItemsTable.tsx`
+- Spalte `BEZEICHNUNG`:
+  - feste Begrenzung `max-w-[140px]` entfernt
+  - harte Zeichenkappung per `substring(0, 35)` entfernt
+  - ersetzt durch `truncate w-full` innerhalb einer `TableCell` mit `min-w-0`
+- Ergebnis: Abschneiden erfolgt jetzt rein über die tatsächlich verfügbare Spaltenbreite.
+
+### Verifikation
+- Die Spalte `BEZEICHNUNG` wächst/schrumpft mit der verfügbaren Restbreite.
+- Feste Breiten der übrigen Spalten bleiben unverändert.
+
+---
+
+## Nachtrag 2026-02-24 - ADD: Dynamische Breite Spalte `Bezeichnung` (RE-Positionen)
+
+### Job / Location
+- Job: Anpassung der Breite einer Tabelle zu einem dynamischen Wert.
+- Location: Run-Detail-Site > Tab `RE-Positionen` > Body > Tabelle `Bezeichnung`.
+
+### Zielbild
+- Nur die Spalte `Bezeichnung` reagiert dynamisch auf die verfuegbare Restbreite.
+- Alle anderen Spalten bleiben mit festen Breiten bestehen.
+- `EAN` bleibt direkt neben `Herstellerartikelnr.`; bei kleinerer Aufloesung wird in `Bezeichnung` entsprechend weniger Inhalt sichtbar.
+
+### Umsetzung (technisch)
+- Datei: `src/components/run-detail/InvoicePreview.tsx`
+- Tabelle auf `table-fixed w-full` gesetzt, damit feste Spaltenbreiten stabil bleiben.
+- `Herstellerartikelnr.` explizit auf `w-[200px]` gesetzt (fix).
+- `Bezeichnung`-Header ohne feste Breite gelassen (nimmt Restplatz).
+- `Bezeichnung`-Zelle:
+  - feste Begrenzung `max-w-[150px]` entfernt
+  - harte Zeichenkappung `substring(0, 35)` entfernt
+  - ersetzt durch `truncate w-full` innerhalb einer `TableCell` mit `min-w-0`
+
+### Verifikation
+- Nur `Bezeichnung` waechst/schrumpft dynamisch mit der Aufloesung.
+- Alle anderen Spalten (inkl. `Herstellerartikelnr.` und `EAN`) bleiben fix.
+
+---
+
+## Nachtrag 2026-02-24 - ADD (Plan): RE-Positionen Scroll-Entkopplung (Double-Scrollbar)
+
+### Job / Location
+- Job: UI/UX-Fix fuer Scroll-Interferenz (innerer vs. aeusserer Scrollbalken).
+- Location: Run-Detail-Site > Tab `RE-Positionen` > Body.
+
+### Erkenntnisse (Ist-Stand)
+- Datei: `src/components/run-detail/InvoicePreview.tsx`
+- Der Tabellen-Container nutzt aktuell durchgehend `overflow-y-auto` und toggelt nur `max-h-[400px]` / `max-h-[5000px]`.
+- Dadurch bleibt auch im ausgeklappten Zustand ein innerer Scroll-Context aktiv; Mausrad-Ereignisse konkurrieren mit dem Seiten-Scroll.
+- Header ist aktuell immer sticky (`sticky top-0`), auch im expanded Zustand.
+
+### Zielbild
+- Collapsed:
+  - definierte Hoehe
+  - innerer Scroll aktiv (`overflow-y-auto`)
+  - Header sticky
+- Expanded:
+  - keine Begrenzung (`maxHeight: none`)
+  - innerer Scroll komplett aus (`overflow-y-hidden`)
+  - Seite uebernimmt 100% Scroll
+  - Header nicht sticky
+
+### Geplanter Umbau (State -> CSS Toggle)
+- Bestehenden State `expandedPositions` weiterverwenden.
+- Optional analog `ItemsTable`: `collapsedHeightPx` + `tableContainerRef` + `toggleContainerRef`, damit collapsed-Hoehe bis zur sichtbaren Unterkante dynamisch passt.
+- Tabellen-Container umstellen auf:
+  - collapsed: `overflow-y-auto` + `maxHeight: <px>`
+  - expanded: `overflow-y-hidden` + `maxHeight: none`
+- Header-Klasse umstellen auf:
+  - collapsed: `sticky top-0 z-10 bg-card`
+  - expanded: `bg-card`
+
+### Geplantes Code-Muster
+```tsx
+const [expandedPositions, setExpandedPositions] = useState(false);
+const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
+
+<div
+  ref={tableContainerRef}
+  className={`overflow-x-hidden transition-all duration-500 ease-in-out ${
+    expandedPositions ? 'overflow-y-hidden' : 'overflow-y-auto'
+  }`}
+  style={expandedPositions ? { maxHeight: 'none' } : { maxHeight: `${collapsedHeightPx}px` }}
+>
+  <Table className="table-fixed w-full">
+    <TableHeader className={expandedPositions ? 'bg-card' : 'sticky top-0 z-10 bg-card'}>
+      ...
+    </TableHeader>
+  </Table>
+</div>
+```
+
+### Akzeptanzkriterien (Abnahme)
+- Collapsed:
+  - innerer Scrollbalken nur im Tabellenbereich
+  - Seiten-Scroll bleibt ruhig
+  - Header bleibt beim Tabellen-Scroll sichtbar
+- Expanded:
+  - kein innerer Scrollbalken mehr im Tabellencontainer
+  - Mausrad scrollt ausschliesslich die Seite
+  - Header scrollt normal mit (nicht sticky)
+- Toggle zwischen beiden Zustaenden ohne Scroll-Spruenge.
+
+### Umsetzung (ausgefuehrt 2026-02-24)
+- Datei: `src/components/run-detail/InvoicePreview.tsx`
+- Container-Logik auf state-gekoppeltes Scrollverhalten umgestellt:
+  - collapsed: `overflow-y-auto` + dynamische `maxHeight` (Viewport-basiert)
+  - expanded: `overflow-y-hidden` + `maxHeight: none`
+- Header-Sticky an den State gekoppelt:
+  - collapsed: `sticky top-0 z-10 bg-card`
+  - expanded: `bg-card`
+- Refs + Hoehenberechnung analog Artikelliste eingebaut:
+  - `tableContainerRef`, `toggleContainerRef`, `collapsedHeightPx`
+  - Formel: `max(260, window.innerHeight - containerTop - toggleHeight - 16)`

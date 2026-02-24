@@ -98,7 +98,7 @@ export function ItemsTable() {
         return;
       }
 
-      const nextHeight = Math.max(260, Math.floor(window.innerHeight - containerTop - toggleHeight - 16));
+      const nextHeight = Math.max(260, Math.floor(window.innerHeight - containerTop - toggleHeight - 8));
       setCollapsedHeightPx(Number.isFinite(nextHeight) ? nextHeight : 400);
     };
 
@@ -181,8 +181,8 @@ export function ItemsTable() {
             <TableRow className="data-table-header">
               <TableHead className="w-16 text-center">DETAILS</TableHead>
               <TableHead className="w-9 text-center">#</TableHead>
-              <TableHead className="w-10 text-center"><span className="sr-only">Status</span></TableHead>
               <TableHead className="w-20">ARTIKEL</TableHead>
+              <TableHead className="w-[8ch] whitespace-nowrap">- MATCH</TableHead>
               <TableHead className="w-36">BESTELLNUMMER</TableHead>
               <TableHead className="w-28">EAN</TableHead>
               <TableHead>BEZEICHNUNG</TableHead>
@@ -222,15 +222,7 @@ export function ItemsTable() {
                   {line.positionIndex}
                 </TableCell>
 
-                {/* Col 3: Match-Status checkbox */}
-                <TableCell className="px-1">
-                  <StatusCheckbox
-                    status={line.matchStatus}
-                    onClick={() => setDetailLine(line)}
-                  />
-                </TableCell>
-
-                {/* Col 4: Art.-Nr. (DE) = falmecArticleNo — renamed from "Art-# (DE)" */}
+                {/* Col 3: Art.-Nr. (DE) = falmecArticleNo — renamed from "Art-# (DE)" */}
                 <TableCell className="font-mono text-xs truncate">
                   <div className="flex items-center gap-1">
                     {line.matchStatus === 'ean-only' && (
@@ -245,6 +237,16 @@ export function ItemsTable() {
                   </div>
                 </TableCell>
 
+                {/* Col 4: Match-Status checkbox */}
+                <TableCell className="px-1 text-center">
+                  <div className="flex justify-center">
+                    <StatusCheckbox
+                      status={line.matchStatus}
+                      onClick={() => setDetailLine(line)}
+                    />
+                  </div>
+                </TableCell>
+
                 {/* Col 5: Herstellerartikelnr. (renamed from "Art-# (IT)") */}
                 <TableCell className="font-mono text-xs truncate" title={line.manufacturerArticleNo}>
                   {line.manufacturerArticleNo}
@@ -255,22 +257,20 @@ export function ItemsTable() {
                   {line.ean}
                 </TableCell>
 
-                {/* Col 7: Bezeichnung — max 35 chars truncate */}
-                <TableCell>
+                {/* Col 7: Bezeichnung — dynamic width, truncate by available space */}
+                <TableCell className="min-w-0">
                   <div
-                    className="text-xs truncate max-w-[140px]"
+                    className="text-xs truncate w-full"
                     title={line.descriptionDE ?? line.descriptionIT}
                   >
-                    {(line.descriptionDE ?? line.descriptionIT)?.substring(0, 35)}
-                    {((line.descriptionDE ?? line.descriptionIT)?.length ?? 0) > 35 ? '…' : ''}
+                    {line.descriptionDE ?? line.descriptionIT}
                   </div>
                   {line.descriptionDE && (
                     <div
-                      className="text-[11px] text-muted-foreground truncate max-w-[140px]"
+                      className="text-[11px] text-muted-foreground truncate w-full"
                       title={line.descriptionIT}
                     >
-                      {line.descriptionIT?.substring(0, 35)}
-                      {(line.descriptionIT?.length ?? 0) > 35 ? '…' : ''}
+                      {line.descriptionIT}
                     </div>
                   )}
                 </TableCell>
@@ -342,16 +342,16 @@ export function ItemsTable() {
 
       {/* PROJ-22 B1: Expand / Collapse Toggle — 25% groesser (w-6 h-6) */}
       {filteredLines.length > 0 && (
-        <div ref={toggleContainerRef} className="flex justify-center py-2 border-t border-border/40 sticky bottom-0 bg-card">
+        <div ref={toggleContainerRef} className="flex justify-center items-center h-[50px] border-t border-border/40 sticky bottom-0 bg-card">
           <button
             className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
             onClick={() => setExpanded((e) => !e)}
             aria-label={expanded ? 'Einklappen' : 'Ausklappen'}
           >
             {expanded ? (
-              <ChevronsUp className="w-6 h-6" />
+              <ChevronsUp className="w-7 h-7 text-muted-foreground/85" />
             ) : (
-              <ChevronsDown className="w-6 h-6 animate-pulse" />
+              <ChevronsDown className="w-7 h-7 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
             )}
           </button>
         </div>
