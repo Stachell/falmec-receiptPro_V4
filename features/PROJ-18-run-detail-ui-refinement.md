@@ -270,3 +270,71 @@ const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
 - Refs + Hoehenberechnung analog Artikelliste eingebaut:
   - `tableContainerRef`, `toggleContainerRef`, `collapsedHeightPx`
   - Formel: `max(260, window.innerHeight - containerTop - toggleHeight - 16)`
+
+---
+
+## Nachtrag 2026-02-24 - ADD: Sticky Header an Body koppeln (Phase 1: RE-Positionen)
+
+### Job / Scope
+- Location 1: Run-Detail > RE-Positionen > Body > Ueberschriftenzeile.
+- Ziel: Header bleibt beim Scrollen im Body sichtbar, ohne Logik-/Store-/Workflow-Eingriffe.
+- Rollout-Vorgabe: zuerst nur RE-Positionen; danach Sichtpruefung, erst dann Artikelliste + Lagerort-Details.
+
+### Ursache (technisch)
+- In `InvoicePreview.tsx` wurde die Tabelle ueber das UI-Primitive `Table` gerendert.
+- `Table` kapselt intern ein zusaetzliches Wrapper-`div` mit `overflow-auto` (`src/components/ui/table.tsx`).
+- Gleichzeitig liegt der eigentliche Body-Scroll auf dem aeusseren Container (`overflow-y-auto` im collapsed State).
+- Ergebnis: Sticky-Header war nicht sauber an den aktiven Scroll-Container gekoppelt.
+
+### Umsetzung (Phase 1 ausgefuehrt: nur RE-Positionen)
+- Datei: `src/components/run-detail/InvoicePreview.tsx`
+- Render-Pfad von `Table` auf nativen `<table>` umgestellt:
+  - statt `<Table className="table-fixed w-full">` jetzt
+    `div.relative.w-full.overflow-x-auto > table.w-full.table-fixed.caption-bottom.text-sm`
+- `TableHeader` Sticky-Logik bleibt unveraendert:
+  - collapsed: `sticky top-0 z-10 bg-card`
+  - expanded: `bg-card`
+- Keine Aenderung an:
+  - Expand/Collapse State
+  - Overflow-Y Toggle
+  - Refs/Scroll-Hoehenberechnung
+  - Datenfluss und Interaktionen
+
+### Verifikation (technisch)
+- `npx tsc --noEmit` ohne Fehler.
+
+### Iteration 2 nach UI-Feedback (ausgefuehrt 2026-02-24)
+- Problem nach erster Umsetzung:
+  - Header blieb im collapsed State weiterhin nicht sauber fixiert.
+  - Beige Header-Ton war visuell verloren gegangen.
+- Ursache:
+  - zusaetzlicher Zwischen-Wrapper mit `overflow-x-auto` zwischen Scroll-Container und Header erzeugte einen konkurrierenden Overflow-Kontext.
+- Anpassung:
+  - Zwischen-Wrapper entfernt; X- und Y-Overflow liegen nun auf demselben Container.
+  - Header-Hintergrund wieder auf `bg-muted/50` (beiger Ton) gesetzt.
+  - Sticky nur collapsed direkt auf den `th`-Zellen (`sticky top-0 z-20 bg-muted/50`).
+- Logikpruefung:
+  - Keine "erste Zeile ueberspringen"-Logik im UI gefunden.
+  - Positionsanzeige nutzt direkt `position.positionIndex` aus den Parserdaten.
+
+### Iteration 3 nach UI-Feedback (ausgefuehrt 2026-02-24)
+- Zusatzanforderung:
+  - Header beim Scrollen voll deckend (keine Halbtransparenz), damit Inhalte darunter nicht durchscheinen.
+- RE-Positionen:
+  - Header-Flaeche auf voll deckenden Beige-Ton `bg-[hsl(var(--surface-sunken))]` umgestellt.
+  - Sticky bleibt nur collapsed aktiv (`sticky top-0 z-20` auf `th`).
+- Rollout gemaess Plan auf weitere Locations:
+  1. Artikelliste (`ItemsTable.tsx`):
+     - Render-Pfad auf natives `<table>` umgestellt (kein zusaetzlicher `Table`-Overflow-Wrapper).
+     - Sticky auf `th`-Zellen, voll deckender Beige-Ton.
+  2. Lagerort-Details (`WarehouseLocations.tsx`):
+     - Sticky Header im collapsed State ergaenzt.
+     - Header voll deckend im Beige-Ton.
+     - X/Y-Overflow auf denselben Scroll-Container gelegt.
+- Sicherheitsaspekt:
+  - Keine Aenderung an Store-/Workflow-/Zuordnungslogik, nur Header-Render/Styling und Scroll-Container-Kopplung.
+
+### Nächster Schritt (nach Abnahme)
+- Bei positiver Rueckmeldung gleiche Sticky-Kopplung auf:
+  1. Run-Detail > Artikelliste > Body > Ueberschriftenzeile
+  2. Run-Detail > Lagerort > Body "Lagerort-Details" > Ueberschriftenzeile

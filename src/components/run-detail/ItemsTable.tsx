@@ -4,7 +4,6 @@ import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -175,21 +174,21 @@ export function ItemsTable() {
         {/* PROJ-22 B2: Unified column order matching InvoicePreview
             1. Info-Icon | 2. Pos | 3. Match-Status | 4. Art.-Nr. | 5. Herstellerartikelnr.
             | 6. EAN | 7. Bezeichnung | 8. Menge | 9. Preis (READ-ONLY) | 10. SN | 11. Bestellung */}
-        <Table className="table-fixed w-full">
-          {/* PROJ-22 B1: sticky header */}
-          <TableHeader className={expanded ? 'bg-card' : 'sticky top-0 z-10 bg-card'}>
-            <TableRow className="data-table-header">
-              <TableHead className="w-16 text-center">DETAILS</TableHead>
-              <TableHead className="w-9 text-center">#</TableHead>
-              <TableHead className="w-20">ARTIKEL</TableHead>
-              <TableHead className="w-[8ch] whitespace-nowrap">- MATCH</TableHead>
-              <TableHead className="w-36">BESTELLNUMMER</TableHead>
-              <TableHead className="w-28">EAN</TableHead>
-              <TableHead>BEZEICHNUNG</TableHead>
-              <TableHead className="w-12 text-right">MENGE</TableHead>
-              <TableHead className="w-36 text-right">PREIS</TableHead>
-              <TableHead className="w-[120px]">SN / SERIAL</TableHead>
-              <TableHead className="w-24">BESTELLUNG</TableHead>
+        <table className="w-full table-fixed caption-bottom text-sm">
+          {/* Sticky header on th-cells for reliable behavior in collapsed body-scroll */}
+          <TableHeader className="bg-[hsl(var(--surface-sunken))]">
+            <TableRow className="bg-[hsl(var(--surface-sunken))]">
+              <TableHead className={`w-[59px] text-center ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>DETAILS</TableHead>
+              <TableHead className={`w-[30px] text-center ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>#</TableHead>
+              <TableHead className={`w-[72px] text-right pr-0 ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>ARTIKEL</TableHead>
+              <TableHead className={`w-[calc(8ch-9px)] whitespace-nowrap pl-0 ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>- MATCH</TableHead>
+              <TableHead className={`w-[157px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLNUMMER</TableHead>
+              <TableHead className={`w-[115px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>EAN</TableHead>
+              <TableHead className={expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>BEZEICHNUNG</TableHead>
+              <TableHead className={`w-[53px] text-center ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
+              <TableHead className={`w-[114px] text-right ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
+              <TableHead className={`w-[120px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SN / SERIAL</TableHead>
+              <TableHead className={`w-24 ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -223,8 +222,8 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* Col 3: Art.-Nr. (DE) = falmecArticleNo — renamed from "Art-# (DE)" */}
-                <TableCell className="font-mono text-xs truncate">
-                  <div className="flex items-center gap-1">
+                <TableCell className="font-mono text-xs truncate text-right pr-0">
+                  <div className="flex items-center justify-end gap-1">
                     {line.matchStatus === 'ean-only' && (
                       <Barcode className="w-3 h-3 text-orange-400 flex-shrink-0" title="EAN-Match" />
                     )}
@@ -238,8 +237,8 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* Col 4: Match-Status checkbox */}
-                <TableCell className="px-1 text-center">
-                  <div className="flex justify-center">
+                <TableCell className="px-1 pl-0 text-left">
+                  <div className="flex justify-start">
                     <StatusCheckbox
                       status={line.matchStatus}
                       onClick={() => setDetailLine(line)}
@@ -276,7 +275,7 @@ export function ItemsTable() {
                 </TableCell>
 
                 {/* Col 8: Menge */}
-                <TableCell className="text-right text-xs font-medium">
+                <TableCell className="text-center text-xs font-medium">
                   {line.qty}
                 </TableCell>
 
@@ -337,7 +336,7 @@ export function ItemsTable() {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* PROJ-22 B1: Expand / Collapse Toggle — 25% groesser (w-6 h-6) */}

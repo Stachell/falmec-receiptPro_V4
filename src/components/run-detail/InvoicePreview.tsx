@@ -13,7 +13,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info, Search } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -224,29 +224,29 @@ export function InvoicePreview({
               {/* PROJ-22 B1: 5-row default max-h + sticky header */}
               <div
                 ref={tableContainerRef}
-                className={`overflow-x-hidden transition-all duration-500 ease-in-out ${
-                  expandedPositions ? 'overflow-y-hidden' : 'overflow-y-auto'
+                className={`transition-all duration-500 ease-in-out ${
+                  expandedPositions ? 'overflow-y-hidden overflow-x-auto' : 'overflow-y-auto overflow-x-auto'
                 }`}
                 style={expandedPositions ? { maxHeight: 'none' } : { maxHeight: `${collapsedHeightPx}px` }}
               >
                 {/* PROJ-22 B2: Unified column order matching ItemsTable:
                     1. Info | 2. Pos | 3. Status | 4. Art.-Nr. | 5. Herstellerartikelnr.
                     | 6. EAN | 7. Bezeichnung | 8. Menge | 9. Preis (ACTIVE) | 10. SN | 11. Bestellung */}
-                <Table className="table-fixed w-full">
-                  {/* PROJ-22 B1: sticky header */}
-                  <TableHeader className={expandedPositions ? 'bg-card' : 'sticky top-0 z-10 bg-card'}>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="w-[36px]">DETAILS</TableHead>
-                      <TableHead className="w-[50px]">#</TableHead>
-                      <TableHead className="w-[90px]">ARTIKEL</TableHead>
-                      <TableHead className="w-[8ch] whitespace-nowrap">- MATCH</TableHead>
-                      <TableHead className="w-[200px]">BESTELLNUMMER</TableHead>
-                      <TableHead className="w-[130px]">EAN</TableHead>
-                      <TableHead>BEZEICHNUNG</TableHead>
-                      <TableHead className="text-right w-[60px]">MENGE</TableHead>
-                      <TableHead className="text-right w-[130px]">PREIS</TableHead>
-                      <TableHead className="w-[36px]">SN / SERIAL</TableHead>
-                      <TableHead className="w-[120px]">BESTELLUNG</TableHead>
+                <table className="w-full table-fixed caption-bottom text-sm">
+                  {/* Sticky header: apply sticky on each th for reliable table behavior */}
+                  <TableHeader className="bg-[hsl(var(--surface-sunken))]">
+                    <TableRow className="bg-[hsl(var(--surface-sunken))]">
+                      <TableHead className={`w-[9ch] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>DETAILS</TableHead>
+                      <TableHead className={`w-[44px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>#</TableHead>
+                      <TableHead className={`w-[59px] text-right ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>ARTIKEL</TableHead>
+                      <TableHead className={`w-[8ch] whitespace-nowrap ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>- MATCH</TableHead>
+                      <TableHead className={`w-[172px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLNUMMER</TableHead>
+                      <TableHead className={`w-[124px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>EAN</TableHead>
+                      <TableHead className={expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>BEZEICHNUNG</TableHead>
+                      <TableHead className={`text-center w-[67px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
+                      <TableHead className={`text-right w-[119px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
+                      <TableHead className={`w-[61px] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SERIAL</TableHead>
+                      <TableHead className={`w-24 ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -256,7 +256,7 @@ export function InvoicePreview({
                       return (
                         <TableRow key={position.positionIndex}>
                           {/* Col 1: Info button — navigate to Artikelliste */}
-                          <TableCell className="px-1">
+                          <TableCell className="px-1 text-center">
                             {posStatus && (
                               <Button
                                 variant="ghost"
@@ -278,15 +278,15 @@ export function InvoicePreview({
                           </TableCell>
 
                           {/* Col 3: Art.-Nr. (DE from positionStatusMap) */}
-                          <TableCell className="font-mono text-xs">
+                          <TableCell className="font-medium text-right">
                             {posStatus?.representativeLine?.falmecArticleNo ?? (
                               <span className="text-muted-foreground">--</span>
                             )}
                           </TableCell>
 
                           {/* Col 4: Status (order badge) */}
-                          <TableCell className="text-center">
-                            <div className="flex justify-center">
+                          <TableCell className="text-left">
+                            <div className="flex justify-start">
                               <Badge variant={orderBadge.variant} className="text-[10px] px-1 py-0">
                                 {orderBadge.label}
                               </Badge>
@@ -320,7 +320,7 @@ export function InvoicePreview({
                           </TableCell>
 
                           {/* Col 8: Menge */}
-                          <TableCell className="text-right font-medium">
+                          <TableCell className="text-center font-medium">
                             {position.quantityDelivered}
                           </TableCell>
 
@@ -340,7 +340,7 @@ export function InvoicePreview({
                           </TableCell>
 
                           {/* Col 10: SN traffic light square */}
-                          <TableCell className="px-1">
+                          <TableCell className="px-1 text-center">
                             {posStatus ? (
                               <TooltipProvider delayDuration={200}>
                                 <Tooltip>
@@ -387,7 +387,7 @@ export function InvoicePreview({
                       );
                     })}
                   </TableBody>
-                </Table>
+                </table>
               </div>
               {/* PROJ-22 B1: Expand / Collapse Toggle — sticky bottom, 25% groesser */}
               <div

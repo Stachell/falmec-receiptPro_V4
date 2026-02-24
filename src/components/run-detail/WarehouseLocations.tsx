@@ -11,7 +11,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -153,18 +152,22 @@ export function WarehouseLocations() {
         <div
           className={`transition-all duration-500 ease-in-out ${
             expandedDetails
-              ? 'max-h-[5000px] overflow-y-hidden'
-              : 'max-h-[360px] overflow-y-auto'
+              ? 'max-h-[5000px] overflow-y-hidden overflow-x-auto'
+              : 'max-h-[360px] overflow-y-auto overflow-x-auto'
           }`}
         >
-          <Table>
-            <TableHeader>
+          <table className="w-full caption-bottom text-sm">
+            <TableHeader className="bg-[hsl(var(--surface-sunken))]">
               <TableRow className="data-table-header">
-                <TableHead>Artikelnummer</TableHead>
-                <TableHead>Beschreibung</TableHead>
-                <TableHead>Menge</TableHead>
-                <TableHead>Aktueller Lagerort</TableHead>
-                {editMode && <TableHead>Neuer Lagerort</TableHead>}
+                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Artikelnummer</TableHead>
+                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Beschreibung</TableHead>
+                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Menge</TableHead>
+                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Aktueller Lagerort</TableHead>
+                {editMode && (
+                  <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>
+                    Neuer Lagerort
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -215,7 +218,7 @@ export function WarehouseLocations() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </table>
         </div>
 
         {/* Expand / Collapse Toggle */}
