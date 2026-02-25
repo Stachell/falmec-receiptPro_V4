@@ -228,14 +228,14 @@ export function InvoicePreview({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11 p-px text-muted-foreground/50 hover:text-muted-foreground"
+                  className="h-11 w-11 p-px border border-gray-400/70 rounded-md text-muted-foreground/50 hover:text-muted-foreground"
                   onClick={handleToggleExpanded}
                   aria-label={toggleAriaLabel}
                 >
                   {expandedPositions ? (
-                    <ChevronsUp className="h-full w-full text-muted-foreground/85" />
+                    <ChevronsUp className="h-full w-full scale-[1.45] transform-gpu text-muted-foreground/85" />
                   ) : (
-                    <ChevronsDown className="h-full w-full animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
+                    <ChevronsDown className="h-full w-full scale-[1.45] transform-gpu animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
                   )}
                 </Button>
               </div>
