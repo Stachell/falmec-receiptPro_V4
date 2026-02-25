@@ -34,6 +34,7 @@ Falmec ReceiptPro ist eine lokale Desktop-Web-Anwendung fuer den strukturierten 
 | P1 | PROJ-14 | Parser-Modularisierung & UI-Bereinigung | In Progress | Modulare Parser-Architektur (V1/V2/V3), Settings-Popup, Parser-Dropdown, Umlaut-Korrektur |
 | P1 | PROJ-28 | Unification of Settings & Workflow Mechanics | Done | Einheitliche Tab-Struktur (A–F), Block-Step-Toggles, OverrideEditorModal, StepDiagnostics-Unifizierung |
 | P1 | PROJ-29 | Run-Detail KPI Double-Check Logic & Line 3 Remapping | In Progress | Neue Zeile-3-Inhalte für Kacheln 1,2,4,5 + reaktive Verified-Logik (grüne Kachel `bg-emerald-100/90` + Check-Icon) für alle 5 Kacheln |
+| P2 | PROJ-30 | Optische Aufwertung Tab-Reiter-Auswahl | Done | 3D-Relief-Effekt für Tab-Leiste: Bar erhaben, aktiver Tab eingedrückt. Rein CSS. |
 
 ## Success Metrics
 

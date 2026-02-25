@@ -512,10 +512,10 @@ export default function RunDetail() {
           {/* Tab-Leiste + Ereignisfeld nebeneinander */}
           <div className="flex items-center gap-4">
             {/* PROJ-22 B1: TabsList bg-[#c9c3b6] */}
-            <TabsList className="bg-[#c9c3b6] border border-border">
+            <TabsList className="bg-[#c9c3b6] border border-border tab-bar-raised">
               <TabsTrigger
                 value="invoice-preview"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 RE-Positionen
                 {parsedInvoiceResult && (
@@ -530,7 +530,7 @@ export default function RunDetail() {
               </TabsTrigger>
               <TabsTrigger
                 value="items"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Artikelliste
                 {/* PROJ-22 B1: Artikelliste-Badge bg-[#008c99] white text */}
@@ -540,7 +540,7 @@ export default function RunDetail() {
               </TabsTrigger>
               <TabsTrigger
                 value="issues"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Fehler
                 {totalIssues > 0 && (
@@ -551,25 +551,25 @@ export default function RunDetail() {
               </TabsTrigger>
               <TabsTrigger
                 value="warehouse"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Lagerorte
               </TabsTrigger>
               <TabsTrigger
                 value="overview"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Details
               </TabsTrigger>
               <TabsTrigger
                 value="export"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Export
               </TabsTrigger>
               <TabsTrigger
                 value="log"
-                className="data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
+                className="tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"
               >
                 Log
               </TabsTrigger>
