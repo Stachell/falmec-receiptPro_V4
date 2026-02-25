@@ -79,6 +79,17 @@ export function InvoicePreview({
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
   const toggleAriaLabel = expandedPositions ? 'Einklappen' : 'Ausklappen';
   const handleToggleExpanded = () => setExpandedPositions((e) => !e);
+  const getOrderZoomClass = (value: string | null | undefined): string => {
+    const count = (value ?? '')
+      .split('|')
+      .map((part) => part.trim())
+      .filter(Boolean).length;
+
+    if (count >= 5) return 'text-[9px] tracking-tighter break-all leading-none';
+    if (count === 4) return 'text-[10px] tracking-tighter break-all leading-none';
+    if (count === 3) return 'text-[11px] tracking-tighter break-all leading-none';
+    return 'text-xs';
+  };
 
   // PROJ-20: Aggregated status from expanded lines per position
   const { invoiceLines: allInvoiceLines, currentRun } = useRunStore();
@@ -217,14 +228,14 @@ export function InvoicePreview({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-muted-foreground/50 hover:text-muted-foreground"
+                  className="h-11 w-11 p-px text-muted-foreground/50 hover:text-muted-foreground"
                   onClick={handleToggleExpanded}
                   aria-label={toggleAriaLabel}
                 >
                   {expandedPositions ? (
-                    <ChevronsUp className="w-5 h-5 text-muted-foreground/85" />
+                    <ChevronsUp className="h-full w-full text-muted-foreground/85" />
                   ) : (
-                    <ChevronsDown className="w-5 h-5 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
+                    <ChevronsDown className="h-full w-full animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
                   )}
                 </Button>
               </div>
@@ -243,6 +254,7 @@ export function InvoicePreview({
             </div>
           ) : (
             <>
+              <div className="-mx-6">
               {/* PROJ-22 B1: 5-row default max-h + sticky header */}
               <div
                 ref={tableContainerRef}
@@ -258,7 +270,7 @@ export function InvoicePreview({
                   {/* Sticky header: apply sticky on each th for reliable table behavior */}
                   <TableHeader className="bg-[hsl(var(--surface-sunken))]">
                     <TableRow className="bg-[hsl(var(--surface-sunken))]">
-                      <TableHead className={`w-[9ch] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>DETAILS</TableHead>
+                      <TableHead className={`w-[9ch] pl-2 text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>DETAILS</TableHead>
                       <TableHead className={`w-[44px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>#</TableHead>
                       <TableHead className={`w-[59px] text-right ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>ARTIKEL</TableHead>
                       <TableHead className={`w-[8ch] whitespace-nowrap ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>- MATCH</TableHead>
@@ -268,7 +280,7 @@ export function InvoicePreview({
                       <TableHead className={`text-center w-[67px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
                       <TableHead className={`text-right w-[119px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
                       <TableHead className={`w-[61px] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SERIAL</TableHead>
-                      <TableHead className={`${bestellungWidthClass} ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
+                      <TableHead className={`${bestellungWidthClass} pr-2 ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -278,7 +290,7 @@ export function InvoicePreview({
                       return (
                         <TableRow key={position.positionIndex}>
                           {/* Col 1: Info button — navigate to Artikelliste */}
-                          <TableCell className="px-1 text-center">
+                          <TableCell className="px-1 pl-2 text-center">
                             {posStatus && (
                               <Button
                                 variant="ghost"
@@ -396,10 +408,10 @@ export function InvoicePreview({
                           </TableCell>
 
                           {/* Col 11: Bestellung — READ-ONLY display in RE-Positionen */}
-                          <TableCell>
+                          <TableCell className="pr-2">
                             <div className="flex flex-col gap-1">
                               {position.orderCandidatesText && (
-                                <span className="text-xs text-muted-foreground font-mono">
+                                <span className={`${getOrderZoomClass(position.orderCandidatesText)} text-muted-foreground font-mono`}>
                                   {position.orderCandidatesText}
                                 </span>
                               )}
@@ -427,6 +439,7 @@ export function InvoicePreview({
                     <ChevronsDown className="w-7 h-7 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
                   )}
                 </button>
+              </div>
               </div>
             </>
           )}

@@ -35,9 +35,10 @@ import type { InvoiceLine } from '@/types';
 
 interface ManualOrderPopupProps {
   line: InvoiceLine;
+  labelClassName?: string;
 }
 
-export function ManualOrderPopup({ line }: ManualOrderPopupProps) {
+export function ManualOrderPopup({ line, labelClassName }: ManualOrderPopupProps) {
   const { orderPool, reassignOrder } = useRunStore();
   const [open, setOpen] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState<string>('');
@@ -83,7 +84,7 @@ export function ManualOrderPopup({ line }: ManualOrderPopupProps) {
           title="Bestellung manuell zuweisen"
         >
           <span
-            className={`font-mono text-xs ${
+            className={`font-mono ${labelClassName ?? 'text-xs'} ${
               line.orderAssignmentReason === 'manual-ok'
                 ? 'text-blue-600'
                 : line.orderNumberAssigned
