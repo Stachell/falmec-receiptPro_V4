@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { format } from 'date-fns';
@@ -18,6 +18,15 @@ export function ExportPanel({ run }: ExportPanelProps) {
   const [downloading, setDownloading] = useState(false);
   const [expandedXml, setExpandedXml] = useState(false);
   const { wrap, isLocked } = useClickLock();
+
+  useEffect(() => {
+    if (!expandedXml) return;
+    const timerId = window.setTimeout(() => {
+      setExpandedXml(false);
+    }, 120000);
+
+    return () => window.clearTimeout(timerId);
+  }, [expandedXml]);
 
   const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
   const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
@@ -145,13 +154,13 @@ ${invoiceLines.map(line => `    <Item>
           </Button>
         </div>
         <div
-          className={`overflow-x-auto transition-all duration-500 ease-in-out ${
+          className={`transition-all duration-500 ease-in-out ${
             expandedXml
-              ? 'max-h-[5000px] overflow-y-hidden'
-              : 'max-h-[300px] overflow-y-auto'
+              ? 'max-h-[5000px] overflow-hidden'
+              : 'max-h-0 overflow-hidden'
           }`}
         >
-          <pre className="p-4 text-xs font-mono text-muted-foreground">
+          <pre className="p-4 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">
             {xmlPreview}
           </pre>
         </div>
@@ -163,9 +172,9 @@ ${invoiceLines.map(line => `    <Item>
             aria-label={expandedXml ? 'Einklappen' : 'Ausklappen'}
           >
             {expandedXml ? (
-              <ChevronsUp className="w-5 h-5" />
+              <ChevronsUp className="w-7 h-7 text-muted-foreground/85" />
             ) : (
-              <ChevronsDown className="w-5 h-5 animate-pulse" />
+              <ChevronsDown className="w-7 h-7 animate-pulse text-muted-foreground/75" />
             )}
           </button>
         </div>
