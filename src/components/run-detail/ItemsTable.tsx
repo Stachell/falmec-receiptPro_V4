@@ -43,6 +43,7 @@ export function ItemsTable() {
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
+  const bestellungWidthClass = 'w-24';
 
   // PROJ-21: Scroll to highlighted row when navigating from IssuesCenter
   useEffect(() => {
@@ -117,6 +118,8 @@ export function ItemsTable() {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(price);
   const packageCount = currentRun?.invoice?.packagesCount ?? invoiceLines.length;
+  const toggleAriaLabel = expanded ? 'Einklappen' : 'Ausklappen';
+  const handleToggleExpanded = () => setExpanded((e) => !e);
 
   return (
     <div className="enterprise-card">
@@ -153,14 +156,33 @@ export function ItemsTable() {
         <div className="text-sm text-muted-foreground">
           {filteredLines.length} von {invoiceLines.length} Positionen
         </div>
-        {/* Right: label (matches RE-Positionen title + subtitle typography) */}
-        <div className="ml-auto text-right">
-          <h3 className="text-2xl font-semibold leading-none tracking-tight">
-            Artikel Liste
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            /article list ({packageCount})
-          </p>
+        {/* Right: label + separator slot (same width as BESTELLUNG column) */}
+        <div className="ml-auto flex items-stretch">
+          <div className="text-right">
+            <h3 className="text-2xl font-semibold leading-none tracking-tight">
+              Artikel Liste
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              /article list ({packageCount})
+            </p>
+          </div>
+          <div className={`${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`}>
+            {filteredLines.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground/50 hover:text-muted-foreground"
+                onClick={handleToggleExpanded}
+                aria-label={toggleAriaLabel}
+              >
+                {expanded ? (
+                  <ChevronsUp className="w-5 h-5 text-muted-foreground/85" />
+                ) : (
+                  <ChevronsDown className="w-5 h-5 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
+                )}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -189,7 +211,7 @@ export function ItemsTable() {
               <TableHead className={`w-[53px] text-center ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
               <TableHead className={`w-[114px] text-right ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
               <TableHead className={`w-[120px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SN / SERIAL</TableHead>
-              <TableHead className={`w-24 ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
+              <TableHead className={`${bestellungWidthClass} ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -345,8 +367,8 @@ export function ItemsTable() {
         <div ref={toggleContainerRef} className="flex justify-center items-center h-[50px] border-t border-border/40 sticky bottom-0 bg-card">
           <button
             className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
-            onClick={() => setExpanded((e) => !e)}
-            aria-label={expanded ? 'Einklappen' : 'Ausklappen'}
+            onClick={handleToggleExpanded}
+            aria-label={toggleAriaLabel}
           >
             {expanded ? (
               <ChevronsUp className="w-7 h-7 text-muted-foreground/85" />
