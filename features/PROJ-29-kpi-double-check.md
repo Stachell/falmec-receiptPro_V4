@@ -156,6 +156,174 @@ Die Double-Check-Logik ist **ausschließlich UI-Validierung** — sie hat keinen
 | 2026-02-25 | Add-On: CheckCircle2-Icon auf 22x22px (137.5%) vergrößert, Farbe `#46cb78` (Stepper-Grün) |
 | 2026-02-25 | Fix: variant-Border bei isVerified unterdrückt — kein `border-l-4` Restrand bei verified Kacheln |
 
+---
+
+## ADD-ON: Bugfix First-Check-Prerequisite & Checkpoint-Queue (2026-02-25)
+
+### ADD-ON 1: BUGFIX — Double-Check braucht First-Check als Voraussetzung
+
+**Problem:**
+1. Die `isKachelXVerified`-Logik aktiviert sich, ohne dass der "First Check" (grüner Balken links = `variant='success'`) bestanden ist. Beispiel: Kachel 4 "Serials geparst" kann verified werden, obwohl noch keine Seriennummern zugeordnet sind.
+2. Wenn `isVerified=true`, verschwindet der grüne Balken links, weil `!isVerified && variantStyles[variant]` die Border unterdrückt. Beides (grüner Balken + Relief) soll gleichzeitig sichtbar sein.
+
+**Lösung:**
+
+**1a) Single Source of Truth — `kachelXVariant` + `isKachelXFirstCheck`**
+Die variant-Logik wird exakt aus dem JSX extrahiert und in benannte Variablen gespeichert. Diese werden sowohl als `variant={...}`-Prop als auch als Double-Check-Guard verwendet. Alte Inline-Logik im JSX wird gelöscht.
+
+```typescript
+const kachel1Variant = parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+  ? 'warning' : parsedInvoiceResult?.header.qtyValidationStatus === 'ok' ? 'success' : 'default';
+const isKachel1FirstCheck = kachel1Variant === 'success';
+
+const kachel2Variant = currentRun.stats.noMatchCount > 0
+  ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default';
+const isKachel2FirstCheck = kachel2Variant === 'success';
+
+const kachel3Variant = (currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0)
+  ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default';
+const isKachel3FirstCheck = kachel3Variant === 'success';
+
+const kachel4Variant = (currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount
+  && currentRun.stats.serialRequiredCount > 0) ? 'success' : 'default';
+const isKachel4FirstCheck = kachel4Variant === 'success';
+
+const kachel5Variant = currentRun.stats.notOrderedCount > 0
+  ? 'warning' : currentRun.stats.matchedOrders > 0 ? 'success' : 'default';
+const isKachel5FirstCheck = kachel5Variant === 'success';
+```
+
+**1b) Jedes `isKachelXVerified` gaten:** `if (!isKachelXFirstCheck) return false;` als erste Zeile jedes useMemo.
+
+**1c) Grüner Balken immer sichtbar:** In KPITile.tsx: `!isVerified && variantStyles[variant]` → `variantStyles[variant]`
+
+**1d) CSS border-left bewahren:** `.kpi-tile-verified` setzt nur `border-top-color`, `border-right-color`, `border-bottom-color` — nicht das Shorthand `border-color`.
+
+### ADD-ON 2: Checkpoint-Meldungen (Queue-System)
+
+**Funktion:** Ersetzt die bisherige einzelne Erfolgsmeldung "Rechnung erfolgreich ausgelesen" durch ein Queue-System mit 6 Checkpoint-Meldungen, die sequentiell angezeigt werden.
+
+**Meldungen:**
+1. `[✓] CHECKFELD "PDF-Parsing" erfüllt: Rechnungspositionen und Rechnungssumme erfolgreich geparst.`
+2. `[✓] CHECKFELD "Artikel extrahiert" erfüllt: Artikelmenge, Artikelzuordnung erfolgreich durchgeführt.`
+3. `[✓] CHECKFELD "Preise checken" erfüllt: Alle Einzel- und Gesamtpreise erfolgreich zugeordnet.`
+4. `[✓] CHECKFELD "Serials geparst" erfüllt: Alle seriennummernpflichtigen Artikel erfolgreich zugeordnet.`
+5. `[✓] CHECKFELD "Beleg zugeteilt" erfüllt: Alle Artikel konnten offene Bestellungen erfolgreich zugeteilt werden.`
+6. `[✓] CHECKFELD "Export" erfüllt: Alle Daten erfolgreich zusammen gestellt, der Download ist verfügbar.`
+
+**Architektur:**
+- `CHECKPOINT_MESSAGES` Konstante (modul-level)
+- `checkpointQueue: number[]` + `activeCheckpoint: number | null` + `checkpointFade: 'in'|'out'|'hidden'` (State)
+- `shownCheckpointsRef: Set<number>` (Ref, verhindert doppelte Anzeige)
+- 6 Watcher-Effects (je 1 pro Checkpoint), enqueuen bei `isKachelXVerified=true`
+- Checkpoint 6 feuert bei `allTilesVerified = isKachel1..5Verified`
+- Consumer-Effect mit sauberem Timer-Cleanup: 2s Anzeige + 300ms Fade-Out
+- Reset-Effect bei Run-Wechsel (`currentRun?.id`)
+- `showEvent` → `showParseError` umbenennen, nur noch für Fehlerfall
+
+**Rendering:**
+- Bestehende Container-Klassen beibehalten (`border-green-500 text-green-800`, `rgba(255,255,255,0.5)`)
+- Einzeilig durch `whitespace-nowrap overflow-hidden text-ellipsis`
+- CheckCircle2 Icon in `#46cb78` (identisch mit KPI-Tile-Icon)
+- Text bis `:` in fett, danach normal
+
+**Kachel 6:** Wird NICHT verändert. Nur die Meldung #6 wird angezeigt.
+
+### Betroffene Dateien
+- `src/index.css` — `.kpi-tile-verified` CSS border-fix
+- `src/components/KPITile.tsx` — variantStyles Guard entfernen
+- `src/pages/RunDetail.tsx` — First-Checks, Verified-Guards, Checkpoint-Queue, Event-Feld
+
+---
+
+## ADD-ON 3 & Bugfix 2: Queue-Timing-Fix + UI-Polish + L-Form-Balken (2026-02-25)
+
+### Bugfix 2: Queue-Timing Freeze
+
+**Problem:** Die Checkpoint-Meldungen frieren ein — nur die erste Meldung erscheint und verschwindet nie.
+
+**Root Cause — Cleanup-Race-Condition im Consumer-Effect:**
+Der alte Consumer-Effect hatte `[checkpointQueue, activeCheckpoint]` als Dependencies. Wenn er 3 State-Updates im selben Tick setzte (Queue slice, activeCheckpoint, fade), verursachte die Queue-Änderung einen Re-Render, der die Cleanup-Funktion auslöste und damit die laufenden Timer (`fadeOutTimer`, `clearTimer`) tötete. Im neuen Effect-Durchlauf war `activeCheckpoint !== null` → early return → keine neuen Timer → Meldung bleibt stehen.
+
+**Fix — Zwei separate Effects:**
+- **Effect A (Dequeuer):** Reagiert auf `[checkpointQueue, activeCheckpoint]`, dequeued nächstes Item. Hat **keine Timer** → kein Cleanup-Problem.
+- **Effect B (Timer):** Reagiert **NUR** auf `[activeCheckpoint]`. Startet 2s Fade-Out + 2.3s Clear. Wird nicht durch Queue-Änderungen re-getriggert.
+
+### UI-Polish: Meldungs-Layout & Farben
+
+- **Höhe:** `h-10` (identisch mit TabsList, 40px) statt `py-2`
+- **Breite:** `ml-5 flex-shrink-0` statt `flex-none w-1/3 ml-auto` (dynamisch, min. 20px Abstand)
+- **Text:** `overflow-hidden text-ellipsis` entfernt (kein Abschneiden)
+- **Icon:** CheckCircle2 in `text-slate-900` (schwarz) statt `text-[#46cb78]` (grün) für bessere Lesbarkeit
+
+### ADD-ON 3: First-Check-Balken L-Form
+
+- **variantStyles** erweitert: `border-t-0` → `border-t-4 border-t-{color}` (L-Form: links + oben)
+- **`.kpi-tile-verified`** CSS: `border-top-color` entfernt, nur noch `border-right-color` + `border-bottom-color`
+- **Zuständigkeit:** Links + Oben = First-Check (Variant-Farbe). Rechts + Unten = Relief (verified-Farbe).
+- **Kachel 6:** Nicht betroffen (nutzt variantStyles nicht)
+
+### Betroffene Dateien
+- `src/components/KPITile.tsx` — variantStyles L-Form (`border-t-4 border-t-{color}`)
+- `src/index.css` — `.kpi-tile-verified` border-top-color entfernt
+- `src/pages/RunDetail.tsx` — Consumer-Effect aufgeteilt (Dequeuer + Timer), Meldungs-Container Layout
+
+---
+
+## ADD-ON 4: Meldung rechtsbündig + L-Form nach unten (2026-02-25)
+
+### Bugfix: Meldung rechtsbündig
+
+- **Problem:** Checkpoint-Meldung dockt linksbündig an (`ml-5` = 20px Offset) statt am rechten Rand
+- **Fix:** `ml-5` → `ml-auto` in RunDetail.tsx — schiebt Meldung in Flex-Container ganz nach rechts, wächst dynamisch nach links. `gap-4` (16px) garantiert Mindestabstand zum Tab-Reiter.
+
+### Design 1: L-Form-Balken nach unten
+
+- **variantStyles:** L-Form wandert von LINKS+OBEN nach LINKS+UNTEN
+  - `border-t-4` → `border-t-0` (oben genullt)
+  - `border-b-0` → `border-b-2` (unten 2px)
+  - `border-t-{color}` → `border-b-{color}` (Farbe nach unten)
+- **`.kpi-tile-verified` CSS:** Relief-Kanten invertiert auf OBEN+RECHTS
+  - `border-top-width: 1px !important; border-right-width: 1px !important;` — Breite muss mit `!important` wiederhergestellt werden, da Variant `border-t-0`/`border-r-0` in `@layer utilities` (höhere Priorität als `@layer components`) die Width auf 0px setzt
+  - `border-top-color` + `border-right-color` = `hsl(193 32% 30%)`
+  - `border-bottom-color` + `border-left-color` = gesteuert durch Variant (L-Form First-Check)
+- **Zuständigkeit:** Links + Unten = First-Check (Variant-Farbe). Oben + Rechts = Relief (verified-Farbe).
+
+## ADD-ON 5: Relief-Intensität +20% (2026-02-25)
+
+- **Problem:** Relief-Effekt (eingedrückter Button) bei verified Kacheln wirkt zu flach
+- **Änderungen in `.kpi-tile-verified`:**
+  - `background-color` opacity: `0.6` → `0.72` (+20%)
+  - Dunkler Inset-Shadow: `inset 2px 2px 6px rgba(0,0,0, 0.35)` → `inset 2px 2px 8px rgba(0,0,0, 0.42)` (Spread 6→8, Opacity +20%)
+  - Heller Inset-Shadow: `inset -1px -1px 3px rgba(255,255,255, 0.08)` → `inset -1px -1px 4px rgba(255,255,255, 0.10)` (Spread 3→4, Opacity +25%)
+
+### Betroffene Dateien
+- `src/pages/RunDetail.tsx` — `ml-5` → `ml-auto` (Zeile 741)
+- `src/components/KPITile.tsx` — variantStyles L-Form unten
+- `src/index.css` — `.kpi-tile-verified` Relief top/right + !important widths + Intensität +20%
+
+---
+
+## ADD-ON 6: Text-Overflow-Fix Checkpoint-Meldung (2026-02-25)
+
+- **Problem:** Auf kleinen Bildschirmen sprengt die Checkpoint-Meldung das Layout (kein Truncation, `flex-shrink-0` verhindert Schrumpfen)
+- **Fix:**
+  - Outer-Div: `flex-shrink-0` → `min-w-0` (Flex-Child darf unter Content-Breite schrumpfen)
+  - Text-Span: `whitespace-nowrap` → `truncate` (Tailwind-Shorthand für `overflow-hidden whitespace-nowrap text-ellipsis`)
+- **Ergebnis:** Meldung bleibt rechtsbündig, Text wird bei Platzmangel mit `...` abgeschnitten
+
+## ADD-ON 7: Label-Texte Kachel 1-5 aktualisiert (2026-02-25)
+
+- Kachel 1 Line 3: "Gesamtsumme" → "Rechnungssumme"
+- Kachel 1 Line 2: "Positionen erhalten" → "Positionen eingelesen"
+- Kachel 2 Line 2: "Artikel extrahiert" → "Positionen extrahiert"
+- Kachel 3 Line 2: "Preise checken" → "Preise geprüft"
+- Kachel 4 Line 3: "ART. ohne S/N-PFLICHT" → "ohne S/N-Pflicht"
+- CHECKPOINT_MESSAGES synchron: Labels #2 und #3 angepasst
+
+### Betroffene Dateien
+- `src/pages/RunDetail.tsx` — Overflow-Fix + 5 Texte + 2 CHECKPOINT_MESSAGES Labels
+
 ## Status
 
 In Progress

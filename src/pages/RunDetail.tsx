@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
+import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, CheckCircle2, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AppLayout } from '@/components/AppLayout';
 import { WorkflowStepper } from '@/components/WorkflowStepper';
@@ -18,6 +18,16 @@ import { ExportPanel } from '@/components/run-detail/ExportPanel';
 import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 import { RunLogTab } from '@/components/run-detail/RunLogTab';
+
+// ─── PROJ-29 Add-On 2: Checkpoint-Meldungen ──────────────────────────────────
+const CHECKPOINT_MESSAGES: { id: number; label: string; description: string }[] = [
+  { id: 1, label: 'PDF-Parsing', description: 'Rechnungspositionen und Rechnungssumme erfolgreich geparst.' },
+  { id: 2, label: 'Positionen extrahiert', description: 'Artikelmenge, Artikelzuordnung erfolgreich durchgeführt.' },
+  { id: 3, label: 'Preise geprüft', description: 'Alle Einzel- und Gesamtpreise erfolgreich zugeordnet.' },
+  { id: 4, label: 'Serials geparst', description: 'Alle seriennummernpflichtigen Artikel erfolgreich zugeordnet.' },
+  { id: 5, label: 'Beleg zugeteilt', description: 'Alle Artikel konnten offene Bestellungen erfolgreich zugeteilt werden.' },
+  { id: 6, label: 'Export', description: 'Alle Daten erfolgreich zusammen gestellt, der Download ist verfügbar.' },
+];
 
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
@@ -85,36 +95,87 @@ export default function RunDetail() {
     return seen.size;
   }, [currentRunLines]);
 
-  // 4. isKachel1Verified — Zeilensummen vs. invoiceTotal (Toleranz < 0,10 €)
+  // ─── PROJ-29 Add-On 1: First-Check (Single Source of Truth für variant-Prop + Double-Check-Guard) ───
+  // Exakte Kopie der bisherigen Inline-variant-Expressions. Werden im JSX als variant={kachelXVariant} verwendet.
+  const kachel1Variant = (
+    parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+      ? 'warning' as const
+      : parsedInvoiceResult?.header.qtyValidationStatus === 'ok'
+        ? 'success' as const
+        : 'default' as const
+  );
+  const isKachel1FirstCheck = kachel1Variant === 'success';
+
+  const kachel2Variant = (
+    (currentRun?.stats.noMatchCount ?? 0) > 0
+      ? 'error' as const
+      : (currentRun?.stats.articleMatchedCount ?? 0) > 0
+        ? 'success' as const
+        : 'default' as const
+  );
+  const isKachel2FirstCheck = kachel2Variant === 'success';
+
+  const kachel3Variant = (
+    ((currentRun?.stats.priceMismatchCount ?? 0) > 0 || (currentRun?.stats.priceMissingCount ?? 0) > 0)
+      ? 'warning' as const
+      : (currentRun?.stats.priceOkCount ?? 0) > 0
+        ? 'success' as const
+        : 'default' as const
+  );
+  const isKachel3FirstCheck = kachel3Variant === 'success';
+
+  const kachel4Variant = (
+    currentRun && currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount
+      && currentRun.stats.serialRequiredCount > 0
+      ? 'success' as const
+      : 'default' as const
+  );
+  const isKachel4FirstCheck = kachel4Variant === 'success';
+
+  const kachel5Variant = (
+    (currentRun?.stats.notOrderedCount ?? 0) > 0
+      ? 'warning' as const
+      : (currentRun?.stats.matchedOrders ?? 0) > 0
+        ? 'success' as const
+        : 'default' as const
+  );
+  const isKachel5FirstCheck = kachel5Variant === 'success';
+
+  // 4. isKachel1Verified — First-Check + Zeilensummen vs. invoiceTotal (Toleranz < 0,10 €)
   const isKachel1Verified = useMemo(() => {
+    if (!isKachel1FirstCheck) return false;
     const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
     if (invoiceTotal == null || currentRunLines.length === 0) return false;
     const lineSum = currentRunLines.reduce((s, l) => s + l.totalLineAmount, 0);
     return Math.abs(lineSum - invoiceTotal) < 0.10;
-  }, [currentRunLines, currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal]);
+  }, [isKachel1FirstCheck, currentRunLines, currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal]);
 
-  // 5. isKachel2Verified — Qty-Summe == packagesCount
+  // 5. isKachel2Verified — First-Check + Qty-Summe == packagesCount
   const isKachel2Verified = useMemo(() => {
+    if (!isKachel2FirstCheck) return false;
     const pkg = parsedInvoiceResult?.header.packagesCount ?? currentRun?.invoice.packagesCount;
     if (pkg == null || pkg === 0 || currentRunLines.length === 0) return false;
     return currentRunLines.reduce((s, l) => s + l.qty, 0) === pkg;
-  }, [currentRunLines, parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount]);
+  }, [isKachel2FirstCheck, currentRunLines, parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount]);
 
-  // 6. isKachel3Verified — 0 Preisabweichungen UND mind. 1 OK-Preis
+  // 6. isKachel3Verified — First-Check + 0 Preisabweichungen UND mind. 1 OK-Preis
   const isKachel3Verified = useMemo(() => {
+    if (!isKachel3FirstCheck) return false;
     if (!currentRun) return false;
     return currentRun.stats.priceMismatchCount === 0 && currentRun.stats.priceOkCount > 0;
-  }, [currentRun?.stats.priceMismatchCount, currentRun?.stats.priceOkCount]);
+  }, [isKachel3FirstCheck, currentRun?.stats.priceMismatchCount, currentRun?.stats.priceOkCount]);
 
-  // 7. isKachel4Verified — serialNotRequired + serialRequired == totalQty
+  // 7. isKachel4Verified — First-Check + serialNotRequired + serialRequired == totalQty
   const isKachel4Verified = useMemo(() => {
+    if (!isKachel4FirstCheck) return false;
     if (currentRunLines.length === 0) return false;
     const totalQty = currentRunLines.reduce((s, l) => s + l.qty, 0);
     return (serialNotRequiredArticleCount + serialRequiredQtySum) === totalQty;
-  }, [currentRunLines, serialNotRequiredArticleCount, serialRequiredQtySum]);
+  }, [isKachel4FirstCheck, currentRunLines, serialNotRequiredArticleCount, serialRequiredQtySum]);
 
-  // 8. isKachel5Verified — alle zugeteilt + Format YYYY-XXXXX (auf einzigartigen Nummern)
+  // 8. isKachel5Verified — First-Check + alle zugeteilt + Format YYYY-XXXXX (auf einzigartigen Nummern)
   const isKachel5Verified = useMemo(() => {
+    if (!isKachel5FirstCheck) return false;
     if (!currentRun) return false;
     const totalLines = currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines;
     if (currentRun.stats.matchedOrders !== totalLines) return false;
@@ -141,13 +202,17 @@ export default function RunDetail() {
       if (!validPrefixes.some(p => suffix.startsWith(p))) return false;
     }
     return true;
-  }, [currentRun, currentRunLines, allocatedOrderCount]);
+  }, [isKachel5FirstCheck, currentRun, currentRunLines, allocatedOrderCount]);
+
+  // PROJ-29 Add-On 2: allTilesVerified — Checkpoint 6 (Export-Meldung) feuert wenn alle 5 bestanden
+  const allTilesVerified = isKachel1Verified && isKachel2Verified && isKachel3Verified
+                          && isKachel4Verified && isKachel5Verified;
 
   // 9. SubValue-Strings (Zeile 3) für Kacheln 1, 2, 4, 5
   const kachel1SubValue = useMemo(() => {
     const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
     if (invoiceTotal != null) {
-      return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Gesamtsumme`;
+      return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Rechnungssumme`;
     }
     return parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
       ? 'Fehler: Anzahl stimmt nicht'
@@ -168,7 +233,7 @@ export default function RunDetail() {
 
   const kachel4SubValue = useMemo(() => {
     if (currentRun?.stats.serialRequiredCount === 0) return 'Keine SN-Pflicht';
-    return `${serialNotRequiredArticleCount} ART. ohne S/N-PFLICHT`;
+    return `${serialNotRequiredArticleCount} ohne S/N-Pflicht`;
   }, [currentRun?.stats.serialRequiredCount, serialNotRequiredArticleCount]);
 
   const kachel5SubValue = useMemo(() => {
@@ -187,18 +252,97 @@ export default function RunDetail() {
     return () => setCurrentRun(null);
   }, [decodedRunId, runs, setCurrentRun]);
 
-  const [showEvent, setShowEvent] = useState(false);
+  // ─── PROJ-29 Add-On 2: Parse-Error Toast (nur noch für Fehlerfälle) ─────────
+  const [showParseError, setShowParseError] = useState(false);
   const mountedAtRef = useRef(Date.now());
   useEffect(() => {
     if (!parsedInvoiceResult) return;
-    // KISS Race-Condition Fix: delay the initial toast by 2s so the real parse
-    // success state has time to settle before we show any error toast.
+    const hasErrors = !parsedInvoiceResult.success ||
+      parsedInvoiceResult.warnings.filter(w => w.severity === 'error').length > 0;
+    if (!hasErrors) return; // Erfolgsfall wird durch Checkpoint-Queue abgedeckt
     const age = Date.now() - mountedAtRef.current;
     const delay = age < 2000 ? 2000 - age : 0;
-    const showTimer = setTimeout(() => setShowEvent(true), delay);
-    const hideTimer = setTimeout(() => setShowEvent(false), delay + 4000);
+    const showTimer = setTimeout(() => setShowParseError(true), delay);
+    const hideTimer = setTimeout(() => setShowParseError(false), delay + 4000);
     return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
   }, [parsedInvoiceResult]);
+
+  // ─── PROJ-29 Add-On 2: Checkpoint-Meldungs-Queue ──────────────────────────
+  const [checkpointQueue, setCheckpointQueue] = useState<number[]>([]);
+  const [activeCheckpoint, setActiveCheckpoint] = useState<number | null>(null);
+  const [checkpointFade, setCheckpointFade] = useState<'in' | 'out' | 'hidden'>('hidden');
+  const shownCheckpointsRef = useRef<Set<number>>(new Set());
+
+  // Reset bei Run-Wechsel
+  useEffect(() => {
+    shownCheckpointsRef.current = new Set();
+    setCheckpointQueue([]);
+    setActiveCheckpoint(null);
+    setCheckpointFade('hidden');
+  }, [currentRun?.id]);
+
+  // Watcher-Effects: enqueuen wenn isKachelXVerified true wird
+  useEffect(() => {
+    if (isKachel1Verified && !shownCheckpointsRef.current.has(1)) {
+      shownCheckpointsRef.current.add(1);
+      setCheckpointQueue(prev => [...prev, 1]);
+    }
+  }, [isKachel1Verified]);
+
+  useEffect(() => {
+    if (isKachel2Verified && !shownCheckpointsRef.current.has(2)) {
+      shownCheckpointsRef.current.add(2);
+      setCheckpointQueue(prev => [...prev, 2]);
+    }
+  }, [isKachel2Verified]);
+
+  useEffect(() => {
+    if (isKachel3Verified && !shownCheckpointsRef.current.has(3)) {
+      shownCheckpointsRef.current.add(3);
+      setCheckpointQueue(prev => [...prev, 3]);
+    }
+  }, [isKachel3Verified]);
+
+  useEffect(() => {
+    if (isKachel4Verified && !shownCheckpointsRef.current.has(4)) {
+      shownCheckpointsRef.current.add(4);
+      setCheckpointQueue(prev => [...prev, 4]);
+    }
+  }, [isKachel4Verified]);
+
+  useEffect(() => {
+    if (isKachel5Verified && !shownCheckpointsRef.current.has(5)) {
+      shownCheckpointsRef.current.add(5);
+      setCheckpointQueue(prev => [...prev, 5]);
+    }
+  }, [isKachel5Verified]);
+
+  useEffect(() => {
+    if (allTilesVerified && !shownCheckpointsRef.current.has(6)) {
+      shownCheckpointsRef.current.add(6);
+      setCheckpointQueue(prev => [...prev, 6]);
+    }
+  }, [allTilesVerified]);
+
+  // Effect A — Dequeuer: dequeued nächste Nachricht wenn kein aktiver Checkpoint
+  useEffect(() => {
+    if (activeCheckpoint !== null || checkpointQueue.length === 0) return;
+    const nextId = checkpointQueue[0];
+    setCheckpointQueue(prev => prev.slice(1));
+    setActiveCheckpoint(nextId);
+    setCheckpointFade('in');
+  }, [checkpointQueue, activeCheckpoint]);
+
+  // Effect B — Timer: startet Fade-Out + Clear, reagiert NUR auf activeCheckpoint
+  useEffect(() => {
+    if (activeCheckpoint === null) return;
+    const fadeOutTimer = setTimeout(() => setCheckpointFade('out'), 2000);
+    const clearTimer = setTimeout(() => {
+      setActiveCheckpoint(null);
+      setCheckpointFade('hidden');
+    }, 2300);
+    return () => { clearTimeout(fadeOutTimer); clearTimeout(clearTimer); };
+  }, [activeCheckpoint]);
 
   // Auto-switch tab based on current workflow step
   useEffect(() => {
@@ -399,23 +543,17 @@ export default function RunDetail() {
           {/* Kachel 1: Positionen erhalten — PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines} / ${parsedInvoiceResult?.header.pzCount ?? parsedInvoiceResult?.header.parsedPositionsCount ?? '?'}`}
-            label="Positionen erhalten"
+            label="Positionen eingelesen"
             subValue={kachel1SubValue}
-            variant={
-              parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
-                ? 'warning'
-                : parsedInvoiceResult?.header.qtyValidationStatus === 'ok'
-                  ? 'success'
-                  : 'default'
-            }
+            variant={kachel1Variant}
             isVerified={isKachel1Verified}
           />
           {/* Kachel 2: Artikel extrahiert — PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
-            label="Artikel extrahiert"
+            label="Positionen extrahiert"
             subValue={kachel2SubValue}
-            variant={currentRun.stats.noMatchCount > 0 ? 'error' : currentRun.stats.articleMatchedCount > 0 ? 'success' : 'default'}
+            variant={kachel2Variant}
             onClick={currentRun.stats.noMatchCount > 0 ? () => {
               setIssuesStepFilter('2');
               setActiveTab('issues');
@@ -425,7 +563,7 @@ export default function RunDetail() {
           {/* Kachel 3: Preise checken — PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
-            label="Preise checken"
+            label="Preise geprüft"
             subValue={
               currentRun.stats.priceMismatchCount > 0
                 ? `${currentRun.stats.priceMismatchCount} Abweichungen`
@@ -433,7 +571,7 @@ export default function RunDetail() {
                   ? `${currentRun.stats.priceMissingCount} fehlen`
                   : undefined
             }
-            variant={currentRun.stats.priceMismatchCount > 0 || currentRun.stats.priceMissingCount > 0 ? 'warning' : currentRun.stats.priceOkCount > 0 ? 'success' : 'default'}
+            variant={kachel3Variant}
             isVerified={isKachel3Verified}
           />
           {/* Kachel 4: Serials geparst — PROJ-20 / PROJ-29 */}
@@ -442,7 +580,7 @@ export default function RunDetail() {
             label="Serials geparst"
             icon={<Fingerprint className="w-4 h-4" />}
             subValue={kachel4SubValue}
-            variant={currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount && currentRun.stats.serialRequiredCount > 0 ? 'success' : 'default'}
+            variant={kachel4Variant}
             onClick={currentRun.steps.find(s => s.stepNo === 3)?.issuesCount ? () => {
               setIssuesStepFilter('3');
               setActiveTab('issues');
@@ -454,7 +592,7 @@ export default function RunDetail() {
             value={`${currentRun.stats.matchedOrders}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Beleg zugeteilt"
             subValue={kachel5SubValue}
-            variant={currentRun.stats.notOrderedCount > 0 ? 'warning' : currentRun.stats.matchedOrders > 0 ? 'success' : 'default'}
+            variant={kachel5Variant}
             isVerified={isKachel5Verified}
           />
           {/* Dynamic Next Step Button — PROJ-25: hover unified + pause badge */}
@@ -575,39 +713,47 @@ export default function RunDetail() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Ereignisfeld – rechtsbuendig, auto-dismiss nach 4 s */}
-            {parsedInvoiceResult && showEvent && (
+            {/* PROJ-29 Add-On 2: Ereignisfeld — Parse-Error-Toast (nur bei Fehler) */}
+            {parsedInvoiceResult && showParseError && (
               <div className="flex-none w-1/3 ml-auto">
-                {parsedInvoiceResult.success && parseErrorCount === 0 ? (
-                  <Alert
-                    className="py-2 border-green-500 text-green-800"
-                    style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
-                  >
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <AlertTitle className="text-sm font-semibold leading-tight">
-                      Rechnung erfolgreich ausgelesen
-                    </AlertTitle>
-                    <AlertDescription className="text-xs leading-tight">
-                      {parsedInvoiceResult.lines.length} Positionen ausgelesen
-                    </AlertDescription>
-                  </Alert>
-                ) : (
-                  <Alert
-                    variant="destructive"
-                    className="py-2"
-                    style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
-                  >
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle className="text-sm font-semibold leading-tight">
-                      Parsing fehlgeschlagen
-                    </AlertTitle>
-                    <AlertDescription className="text-xs leading-tight">
-                      Bitte Warnungen pruefen
-                    </AlertDescription>
-                  </Alert>
-                )}
+                <Alert
+                  variant="destructive"
+                  className="py-2"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle className="text-sm font-semibold leading-tight">
+                    Parsing fehlgeschlagen
+                  </AlertTitle>
+                  <AlertDescription className="text-xs leading-tight">
+                    Bitte Warnungen pruefen
+                  </AlertDescription>
+                </Alert>
               </div>
             )}
+
+            {/* PROJ-29 Add-On 2: Checkpoint-Meldungen (Queue, einzeilig, Fade-In/Out) */}
+            {!showParseError && activeCheckpoint !== null && (() => {
+              const msg = CHECKPOINT_MESSAGES.find(m => m.id === activeCheckpoint);
+              if (!msg) return null;
+              return (
+                <div
+                  className="ml-auto min-w-0 transition-opacity duration-300"
+                  style={{ opacity: checkpointFade === 'in' ? 1 : 0 }}
+                >
+                  <div
+                    className="flex items-center gap-2 rounded-lg border border-green-500 text-green-800 h-10 px-4"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
+                  >
+                    <CheckCircle2 className="h-4 w-4 text-slate-900 flex-shrink-0" />
+                    <span className="text-sm leading-tight truncate">
+                      <span className="font-semibold">CHECKFELD &ldquo;{msg.label}&rdquo; erf&uuml;llt:</span>
+                      {' '}{msg.description}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <TabsContent value="overview">

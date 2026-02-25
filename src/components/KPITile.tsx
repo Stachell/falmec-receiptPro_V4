@@ -18,9 +18,9 @@ interface KPITileProps {
 
 const variantStyles = {
   default: 'border-border',
-  success: 'border-l-4 border-l-status-ok border-t-0 border-r-0 border-b-0',
-  warning: 'border-l-4 border-l-status-soft-fail border-t-0 border-r-0 border-b-0',
-  error: 'border-l-4 border-l-status-failed border-t-0 border-r-0 border-b-0',
+  success: 'border-l-4 border-b-2 border-l-status-ok border-b-status-ok border-t-0 border-r-0',
+  warning: 'border-l-4 border-b-2 border-l-status-soft-fail border-b-status-soft-fail border-t-0 border-r-0',
+  error: 'border-l-4 border-b-2 border-l-status-failed border-b-status-failed border-t-0 border-r-0',
 };
 
 export function KPITile({
@@ -36,7 +36,7 @@ export function KPITile({
 }: KPITileProps) {
   return (
     <div
-      className={cn('kpi-tile', !isVerified && variantStyles[variant], isVerified && 'kpi-tile-verified', className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
+      className={cn('kpi-tile', variantStyles[variant], isVerified && 'kpi-tile-verified', className, onClick && 'cursor-pointer hover:opacity-80 transition-opacity')}
       onClick={onClick}
     >
       <div className="flex items-center justify-between">
