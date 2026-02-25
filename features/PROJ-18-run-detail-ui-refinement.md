@@ -376,3 +376,126 @@ const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
 - Top-Button ist im rechten Slot horizontal und vertikal zentriert.
 - Expand/Collapse funktioniert identisch ueber Top- und Footer-Button.
 - Collapsed: Pulse sichtbar; Expanded: statischer Up-Icon-Zustand.
+
+---
+
+## Nachtrag 2026-02-25 - ADD-ON: Artikelliste Body Edge-to-Edge + Header-Alignment
+
+### Job / Location
+- Job: Tabellen-Body in der Artikelliste auf echte Edge-to-Edge-Optik umstellen, bei unveraendertem Header-Padding.
+- Location: `Run-Detail > Artikelliste > Body` in `src/components/run-detail/ItemsTable.tsx`.
+
+### Zielbild
+- Header bleibt seitlich eingerueckt (normales Card-Header-Padding).
+- Tabellenbereich (Headerzeile + Body-Zeilen) laeuft links/rechts bis an den aeusseren Card-Rand.
+- Keine "klebenden" Inhalte am Rand: erste und letzte Spalte bleiben visuell an der Header-Fluchtlinie ausgerichtet.
+
+### Umsetzung (technisch)
+- Container-Migration in `ItemsTable.tsx`:
+  - root von `enterprise-card` auf shadcn `Card` umgestellt.
+  - Toolbar in `CardHeader`.
+  - Tabellenbereich in `CardContent` (`pt-0 pb-0`).
+- Edge-to-Edge-Bleed nur fuer den Tabellenbereich:
+  - Tabellenblock in `div.-mx-6` eingebettet.
+  - Header bleibt unberuehrt ausserhalb dieses Bleed-Wrappers.
+- Sicherheits-Add-on fuer Randabstaende:
+  - Erste Spalte (`DETAILS`) erhaelt `pl-6` (thead + tbody Startkante).
+  - Letzte Spalte (`BESTELLUNG`) erhaelt `pr-6` (thead + tbody Endkante).
+- Scroll-/Sticky-Logik bleibt identisch:
+  - collapsed: `overflow-y-auto overflow-x-auto`
+  - expanded: `overflow-y-hidden overflow-x-auto`
+  - sticky Header weiterhin state-gekoppelt auf den `th`-Zellen.
+
+### Nicht veraendert
+- Keine Aenderung an Store, Parser, Workflow, API oder Datenmodell.
+- Keine Aenderung an Filter-/Suche-/Toggle-Logik.
+- Keine Aenderung an Zeilen-Mapping, Highlighting, Detail-Popup oder Manual-Order-Interaktion.
+
+### Verifikation / Abnahme
+- `Run-Detail > Artikelliste > Body`:
+  - Tabellenbereich ist links/rechts edge-to-edge.
+  - Header bleibt seitlich eingerueckt.
+  - Erste/letzte Spalte kleben nicht am Rand (saubere Fluchtlinie).
+- Expand/Collapse, Sticky-Header und Scroll-Verhalten unveraendert funktionsfaehig.
+- Typecheck: `npx tsc --noEmit` ohne Fehler.
+
+---
+
+## Nachtrag 2026-02-25 - ADD-BUGFIX: Edge-to-Edge Tabellen-Padding Minimierung
+
+### Job / Scope
+- Ziel: Nutzbare Tabellenbreite links/rechts maximieren, ohne Text direkt am Pixelrand kleben zu lassen.
+- Gilt fuer beide Tabellen:
+  - `src/components/run-detail/ItemsTable.tsx` (Artikelliste)
+  - `src/components/run-detail/InvoicePreview.tsx` (RE-Positionen)
+
+### Ursache
+- In der Artikelliste wurde die Edge-to-Edge-Wirkung durch `pl-6`/`pr-6` auf erster/letzter Spalte optisch wieder neutralisiert.
+- In den RE-Positionen war der `-mx-6` Bleed-Wrapper am Tabellenblock noch nicht gesetzt.
+
+### Umsetzung (technisch)
+- Gemeinsame Regel fuer erste/letzte Spalte:
+  - links: `pl-6` -> `pl-2` (thead + tbody)
+  - rechts: `pr-6` -> `pr-2` (thead + tbody)
+- `ItemsTable.tsx`:
+  - bestehender `-mx-6` Wrapper bleibt unveraendert erhalten.
+  - nur Padding-Reduktion auf erster/letzter Spalte.
+- `InvoicePreview.tsx`:
+  - Tabellenblock in `div.-mx-6` eingebettet (Bleed analog Artikelliste).
+  - erste/letzte Spalte auf `pl-2`/`pr-2` gesetzt.
+
+### Nicht veraendert
+- Keine Aenderung an Datenfluss, Store, Parser, APIs oder Workflow-Logik.
+- Keine Aenderung an Spaltenbreiten.
+- Keine Aenderung an Inhalt/Truncate/Zoom der Spalte `BESTELLUNG` (separater Follow-up).
+
+### Verifikation / Abnahme
+- Beide Tabellen nutzen den Body-Raum bis fast an den Rand.
+- Linke/rechte Kante bleibt lesbar durch minimales `pl-2`/`pr-2`.
+- Sticky-Header, Expand/Collapse und Scroll-Verhalten bleiben unveraendert.
+- Typecheck: `npx tsc --noEmit` ohne Fehler.
+
+---
+
+## Nachtrag 2026-02-25 - ADD-ON: Bestellung-Spalte dynamischer Text-Zoom
+
+### Job / Scope
+- Ziel: In der Spalte `BESTELLUNG` den Text dynamisch verkleinern, wenn mehrere Bestellnummern angezeigt werden.
+- Gilt nur fuer:
+  - `Run-Detail > RE-Positionen > Body > Tabelle > Spalte BESTELLUNG`
+  - `Run-Detail > Artikelliste > Body > Tabelle > Spalte BESTELLUNG`
+- Nicht im Scope:
+  - Tabellenkopf `BESTELLUNG` (`th`) bleibt unveraendert
+  - Andere Tabellen/Spalten bleiben unveraendert
+
+### Ausgangslage / Physikalisches Limit
+- Spaltenbreite bleibt fix auf `w-24` (96px).
+- Bei mehreren Bestellnummern (z. B. pipe-getrennt) reicht selbst kleine Schriftbreite nicht immer fuer eine Einzeile.
+- Deshalb muessen Zoom-Stufen fuer 3+ Nummern harte Umbruchregeln enthalten.
+
+### Zoom-Mapping (KISS)
+- `1..2`: `text-xs`
+- `3`: `text-[11px] tracking-tighter break-all leading-none`
+- `4`: `text-[10px] tracking-tighter break-all leading-none`
+- `>=5`: `text-[9px] tracking-tighter break-all leading-none`
+
+### Umsetzung (technisch)
+- Lokale Hilfslogik `getOrderZoomClass(value)` in `ItemsTable.tsx` und `InvoicePreview.tsx`:
+  - zaehlt Nummern ueber `split('|')`, `trim()`, `filter(Boolean)`
+  - liefert Zoom-Klasse gemaess Mapping
+- Anwendung:
+  - `InvoicePreview.tsx`: nur auf den `td`-Inhalt der Spalte `BESTELLUNG`
+  - `ItemsTable.tsx`: nur auf den `td`-Inhalt der Spalte `BESTELLUNG`
+  - `ItemsTable.tsx` expanded-Pfad: Zoom-Klasse wird als Prop in `ManualOrderPopup.tsx` gereicht
+  - `ManualOrderPopup.tsx`: Trigger-Label nutzt `labelClassName` statt festem `text-xs`
+
+### Nicht veraendert
+- Keine Aenderung an Spaltenbreiten (`w-24` bleibt fix).
+- Keine Aenderung an Header-Texten/Head-Zellen.
+- Keine Aenderung an Datenfluss, Store, Parser oder Workflow.
+
+### Verifikation / Abnahme
+- Bei 1-2 Nummern bleibt Standardlesbarkeit (`text-xs`) erhalten.
+- Bei 3-5+ Nummern verkleinert sich Text progressiv; mehrzeilige Faelle umbrechen kontrolliert (`break-all`) bei kompakter Zeilenhoehe (`leading-none`).
+- Tabellenlayout bleibt stabil (keine unkontrollierten Hoehenspruenge der Zeilen).
+- Typecheck: `npx tsc --noEmit` ohne Fehler.
