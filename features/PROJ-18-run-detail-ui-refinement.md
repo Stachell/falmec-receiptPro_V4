@@ -499,3 +499,69 @@ const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
 - Bei 3-5+ Nummern verkleinert sich Text progressiv; mehrzeilige Faelle umbrechen kontrolliert (`break-all`) bei kompakter Zeilenhoehe (`leading-none`).
 - Tabellenlayout bleibt stabil (keine unkontrollierten Hoehenspruenge der Zeilen).
 - Typecheck: `npx tsc --noEmit` ohne Fehler.
+
+---
+
+## Nachtrag 2026-02-25 - ADD-ON: Header-Toggle Icon-Boost + Rahmen (RE-Positionen & Artikelliste)
+
+### Job / Scope
+- Location 1: `Run Detail > RE-Positionen > Body Ueberschrift > Button zum Ein-/Ausklappen`
+- Location 2: `Run Detail > Artikelliste > Body Ueberschrift > Button zum Ein-/Ausklappen`
+- Ziel: Pfeil-Icon im bestehenden Header-Toggle visuell vergroessern, ohne die Button-Groesse selbst zu aendern, und einen duennen grauen Rahmen um den Button legen.
+
+### Umsetzung (technisch)
+- Dateien:
+  - `src/components/run-detail/InvoicePreview.tsx`
+  - `src/components/run-detail/ItemsTable.tsx`
+- Buttongroesse unveraendert belassen: `h-11 w-11`.
+- Button-Rahmen ergaenzt:
+  - `border border-gray-400/70 rounded-md`
+- Icon vergroessert (beide Zustaende `ChevronsUp` / `ChevronsDown`):
+  - `scale-[1.45] transform-gpu`
+- Pulse-Animation im collapsed Zustand bleibt unveraendert aktiv.
+
+### Nicht veraendert
+- Keine Aenderung an Toggle-Logik/State/Handlern.
+- Keine Aenderung an Footer-Toggle-Buttons.
+- Keine Aenderung an Datenfluss, Store, Parser oder Workflow.
+
+### Verifikation / Abnahme
+- Beide Header-Toggle-Buttons zeigen einen duennen grauen Rahmen.
+- Pfeil-Icons sind in beiden Buttons sichtbar vergroessert (ca. 145%), bei gleicher Buttonflaeche.
+- Interaktion (hover, click, expand/collapse) unveraendert.
+- Typecheck: `npx tsc --noEmit` ohne Fehler.
+
+---
+
+## Nachtrag 2026-02-25 - ADD: XML-Vorschau komplett collapsed + Auto-Collapse (120s)
+
+### Job / Location
+- Location: `Run-Detail > Export > Body XML-Vorschau`
+- Ziel:
+  - Body startet immer komplett zugeklappt.
+  - Aufklappen nur ueber vorhandenen Ein-/Ausklapp-Pfeil.
+  - Nach 120 Sekunden im aufgeklappten Zustand klappt der Body automatisch wieder zu.
+  - Innerer Scrollbalken im Body verschwindet komplett.
+
+### Umsetzung (technisch)
+- Datei: `src/components/run-detail/ExportPanel.tsx`
+- Collapse/Expand-Container umgestellt:
+  - collapsed: `max-h-0 overflow-hidden`
+  - expanded: `max-h-[5000px] overflow-hidden`
+  - Transition bleibt: `transition-all duration-500 ease-in-out`
+- XML-`pre` fuer scrollfreie Darstellung angepasst:
+  - `whitespace-pre-wrap break-all`
+- Auto-Collapse-Intervall:
+  - `useEffect` auf `expandedXml`
+  - bei `true`: `setTimeout(..., 120000)` -> `setExpandedXml(false)`
+  - Cleanup via `clearTimeout` bei Toggle/Unmount
+
+### Nicht veraendert
+- Vorhandener Toggle-Button (Chevron) und Event-Handler bleiben bestehen.
+- Keine Aenderung an Export-Logik, Dateiname, Clipboard- oder Download-Funktion.
+
+### Verifikation / Abnahme
+- Initial: XML-Body ist komplett eingeklappt (kein sichtbarer Inhaltsbereich).
+- Nach Klick auf Toggle: XML-Body komplett aufgeklappt, kein innerer Scrollbalken.
+- Nach 120 Sekunden aufgeklappt: automatisches Zuklappen.
+- Typecheck: `npx tsc --noEmit` ohne Fehler.
