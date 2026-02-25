@@ -14,6 +14,7 @@ interface KPITileProps {
   onClick?: () => void;
   /** PROJ-29: True wenn alle Double-Check-Bedingungen erfüllt sind */
   isVerified?: boolean;
+  showVerifiedIcon?: boolean;
 }
 
 const variantStyles = {
@@ -33,6 +34,7 @@ export function KPITile({
   variant = 'default',
   onClick,
   isVerified = false,
+  showVerifiedIcon = true,
 }: KPITileProps) {
   return (
     <div
@@ -63,7 +65,7 @@ export function KPITile({
           <span className={cn('text-xs', isVerified ? 'text-emerald-50' : 'text-muted-foreground')}>
             {subValue}
           </span>
-          {isVerified && (
+          {isVerified && showVerifiedIcon && (
             <CheckCircle2 className="w-[22px] h-[22px] text-[#46cb78] flex-shrink-0" />
           )}
         </div>

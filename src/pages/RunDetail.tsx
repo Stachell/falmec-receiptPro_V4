@@ -231,6 +231,22 @@ export default function RunDetail() {
   }, [parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount,
       currentRun?.stats.expandedLineCount, currentRun?.stats.noMatchCount]);
 
+  const kachel3SubValue = useMemo(() => {
+    if (!currentRun) return undefined;
+    if (
+      isKachel3Verified &&
+      currentRun.stats.priceMismatchCount === 0 &&
+      currentRun.stats.priceMissingCount === 0
+    ) {
+      return '0 Abweichungen';
+    }
+    return currentRun.stats.priceMismatchCount > 0
+      ? `${currentRun.stats.priceMismatchCount} Abweichungen`
+      : currentRun.stats.priceMissingCount > 0
+        ? `${currentRun.stats.priceMissingCount} fehlen`
+        : undefined;
+  }, [isKachel3Verified, currentRun?.stats.priceMismatchCount, currentRun?.stats.priceMissingCount]);
+
   const kachel4SubValue = useMemo(() => {
     if (currentRun?.stats.serialRequiredCount === 0) return 'Keine SN-Pflicht';
     return `${serialNotRequiredArticleCount} ohne S/N-Pflicht`;
@@ -564,13 +580,7 @@ export default function RunDetail() {
           <KPITile
             value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
             label="Preise geprüft"
-            subValue={
-              currentRun.stats.priceMismatchCount > 0
-                ? `${currentRun.stats.priceMismatchCount} Abweichungen`
-                : currentRun.stats.priceMissingCount > 0
-                  ? `${currentRun.stats.priceMissingCount} fehlen`
-                  : undefined
-            }
+            subValue={kachel3SubValue}
             variant={kachel3Variant}
             isVerified={isKachel3Verified}
           />
