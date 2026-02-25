@@ -324,6 +324,31 @@ Der alte Consumer-Effect hatte `[checkpointQueue, activeCheckpoint]` als Depende
 ### Betroffene Dateien
 - `src/pages/RunDetail.tsx` — Overflow-Fix + 5 Texte + 2 CHECKPOINT_MESSAGES Labels
 
+## ADD-ON 8: Kachel 3 Zeile-3 im Verified-Zustand sichtbar (2026-02-25)
+
+- **Problem:** Kachel 3 verlor im Erfolgsfall die 3. Zeile inkl. Verified-Darstellung, weil `subValue` bei `0` Abweichungen `undefined` war und die Zeile nur bei vorhandenem `subValue` gerendert wird.
+- **Fix in RunDetail:** Dediziertes `kachel3SubValue` eingeführt:
+  - Wenn `isKachel3Verified === true` und `priceMismatchCount === 0` und `priceMissingCount === 0` → `✔️- 0 Abweichungen`
+  - Sonst unverändert: `{x} Abweichungen` / `{x} fehlen` / `undefined`
+- **Fix in KPITile:** Neues optionales Prop `showVerifiedIcon?: boolean` (Default `true`).
+  - Für Kachel 3 wird `showVerifiedIcon={false}` gesetzt, damit bei Text `✔️- 0 Abweichungen` kein doppeltes Prüf-Icon erscheint.
+  - Kachel 1,2,4,5 bleiben unverändert (Default `true`).
+- **Wichtig:** Keine Änderungen an First-Check-/Variant-Logik (Timeline-relevant), keine Änderungen an Queue/Step-Guards, **Kachel 6 nicht betroffen**.
+
+### Betroffene Dateien
+- `src/pages/RunDetail.tsx` — `kachel3SubValue` + Kachel-3-Prop `showVerifiedIcon={false}`
+- `src/components/KPITile.tsx` — neues optionales Prop `showVerifiedIcon`
+
+## ADD-ON 9: Kachel 3 Zeile-3 Flucht + Icon-Angleichung (2026-02-25)
+
+- **Problem:** In Kachel 3 war Zeile 3 optisch nicht in derselben Flucht wie bei Kachel 1/2/4/5, da das Haken-Symbol als Teil des Textes gerendert wurde.
+- **Fix:** Verified-Text in Kachel 3 von `✔️- 0 Abweichungen` auf `0 Abweichungen` umgestellt und wieder das standardisierte KPITile-Icon rechts verwendet.
+- **Ergebnis:** Gleiche Zeile-3-Geometrie, gleiche Icon-Position/Größe wie bei den anderen Kacheln.
+- **Wichtig:** Keine Änderung an First-Check-/Variant-/Timeline-Logik, Kachel 6 unverändert.
+
+### Betroffene Dateien
+- `src/pages/RunDetail.tsx` — Kachel-3-subValue angepasst, `showVerifiedIcon={false}` entfernt
+
 ## Status
 
 In Progress
