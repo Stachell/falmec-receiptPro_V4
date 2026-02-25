@@ -74,8 +74,11 @@ export function InvoicePreview({
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
+  const bestellungWidthClass = 'w-24';
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
+  const toggleAriaLabel = expandedPositions ? 'Einklappen' : 'Ausklappen';
+  const handleToggleExpanded = () => setExpandedPositions((e) => !e);
 
   // PROJ-20: Aggregated status from expanded lines per position
   const { invoiceLines: allInvoiceLines, currentRun } = useRunStore();
@@ -204,9 +207,28 @@ export function InvoicePreview({
               className="pl-10 h-8 text-sm bg-surface-elevated"
             />
           </div>
-          <div className="ml-auto text-right">
-            <CardTitle>Rechnungspositionen</CardTitle>
-            <CardDescription>/invoicelines ({positions.length})</CardDescription>
+          <div className="ml-auto flex items-stretch">
+            <div className="text-right">
+              <CardTitle>Rechnungspositionen</CardTitle>
+              <CardDescription>/invoicelines ({positions.length})</CardDescription>
+            </div>
+            {positions.length > 0 && (
+              <div className={`${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground/50 hover:text-muted-foreground"
+                  onClick={handleToggleExpanded}
+                  aria-label={toggleAriaLabel}
+                >
+                  {expandedPositions ? (
+                    <ChevronsUp className="w-5 h-5 text-muted-foreground/85" />
+                  ) : (
+                    <ChevronsDown className="w-5 h-5 animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="pt-0 pb-0">
@@ -246,7 +268,7 @@ export function InvoicePreview({
                       <TableHead className={`text-center w-[67px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
                       <TableHead className={`text-right w-[119px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
                       <TableHead className={`w-[61px] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SERIAL</TableHead>
-                      <TableHead className={`w-24 ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
+                      <TableHead className={`${bestellungWidthClass} ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLUNG</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -396,8 +418,8 @@ export function InvoicePreview({
               >
                 <button
                   className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
-                  onClick={() => setExpandedPositions((e) => !e)}
-                  aria-label={expandedPositions ? 'Einklappen' : 'Ausklappen'}
+                  onClick={handleToggleExpanded}
+                  aria-label={toggleAriaLabel}
                 >
                   {expandedPositions ? (
                     <ChevronsUp className="w-7 h-7 text-muted-foreground/85" />
