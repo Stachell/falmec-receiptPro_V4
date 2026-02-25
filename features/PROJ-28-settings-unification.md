@@ -161,3 +161,34 @@ Keine neuen Packages noetig. Alles wird mit bestehenden Tools gebaut:
 - [x] Phase C — Override-Modal (`src/components/OverrideEditorModal.tsx` neu erstellt; shadcn Dialog, Sektion 1 Alias-CSV, Sektion 2 benannte Regex-Felder mit Live-Validierung, wiederverwendbar fuer Step 2 + Step 4)
 - [x] Phase D — SettingsPopup Unified Layout (alle 4 Step-Tabs unifiziert: DiagnosticsBlock [D] in allen Tabs, [C] Override-Toggle + Anpassen-Button in Matcher + OrderMapper, [F] Block-Toggles in Matcher + OrderMapper, Schema-Display entfernt, Inline-Alias-Inputs nach Modal migriert, `latestDiagnostics` ersetzt `lastOrderParserDiagnostics`)
 - [x] Phase E — Diagnose-Stubs
+
+---
+
+## ADD-ON: RE-Positionen Header-Separator + Top-Right Expand/Collapse Toggle
+
+### Zielbild
+- Im Header-Bereich von `Run-Detail > RE-Positionen > Body` wird der rechte Cluster wie in der Artikelliste aufgebaut:
+  1. linker Teil: bestehender Textblock (rechtsbuendig, unveraendert)
+  2. rechter Teil: neuer Separator-Slot als unsichtbarer Layoutanker
+- In diesem Separator-Slot sitzt ein kompakter Top-Toggle (icon-only), der denselben Expand/Collapse-State wie der Footer-Toggle steuert.
+- Bei leerer Liste (`positions.length === 0`) wird kein Top-Toggle angezeigt.
+
+### Technische Umsetzung
+- Datei: `src/components/run-detail/InvoicePreview.tsx`
+- `BESTELLUNG`-Spaltenbreite und Header-Slot teilen sich eine gemeinsame Breitenquelle:
+  - `const bestellungWidthClass = 'w-24'`
+- Header-Layout rechts:
+  - Container: `ml-auto flex items-stretch`
+  - Slot: `${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`
+- Top-Toggle:
+  - `Button` mit `variant="ghost"` + `size="icon"`
+  - collapsed: `ChevronsDown` mit Pulse
+  - expanded: `ChevronsUp`
+  - gleicher State-Handler wie Footer (`expandedPositions` / `setExpandedPositions`)
+
+### Sicherheitsregel
+- Kein Top-Toggle und kein zusaetzlicher Separator-Slot im Empty-State (`positions.length === 0`).
+
+### Scope / Non-Goals
+- Keine Aenderung an Store, Parser, Workflow oder API.
+- Rein visuelles/strukturelles UI-Refinement in `InvoicePreview`.

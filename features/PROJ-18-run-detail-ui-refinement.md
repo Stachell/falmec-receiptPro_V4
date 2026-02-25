@@ -338,3 +338,41 @@ const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
 - Bei positiver Rueckmeldung gleiche Sticky-Kopplung auf:
   1. Run-Detail > Artikelliste > Body > Ueberschriftenzeile
   2. Run-Detail > Lagerort > Body "Lagerort-Details" > Ueberschriftenzeile
+
+---
+
+## Nachtrag 2026-02-25 - ADD: Artikelliste Header-Separator + Top-Right Toggle
+
+### Job / Location
+- Job 1: Separator-Bereich in der Body-Ueberschrift erzeugen.
+- Job 2: Expand/Collapse-Button aus dem Footer als zweite Trigger-Position in die Ueberschrift kopieren.
+- Location: `Run-Detail > Artikelliste > Body > Ueberschrift Body` in `src/components/run-detail/ItemsTable.tsx`.
+
+### Zielbild
+- Die Texte `Artikel Liste` und `/article list (counter)` bleiben inhaltlich unveraendert.
+- Rechts daneben existiert ein unsichtbarer Separator-Slot mit derselben Breite wie die Spalte `BESTELLUNG`.
+- In diesem Slot sitzt ein kompakter Icon-Button (ohne Text), der denselben Expand/Collapse-State wie der Footer-Button toggelt.
+- Footer-Button bleibt weiterhin aktiv; beide Trigger arbeiten synchron auf demselben State.
+
+### Umsetzung (technisch)
+- Gemeinsame Breitenquelle fuer `BESTELLUNG`-Spalte und Header-Slot ueber eine Klassen-Konstante (`w-24`).
+- Rechter Header-Cluster in zwei Bereiche getrennt:
+  1. Textblock (rechtsbuendig)
+  2. Separator-Slot (`border-l border-transparent`, visuell unsichtbar)
+- Neuer Top-Button im Separator-Slot:
+  - `Button` mit `variant="ghost"` und `size="icon"` (kompakt, icon-only)
+  - collapsed: `ChevronsDown` + Pulse
+  - expanded: `ChevronsUp`
+  - gleicher Toggle-State wie Footer (`expanded` via `setExpanded`).
+- Sichtbarkeit analog Footer nur bei vorhandenen Zeilen (`filteredLines.length > 0`).
+
+### Nicht veraendert
+- Keine Aenderung an Store-/Parser-/Workflow-Logik.
+- Keine Aenderung an APIs, Types, Datenfluss oder Footer-Toggle-Verhalten.
+- Keine Textaenderung an `Artikel Liste` und `/article list (counter)`.
+
+### Verifikation / Abnahme
+- Header-Texte unveraendert, aber vor dem neuen Separator-Slot positioniert.
+- Top-Button ist im rechten Slot horizontal und vertikal zentriert.
+- Expand/Collapse funktioniert identisch ueber Top- und Footer-Button.
+- Collapsed: Pulse sichtbar; Expanded: statischer Up-Icon-Zustand.
