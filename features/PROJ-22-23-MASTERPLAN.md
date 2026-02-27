@@ -572,3 +572,42 @@ Frontend-Agent: B1+B4 ──> B2 ──> B3+B5 ──> A5(UI)
 - **Nach A1 abgeschlossen:** Frontend kann B2 starten (braucht `isExpanded`)
 - **Nach A2 abgeschlossen:** Frontend kann B5 starten (braucht Persistenz-API)
 - **Nach A3+A4 abgeschlossen:** Frontend kann A5 UI starten (braucht OrderPool + Expansion)
+
+---
+
+## Nachtrag 2026-02-26 - ADD-ON: RE-Details Popup + Pending Platzhalter
+
+### Zuordnung
+- Projekt: `PROJ-22` (Phase `B3 Pop-ups`)
+- Grund: Erweiterung/Verfeinerung der Detail-Popups im Run-Detail (RE-Positionen + Artikelliste)
+
+### Problemstellung (Ist)
+- In `Run-Detail > RE-Positionen > Tabelle > DETAILS` hat das Info-Icon zur `Artikelliste` umgeschaltet statt ein Detail-Popup zu oeffnen.
+- In beiden Detail-Popups wurden fehlende Werte als `--` angezeigt; gewuenscht ist die bestehende Pending-Sanduhr-Visualisierung.
+
+### Umsetzung (Soll -> Implementiert)
+1. RE-Positionen: Info-Icon oeffnet jetzt ein eigenes Popup:
+   - Titel: `Artikeldetails Rechnungszeile`
+   - Datenverknuepfung ueber `positionIndex` (`parsedPositions` + run-spezifische `invoiceLines`)
+2. Neues RE-Detailpopup mit read-only Feldern:
+   - inkl. `Artikelliste [_sum=...]` fuer Summen-/Kontextanzeige auf Rechnungspositions-Ebene
+   - Match-/Preis-/Order-/Serial-Infos positionsbezogen zusammengefuehrt
+3. Platzhalter-Standardisierung:
+   - In `DetailPopup` (Artikelliste) und `InvoiceLineDetailPopup` (RE-Positionen) wurden `--`-Fallbacks entfernt
+   - Fehlende Werte zeigen jetzt die vorhandene Pending-Sanduhr (`PendingHourglassIcon`) inkl. Kreis-Hintergrund + Puls-Overlay
+
+### Geaenderte Dateien
+- `src/components/run-detail/InvoicePreview.tsx`
+  - Info-Icon: Tab-Switch -> Popup-Open
+  - Mapping: `linesByPosition` (positionIndex-basierte Datenzusammenfuehrung)
+- `src/components/run-detail/InvoiceLineDetailPopup.tsx` (neu)
+  - neues read-only Popup fuer RE-Positionen
+- `src/components/run-detail/DetailPopup.tsx`
+  - Placeholder-Fallback von `--` auf `PendingHourglassIcon`
+
+### Verifikation
+- Build erfolgreich: `npm run build`
+- Manuelle UI-Pruefpunkte:
+  1. RE-Positionen -> Details-Icon oeffnet Popup statt Tab-Wechsel
+  2. Leere Felder im RE-Popup zeigen Sanduhr statt `--`
+  3. Leere Felder im Artikellisten-Popup zeigen Sanduhr statt `--`

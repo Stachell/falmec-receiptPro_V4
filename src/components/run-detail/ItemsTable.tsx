@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Info, Barcode, Type, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { Search, Filter, Info, Barcode, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,9 @@ import { StatusCheckbox } from './StatusCheckbox';
 import { PriceCell } from './PriceCell';
 import { DetailPopup } from './DetailPopup';
 import { ManualOrderPopup } from './ManualOrderPopup';
+import { getOrderReasonStyle } from './orderReasonStyle';
+import { SerialStatusDot } from './SerialStatusDot';
+import { cn } from '@/lib/utils';
 import { InvoiceLine } from '@/types';
 import {
   Tooltip,
@@ -43,7 +46,10 @@ export function ItemsTable() {
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
-  const bestellungWidthClass = 'w-24';
+  const bestellungWidthClass = 'w-[106px]';
+
+  const step4 = currentRun?.steps.find(s => s.stepNo === 4);
+  const isStep4Done = step4?.status === 'ok' || step4?.status === 'soft-fail';
 
   useEffect(() => {
     if (!scrollToLineId) return;
@@ -156,20 +162,29 @@ export function ItemsTable() {
             </SelectContent>
           </Select>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {filteredLines.length} von {invoiceLines.length} Positionen
-        </div>
         <div className="ml-auto flex items-stretch">
-          <div className="text-right">
-            <h3 className="text-2xl font-semibold leading-none tracking-tight">
-              Artikel Liste
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              /article list ({packageCount})
-            </p>
+          <div className="flex items-center">
+            <div
+              className="mr-[10px] flex items-center"
+              title={isStep4Done ? 'Artikelliste zur Bearbeitung freigegeben' : 'Gesperrt/locked: Artikelliste wird nach Abschluss von Schritt 4 ausgerollt und ist ab dann verfügbar.'}
+            >
+              {isStep4Done ? (
+                <span className="flex items-center justify-center leading-none select-none" style={{ fontSize: '2.156rem' }}>🔓</span>
+              ) : (
+                <span className="flex items-center justify-center leading-none select-none" style={{ fontSize: '2.156rem' }}>🔒</span>
+              )}
+            </div>
+            <div className="text-right">
+              <h3 className="text-2xl font-semibold leading-none tracking-tight">
+                Artikel Liste
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                /article list ({packageCount})
+              </p>
+            </div>
           </div>
-          <div className={`${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`}>
-            {filteredLines.length > 0 && (
+          {filteredLines.length > 0 && (
+            <div className={`${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`}>
               <Button
                 variant="ghost"
                 size="icon"
@@ -183,8 +198,8 @@ export function ItemsTable() {
                   <ChevronsDown className="h-full w-full scale-[1.45] transform-gpu animate-[pulse_1.1s_ease-in-out_infinite] text-muted-foreground/75" />
                 )}
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </CardHeader>
 
@@ -247,9 +262,6 @@ export function ItemsTable() {
                           {line.matchStatus === 'ean-only' && (
                             <Barcode className="w-3 h-3 text-orange-400 flex-shrink-0" title="EAN-Match" />
                           )}
-                          {(line.matchStatus === 'code-it-only' || line.matchStatus === 'full-match') && (
-                            <Type className="w-3 h-3 text-green-500 flex-shrink-0" title="ArtNo-Match" />
-                          )}
                           <span className="truncate">
                             {line.falmecArticleNo ?? <span className="text-muted-foreground">--</span>}
                           </span>
@@ -303,20 +315,9 @@ export function ItemsTable() {
                           <TooltipProvider delayDuration={200}>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span
-                                  className="inline-block w-3 h-3 rounded-sm flex-shrink-0 border"
-                                  style={{
-                                    backgroundColor: !line.serialRequired
-                                      ? '#000000'
-                                      : line.serialNumber
-                                        ? '#22C55E'
-                                        : '#E5E7EB',
-                                    borderColor: !line.serialRequired
-                                      ? '#000000'
-                                      : line.serialNumber
-                                        ? '#16A34A'
-                                        : '#9CA3AF',
-                                  }}
+                                <SerialStatusDot
+                                  serialRequired={line.serialRequired}
+                                  serialAssigned={!!line.serialNumber}
                                 />
                               </TooltipTrigger>
                               <TooltipContent>
@@ -334,15 +335,23 @@ export function ItemsTable() {
                         </div>
                       </TableCell>
 
-                      <TableCell className="pr-2">
+                      <TableCell className="pr-0 overflow-hidden">
                         {(() => {
                           const orderZoomClass = getOrderZoomClass(line.orderNumberAssigned);
+                          const reasonStyle = getOrderReasonStyle(line.orderAssignmentReason);
                           return currentRun?.isExpanded ? (
                             <ManualOrderPopup line={line} labelClassName={orderZoomClass} />
-                          ) : line.orderNumberAssigned ? (
-                            <span className={`font-mono ${orderZoomClass}`}>{line.orderNumberAssigned}</span>
                           ) : (
-                            <span className="text-xs text-status-soft-fail">--</span>
+                            <span
+                              className={cn(
+                                reasonStyle.pillClass,
+                                'block w-full truncate text-right',
+                                orderZoomClass
+                              )}
+                              title={reasonStyle.label}
+                            >
+                              {line.orderNumberAssigned ?? '--'}
+                            </span>
                           );
                         })()}
                       </TableCell>

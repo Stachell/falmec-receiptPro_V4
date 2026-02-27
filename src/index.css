@@ -263,4 +263,17 @@
   .text-balance {
     text-wrap: balance;
   }
+
+  @keyframes pending-hourglass-pulse {
+    0%, 100% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .pending-hourglass-overlay {
+    animation: pending-hourglass-pulse 1.2s ease-in-out infinite;
+  }
 }

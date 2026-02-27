@@ -38,7 +38,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save } from 'lucide-react';
+import { useExportConfigStore } from '@/store/exportConfigStore';
 import { toast } from 'sonner';
 import { getAllParsers } from '@/services/parsers';
 import { parserRegistryService, type ParserRegistryModule } from '@/services/parserRegistryService';
@@ -71,7 +72,7 @@ interface SettingsPopupProps {
   };
 }
 
-type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'overview';
+type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview';
 
 /** Hover-style helper button (matching app design) */
 function FooterButton({
@@ -157,6 +158,100 @@ function DiagnosticsBlock({ diag }: { diag: StepDiagnostics | undefined }) {
         <p className="text-xs text-muted-foreground">Noch keine Diagnose vorhanden.</p>
       )}
     </div>
+  );
+}
+
+/** PROJ-35: Export column order configuration tab */
+function ExportConfigTab() {
+  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics } = useExportConfigStore();
+
+  return (
+    <TabsContent value="export" className="mt-0 space-y-3">
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Export-Spaltenreihenfolge</div>
+      <p className="text-xs text-muted-foreground">
+        Felder in die gewuenschte Reihenfolge bringen.
+      </p>
+
+      {/* Sortierbare Liste */}
+      <div className="space-y-1 border-t border-border pt-3">
+        {columnOrder.map((col, index) => (
+          <div
+            key={col.columnKey}
+            className="bg-white rounded-md border border-border px-3 py-1.5 flex items-center gap-3"
+          >
+            <GripVertical className="w-4 h-4 text-muted-foreground/40 flex-shrink-0" />
+            <span className="text-muted-foreground font-mono text-sm w-6 text-right flex-shrink-0">
+              {col.position}.
+            </span>
+            <span className="text-sm flex-1">{col.label}</span>
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => moveColumn(index, index - 1)}
+              className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+              aria-label={`${col.label} nach oben`}
+            >
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              disabled={index === columnOrder.length - 1}
+              onClick={() => moveColumn(index, index + 1)}
+              className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+              aria-label={`${col.label} nach unten`}
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Diagnose (letzter Export) */}
+      <div className="border-t border-border pt-3">
+        <Label className="text-xs font-semibold">Diagnose (letzter Export)</Label>
+        {lastDiagnostics ? (
+          <div className="mt-1 space-y-0.5">
+            <p className="text-xs text-muted-foreground">
+              Zeitpunkt: <span className="font-semibold">{new Date(lastDiagnostics.timestamp).toLocaleString('de-DE')}</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Datei: <span className="font-semibold font-mono">{lastDiagnostics.fileName}</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Zeilen: <span className="font-semibold">{lastDiagnostics.lineCount}</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Status:{' '}
+              <span className={`font-semibold ${lastDiagnostics.status === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+                {lastDiagnostics.status === 'success' ? 'Erfolg' : 'Fehler'}
+              </span>
+              {lastDiagnostics.message && (
+                <span className="ml-1">— {lastDiagnostics.message}</span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-1">Noch kein Export durchgefuehrt.</p>
+        )}
+      </div>
+
+      {/* Aktionsleiste */}
+      <div className="flex items-center gap-3 border-t border-border pt-3">
+        {isDirty && (
+          <FooterButton onClick={saveConfig}>
+            <Save className="w-4 h-4" />
+            Speichern
+          </FooterButton>
+        )}
+        <button
+          type="button"
+          onClick={resetToDefault}
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+        >
+          Zuruecksetzen
+        </button>
+      </div>
+    </TabsContent>
   );
 }
 
@@ -396,11 +491,12 @@ export function SettingsPopup({
           </DialogHeader>
 
           {/* PROJ-22 B4: Vertikales Tab-Menu */}
+          {/* PROJ-35: feste Hoehe gegen Layout-Shift beim Tab-Wechsel */}
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as SettingsTabKey)}
             orientation="vertical"
-            className="flex gap-4 mt-2"
+            className="flex gap-4 mt-2 h-[65vh] max-h-[800px]"
           >
             <TabsList
               className="flex flex-col h-auto items-start justify-start gap-0.5 p-1 w-44 shrink-0"
@@ -411,10 +507,11 @@ export function SettingsPopup({
               <TabsTrigger value="matcher"     className="w-full justify-start text-left text-sm px-3 py-2">Artikel extrahieren</TabsTrigger>
               <TabsTrigger value="serial"      className="w-full justify-start text-left text-sm px-3 py-2">Serial parsen</TabsTrigger>
               <TabsTrigger value="ordermapper" className="w-full justify-start text-left text-sm px-3 py-2">Bestellung mappen</TabsTrigger>
+              <TabsTrigger value="export"      className="w-full justify-start text-left text-sm px-3 py-2">Export</TabsTrigger>
               <TabsTrigger value="overview"    className="w-full justify-start text-left text-sm px-3 py-2">Speicher/Cache</TabsTrigger>
             </TabsList>
 
-            <div className="flex-1 min-h-[280px]">
+            <div className="flex-1 overflow-y-auto">
               {/* Tab 1: Speicher/Cache */}
               <TabsContent value="overview" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Speicher/Cache</div>
@@ -825,6 +922,9 @@ export function SettingsPopup({
                 </div>
 
               </TabsContent>
+
+              {/* PROJ-35: Tab 7 — Export-Konfiguration */}
+              <ExportConfigTab />
 
             </div>
           </Tabs>

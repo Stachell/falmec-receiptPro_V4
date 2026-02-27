@@ -3,7 +3,9 @@ import { useClickLock } from '@/hooks/useClickLock';
 import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { format } from 'date-fns';
 import { Run } from '@/types';
+import type { ExportColumnKey } from '@/types';
 import { useRunStore } from '@/store/runStore';
+import { useExportConfigStore } from '@/store/exportConfigStore';
 import { Button } from '@/components/ui/button';
 
 interface ExportPanelProps {
@@ -35,7 +37,31 @@ export function ExportPanel({ run }: ExportPanelProps) {
 
   const exportFileName = `Fattura-${run.invoice.fattura.replace(/[^a-zA-Z0-9]/g, '')}_${format(new Date(), 'dd-MM-yyyy')}-${run.config.eingangsart}.xml`;
 
-  // Generate mock XML preview
+  // PROJ-35: Read configured column order
+  const columnOrder = useExportConfigStore((s) => s.columnOrder);
+
+  /** Map a columnKey to its XML tag name + value for a given line */
+  const resolveColumn = (key: ExportColumnKey, line: typeof invoiceLines[number]): { tag: string; value: string } => {
+    switch (key) {
+      case 'manufacturerArticleNo': return { tag: 'ManufacturerArticleNo', value: line.manufacturerArticleNo };
+      case 'ean':                   return { tag: 'EAN', value: line.ean };
+      case 'falmecArticleNo':       return { tag: 'FalmecArticleNo', value: line.falmecArticleNo || '' };
+      case 'descriptionDE':         return { tag: 'DescriptionDE', value: line.descriptionDE || '' };
+      case 'descriptionIT':         return { tag: 'DescriptionIT', value: line.descriptionIT };
+      case 'qty':                   return { tag: 'Quantity', value: String(line.qty) };
+      case 'unitPriceInvoice':      return { tag: 'UnitPrice', value: String(line.unitPriceInvoice) };
+      case 'unitPriceOrder':        return { tag: 'UnitPriceOrder', value: String(line.unitPriceSage ?? '') };
+      case 'totalPrice':            return { tag: 'TotalPrice', value: String(line.totalLineAmount) };
+      case 'orderNumberAssigned':   return { tag: 'OrderNumber', value: line.orderNumberAssigned || '' };
+      case 'orderDate':             return { tag: 'OrderDate', value: line.orderYear ? String(line.orderYear) : '' };
+      case 'serialNumber':          return { tag: 'SerialNumber', value: line.serialNumber || '' };
+      case 'storageLocation':       return { tag: 'StorageLocation', value: line.storageLocation || '' };
+      case 'eingangsart':           return { tag: 'Eingangsart', value: run.config.eingangsart };
+      case 'fattura':               return { tag: 'Fattura', value: run.invoice.fattura };
+    }
+  };
+
+  // Generate XML preview with configured column order
   const xmlPreview = `<?xml version="1.0" encoding="UTF-8"?>
 <Sage100Import>
   <Header>
@@ -46,17 +72,13 @@ export function ExportPanel({ run }: ExportPanelProps) {
     <CreatedAt>${new Date().toISOString()}</CreatedAt>
   </Header>
   <Items>
-${invoiceLines.map(line => `    <Item>
-      <ManufacturerArticleNo>${line.manufacturerArticleNo}</ManufacturerArticleNo>
-      <EAN>${line.ean}</EAN>
-      <FalmecArticleNo>${line.falmecArticleNo || ''}</FalmecArticleNo>
-      <Description>${line.descriptionDE || line.descriptionIT}</Description>
-      <Quantity>${line.qty}</Quantity>
-      <UnitPrice>${line.unitPriceInvoice}</UnitPrice>
-      <OrderNumber>${line.orderNumberAssigned || ''}</OrderNumber>
-      <SerialNumber>${line.serialNumber || ''}</SerialNumber>
-      <StorageLocation>${line.storageLocation || ''}</StorageLocation>
-    </Item>`).join('\n')}
+${invoiceLines.map(line => {
+    const fields = columnOrder.map(col => {
+      const { tag, value } = resolveColumn(col.columnKey, line);
+      return `      <${tag}>${value}</${tag}>`;
+    }).join('\n');
+    return `    <Item>\n${fields}\n    </Item>`;
+  }).join('\n')}
   </Items>
 </Sage100Import>`;
 
@@ -75,6 +97,15 @@ ${invoiceLines.map(line => `    <Item>
     a.download = exportFileName;
     a.click();
     URL.revokeObjectURL(url);
+
+    // PROJ-35: Write export diagnostics
+    useExportConfigStore.getState().setLastDiagnostics({
+      timestamp: new Date().toISOString(),
+      fileName: exportFileName,
+      lineCount: invoiceLines.length,
+      status: 'success',
+    });
+
     setTimeout(() => setDownloading(false), 1000);
   };
 

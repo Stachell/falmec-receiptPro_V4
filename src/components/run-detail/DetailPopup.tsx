@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { StatusCheckbox } from './StatusCheckbox';
+import { PendingHourglassIcon } from './PendingHourglassIcon';
 
 interface DetailPopupProps {
   line: InvoiceLine;
@@ -31,8 +32,8 @@ interface DetailPopupProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const formatPrice = (price: number | null | undefined): string => {
-  if (price == null) return '--';
+const formatPrice = (price: number | null | undefined): string | null => {
+  if (price == null) return null;
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(price);
 };
 
@@ -66,7 +67,7 @@ const FIELDS: FieldRow[] = [
   { label: 'Preis (Final)',          value: l => formatPrice(l.unitPriceFinal) },
   { label: 'Bestellnummer',         value: l => l.orderNumberAssigned,    mono: true },
   // S/N row is rendered separately below (dropdown when >1)
-  { label: 'Seriennummer',          value: (_l, selectedSN) => selectedSN ?? '--', mono: true, isSnRow: true },
+  { label: 'Seriennummer',          value: (_l, selectedSN) => selectedSN ?? null, mono: true, isSnRow: true },
   { label: 'Lagerort',              value: l => l.storageLocation,        mono: true },
   {
     label: 'Match-Status',
@@ -91,7 +92,7 @@ const FIELDS: FieldRow[] = [
 export function DetailPopup({ line, open, onOpenChange }: DetailPopupProps) {
   // PROJ-22 B3: S/N Dropdown state — only shown when serialNumbers.length > 1
   const hasMultipleSN = (line.serialNumbers?.length ?? 0) > 1;
-  const defaultSN = line.serialNumbers?.[0] ?? line.serialNumber ?? '--';
+  const defaultSN = line.serialNumbers?.[0] ?? line.serialNumber ?? '';
   const [selectedSN, setSelectedSN] = useState<string>(defaultSN);
 
   return (
@@ -132,7 +133,9 @@ export function DetailPopup({ line, open, onOpenChange }: DetailPopupProps) {
             }
 
             const rendered = value(line, selectedSN);
-            const display = rendered == null || rendered === '' ? '--' : rendered;
+            const display = rendered == null || rendered === ''
+              ? <PendingHourglassIcon sizeClass="w-5 h-5 text-[14px]" withCircle />
+              : rendered;
             return (
               <div key={label}>
                 <dt className="text-xs" style={{ color: '#93b5bc' }}>{label}</dt>

@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { InvoiceLine, PriceCheckStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { badgeVariants } from '@/components/ui/badge';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
+import { PendingHourglassIcon } from './PendingHourglassIcon';
 
 interface PriceCellProps {
   line: InvoiceLine;
@@ -15,12 +18,12 @@ interface PriceCellProps {
   readOnly?: boolean;
 }
 
-const BADGE_CONFIG: Record<PriceCheckStatus, { text: string; className: string }> = {
-  pending:  { text: 'folgt',     className: 'bg-amber-100 text-amber-700' },
-  ok:       { text: 'OK',        className: 'bg-green-100 text-green-700' },
-  mismatch: { text: 'check',     className: 'bg-yellow-100 text-yellow-700' },
-  missing:  { text: 'fehlt',     className: 'bg-red-100 text-red-700' },
-  custom:   { text: 'angepasst', className: 'bg-blue-100 text-blue-700' },
+export const BADGE_CONFIG: Record<PriceCheckStatus, { label: string; className: string; display?: string }> = {
+  pending:  { label: 'folgt', className: 'bg-[#968C8C] text-white' },
+  ok:       { label: 'OK', className: 'bg-green-100 text-green-700', display: 'OK' },
+  mismatch: { label: 'check', className: 'bg-yellow-100 text-yellow-700', display: '\u26A0\uFE0F' },
+  missing:  { label: 'fehlt', className: 'bg-red-100 text-red-700', display: '\u274C' },
+  custom:   { label: 'angepasst', className: 'bg-blue-100 text-blue-700', display: '\u{1F6B9}' },
 };
 
 const formatPrice = (price: number) =>
@@ -32,6 +35,7 @@ export function PriceCell({ line, onSetPrice, readOnly = false }: PriceCellProps
 
   const badge = BADGE_CONFIG[line.priceCheckStatus];
   const displayPrice = line.unitPriceFinal ?? line.unitPriceInvoice;
+  const okCompactSizeClass = 'w-[25px] h-5 text-[11.25px] leading-none justify-center';
 
   const handleInvoicePrice = () => {
     onSetPrice(line.lineId, line.unitPriceInvoice, 'invoice');
@@ -54,17 +58,41 @@ export function PriceCell({ line, onSetPrice, readOnly = false }: PriceCellProps
     }
   };
 
+  const renderStatusVisual = (status: PriceCheckStatus, sizeClass: string) => {
+    if (status === 'pending') {
+      return <PendingHourglassIcon sizeClass={sizeClass} withCircle={false} />;
+    }
+    return (
+      <span aria-hidden="true" className={`${sizeClass} leading-none`}>
+        {BADGE_CONFIG[status].display ?? BADGE_CONFIG[status].label}
+      </span>
+    );
+  };
+
   // PROJ-22 B2: readOnly mode — show badge without popover trigger
   if (readOnly) {
     return (
       <div className="flex items-center gap-1 justify-end">
         <span className="font-mono text-xs">{formatPrice(displayPrice)}</span>
-        <span
-          className={`inline-flex items-center rounded-md px-1.5 py-px text-[10px] leading-4 font-medium cursor-default opacity-70 ${badge.className}`}
-          title="Preis kann nur in RE-Positionen bearbeitet werden"
-        >
-          {badge.text}
-        </span>
+        {line.priceCheckStatus === 'ok' ? (
+          <span
+            className={cn(
+              badgeVariants({ variant: 'default' }),
+              `px-0 py-0 cursor-default opacity-70 ${okCompactSizeClass}`
+            )}
+            title="Preis kann nur in RE-Positionen bearbeitet werden"
+          >
+            OK
+          </span>
+        ) : (
+          <span
+            className={`inline-flex items-center rounded-md px-1.5 py-px text-[12.5px] leading-4 font-medium cursor-default opacity-70 ${badge.className}`}
+            title="Preis kann nur in RE-Positionen bearbeitet werden"
+          >
+            {renderStatusVisual(line.priceCheckStatus, 'text-[12.5px]')}
+            <span className="sr-only">{badge.label}</span>
+          </span>
+        )}
       </div>
     );
   }
@@ -74,12 +102,26 @@ export function PriceCell({ line, onSetPrice, readOnly = false }: PriceCellProps
       <span className="font-mono text-xs">{formatPrice(displayPrice)}</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
-            type="button"
-            className={`inline-flex items-center rounded-md px-1.5 py-px text-[10px] leading-4 font-medium cursor-pointer hover:opacity-80 transition-opacity ${badge.className}`}
-          >
-            {badge.text}
-          </button>
+          {line.priceCheckStatus === 'ok' ? (
+            <button
+              type="button"
+              className={cn(
+                badgeVariants({ variant: 'default' }),
+                `px-0 py-0 cursor-pointer hover:opacity-80 transition-opacity ${okCompactSizeClass} text-[8.4375px]`
+              )}
+              aria-label="Preisstatus: OK. Preisoptionen oeffnen"
+            >
+              OK
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`inline-flex items-center rounded-md px-1.5 py-px text-[10px] leading-4 font-medium cursor-pointer hover:opacity-80 transition-opacity ${badge.className}`}
+            >
+              {renderStatusVisual(line.priceCheckStatus, 'text-[12.5px]')}
+              <span className="sr-only">{badge.label}</span>
+            </button>
+          )}
         </PopoverTrigger>
         <PopoverContent className="w-72 p-4" align="end">
           <div className="space-y-3">

@@ -449,6 +449,38 @@ export interface LeanSerialArchiveEntry {
   sourceRowIndex: number;
 }
 
+// PROJ-35: Export column configuration types
+export type ExportColumnKey =
+  | 'manufacturerArticleNo'
+  | 'ean'
+  | 'falmecArticleNo'
+  | 'descriptionDE'
+  | 'descriptionIT'
+  | 'qty'
+  | 'unitPriceInvoice'
+  | 'unitPriceOrder'
+  | 'totalPrice'
+  | 'orderNumberAssigned'
+  | 'orderDate'
+  | 'serialNumber'
+  | 'storageLocation'
+  | 'eingangsart'
+  | 'fattura';
+
+export interface ExportColumnMapping {
+  position: number;           // 1–15
+  columnKey: ExportColumnKey;
+  label: string;              // Anzeigename (deutsch)
+}
+
+export interface ExportDiagnostics {
+  timestamp: string;
+  fileName: string;
+  lineCount: number;
+  status: 'success' | 'error';
+  message?: string;
+}
+
 // PROJ-12: Archive package metadata written to metadata.json on disk
 export interface ArchiveMetadata {
   version: 1;

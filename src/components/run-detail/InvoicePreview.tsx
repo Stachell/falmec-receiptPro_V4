@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRunStore } from '@/store/runStore';
 import { PriceCell } from './PriceCell';
+import { StatusCheckbox } from './StatusCheckbox';
+import { SerialStatusDot } from './SerialStatusDot';
+import { InvoiceLineDetailPopup } from './InvoiceLineDetailPopup';
 import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended, PriceCheckStatus, InvoiceLine } from '@/types';
 
 interface InvoicePreviewProps {
@@ -45,23 +48,6 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-/**
- * Get badge variant for order status
- */
-function getOrderStatusBadge(status: 'YES' | 'NO' | 'check'): {
-  variant: 'default' | 'secondary' | 'destructive' | 'outline';
-  label: string;
-} {
-  switch (status) {
-    case 'YES':
-      return { variant: 'default', label: 'OK' };
-    case 'NO':
-      return { variant: 'destructive', label: 'Keine' };
-    case 'check':
-      return { variant: 'secondary', label: 'check' };
-  }
-}
-
 export function InvoicePreview({
   header,
   positions,
@@ -71,6 +57,8 @@ export function InvoicePreview({
 }: InvoicePreviewProps) {
   const [expandedPositions, setExpandedPositions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailPosition, setDetailPosition] = useState<ParsedInvoiceLineExtended | null>(null);
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
@@ -98,6 +86,19 @@ export function InvoicePreview({
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
     : allInvoiceLines;
 
+  const linesByPosition = useMemo(() => {
+    const map = new Map<number, InvoiceLine[]>();
+    for (const line of invoiceLines) {
+      const existing = map.get(line.positionIndex);
+      if (existing) {
+        existing.push(line);
+      } else {
+        map.set(line.positionIndex, [line]);
+      }
+    }
+    return map;
+  }, [invoiceLines]);
+
   const positionStatusMap = useMemo(() => {
     const map = new Map<number, {
       priceCheckStatus: PriceCheckStatus;
@@ -105,18 +106,17 @@ export function InvoicePreview({
       serialAssigned: boolean;
       representativeLine: InvoiceLine;
     }>();
-    for (const line of invoiceLines) {
-      if (!map.has(line.positionIndex)) {
-        map.set(line.positionIndex, {
-          priceCheckStatus: line.priceCheckStatus,
-          serialRequired: line.serialRequired,
-          serialAssigned: !!line.serialNumber,
-          representativeLine: line,
-        });
-      }
+    for (const [positionIndex, lines] of linesByPosition.entries()) {
+      const representativeLine = lines[0];
+      map.set(positionIndex, {
+        priceCheckStatus: representativeLine.priceCheckStatus,
+        serialRequired: representativeLine.serialRequired,
+        serialAssigned: !!representativeLine.serialNumber,
+        representativeLine,
+      });
     }
     return map;
-  }, [invoiceLines]);
+  }, [linesByPosition]);
 
   // PROJ-22 B2: PriceCell handler — ACTIVE in RE-Positionen
   // TODO: Wire to store action when price persistence is implemented (PROJ-23 A2)
@@ -285,8 +285,8 @@ export function InvoicePreview({
                   </TableHeader>
                   <TableBody>
                     {filteredPositions.map((position) => {
-                      const orderBadge = getOrderStatusBadge(position.orderStatus);
                       const posStatus = positionStatusMap.get(position.positionIndex);
+                      const matchStatus = posStatus?.representativeLine.matchStatus ?? 'pending';
                       return (
                         <TableRow key={position.positionIndex}>
                           {/* Col 1: Info button — navigate to Artikelliste */}
@@ -297,8 +297,8 @@ export function InvoicePreview({
                                 size="icon"
                                 className="h-6 w-6"
                                 onClick={() => {
-                                  const { setActiveTab } = useRunStore.getState();
-                                  setActiveTab('items');
+                                  setDetailPosition(position);
+                                  setDetailOpen(true);
                                 }}
                               >
                                 <Info className="w-3.5 h-3.5" />
@@ -318,12 +318,10 @@ export function InvoicePreview({
                             )}
                           </TableCell>
 
-                          {/* Col 4: Status (order badge) */}
+                          {/* Col 4: Match status (same source and icon logic as Artikelliste) */}
                           <TableCell className="text-left">
                             <div className="flex justify-start">
-                              <Badge variant={orderBadge.variant} className="text-[10px] px-1 py-0">
-                                {orderBadge.label}
-                              </Badge>
+                              <StatusCheckbox status={matchStatus} />
                             </div>
                           </TableCell>
 
@@ -379,20 +377,9 @@ export function InvoicePreview({
                               <TooltipProvider delayDuration={200}>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span
-                                      className="inline-block w-3 h-3 rounded-sm border"
-                                      style={{
-                                        backgroundColor: !posStatus.serialRequired
-                                          ? '#000000'
-                                          : posStatus.serialAssigned
-                                            ? '#22C55E'
-                                            : '#E5E7EB',
-                                        borderColor: !posStatus.serialRequired
-                                          ? '#000000'
-                                          : posStatus.serialAssigned
-                                            ? '#16A34A'
-                                            : '#9CA3AF',
-                                      }}
+                                    <SerialStatusDot
+                                      serialRequired={posStatus.serialRequired}
+                                      serialAssigned={posStatus.serialAssigned}
                                     />
                                   </TooltipTrigger>
                                   <TooltipContent>
@@ -445,6 +432,13 @@ export function InvoicePreview({
           )}
         </CardContent>
       </Card>
+
+      <InvoiceLineDetailPopup
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        position={detailPosition}
+        linesForPosition={detailPosition ? (linesByPosition.get(detailPosition.positionIndex) ?? []) : []}
+      />
 
     </div>
   );

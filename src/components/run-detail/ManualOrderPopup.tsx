@@ -31,6 +31,8 @@ import {
 } from '@/components/ui/select';
 import { useRunStore } from '@/store/runStore';
 import { getAvailableForArticle } from '@/services/matching/orderPool';
+import { cn } from '@/lib/utils';
+import { getOrderReasonStyle } from './orderReasonStyle';
 import type { InvoiceLine } from '@/types';
 
 interface ManualOrderPopupProps {
@@ -74,27 +76,26 @@ export function ManualOrderPopup({ line, labelClassName }: ManualOrderPopupProps
 
   // Badge label: current order or "--"
   const currentLabel = line.orderNumberAssigned ?? '--';
+  const reasonStyle = getOrderReasonStyle(line.orderAssignmentReason);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1 group hover:opacity-80 transition-opacity"
-          title="Bestellung manuell zuweisen"
+          className={cn(
+            'flex items-center justify-end gap-1 w-full min-w-0 group hover:opacity-80 transition-opacity',
+            reasonStyle.pillClass
+          )}
+          title={`Bestellung manuell zuweisen (${reasonStyle.label})`}
         >
-          <span
-            className={`font-mono ${labelClassName ?? 'text-xs'} ${
-              line.orderAssignmentReason === 'manual-ok'
-                ? 'text-blue-600'
-                : line.orderNumberAssigned
-                ? 'text-foreground'
-                : 'text-status-soft-fail'
-            }`}
-          >
+          <span className={cn('truncate min-w-0 text-right', labelClassName ?? 'text-xs')}>
             {currentLabel}
           </span>
-          <Pencil className="w-2.5 h-2.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+          <Pencil className={cn(
+            'shrink-0 w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity',
+            reasonStyle.iconClass
+          )} />
         </button>
       </PopoverTrigger>
 

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useClickLock } from '@/hooks/useClickLock';
-import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, CheckCircle, Settings } from 'lucide-react';
+import { SlidersHorizontal, ChevronsDown, AlertTriangle, FolderOpen, CheckCircle, Settings, BookOpen, Download } from 'lucide-react';
+import { useExportConfigStore, DEFAULT_COLUMN_ORDER } from '@/store/exportConfigStore';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { fileSystemService } from '@/services/fileSystemService';
@@ -10,6 +11,7 @@ import { matcherRegistryService, type MatcherRegistryModule } from '@/services/m
 import { getParser } from '@/services/parsers';
 import { getMatcher } from '@/services/matchers';
 import { SettingsPopup } from '@/components/SettingsPopup';
+import { IconGuidePopup } from '@/components/IconGuidePopup';
 import { logService } from '@/services/logService';
 
 const DEFAULT_DATA_PATH = 'nicht gewaehlt';
@@ -18,7 +20,7 @@ const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 const HOVER_BORDER = '#D8E6E7';
-type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'overview' | 'misc';
+type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview' | 'misc';
 
 export function AppFooter() {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,8 +30,10 @@ export function AppFooter() {
   const [, setIsSelectingFolder] = useState(false);
   const [isToggleHovered, setIsToggleHovered] = useState(false);
   const [isSettingsHovered, setIsSettingsHovered] = useState(false);
+  const [isGuideHovered, setIsGuideHovered] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [isDataPathHovered, setIsDataPathHovered] = useState(false);
-  const [hoveredStatusKey, setHoveredStatusKey] = useState<null | 'parser' | 'matcher' | 'serial' | 'ordermapper'>(null);
+  const [hoveredStatusKey, setHoveredStatusKey] = useState<null | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export'>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabKey>('overview');
   const [selectedParserId, setSelectedParserId] = useState('auto');
@@ -166,6 +170,12 @@ export function AppFooter() {
   const activeOrderMapperDisplayName = orderMapperOptions.find((option) => option.id === activeOrderMapperId)?.label
     || activeOrderMapperId;
 
+  // PROJ-35: Export config status
+  const exportColumnOrder = useExportConfigStore((s) => s.columnOrder);
+  const exportIsDirty = useExportConfigStore((s) => s.isDirty);
+  const isExportCustom = JSON.stringify(exportColumnOrder.map(c => c.columnKey)) !== JSON.stringify(DEFAULT_COLUMN_ORDER.map(c => c.columnKey));
+  const exportDisplayName = isExportCustom ? 'konfiguriert' : 'Standard';
+
   return (
     <>
       {/* Toggle Button - Always visible at bottom left */}
@@ -218,8 +228,8 @@ export function AppFooter() {
           isOpen ? "h-[73px] opacity-100" : "h-0 opacity-0 overflow-hidden border-t-0"
         )}
       >
-        <div className="h-full px-6 flex items-center justify-end gap-6">
-          <div className="flex items-center gap-[1.05rem]">
+        <div className="h-full px-6 flex items-center justify-end gap-6 flex-nowrap overflow-x-auto">
+          <div className="flex items-center gap-[1.05rem] shrink-0">
             {/* [1] PDF-Parser (Statusfeld) */}
             <div className="flex flex-col gap-0.5">
             <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
@@ -319,9 +329,35 @@ export function AppFooter() {
               <span className="truncate">{activeOrderMapperDisplayName}</span>
             </button>
             </div>
+
+            {/* [1e] Export (Statusfeld) — PROJ-35 */}
+            <div className="flex flex-col gap-0.5">
+            <Label className="w-40 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
+              Export
+              {isExportCustom && !exportIsDirty && (
+                <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+              )}
+            </Label>
+            <button
+              type="button"
+              onClick={() => openSettingsAtTab('export')}
+              onMouseEnter={() => setHoveredStatusKey('export')}
+              onMouseLeave={() => setHoveredStatusKey(null)}
+              className="h-7 w-40 text-xs border rounded-md px-2 flex items-center gap-1.5 transition-colors"
+              style={{
+                backgroundColor: hoveredStatusKey === 'export' ? HOVER_BG : '#FFFFFF',
+                color: hoveredStatusKey === 'export' ? HOVER_TEXT : '#666666',
+                borderColor: hoveredStatusKey === 'export' ? HOVER_BORDER : '#666666',
+              }}
+              title="Klicken, um Einstellungen > Export zu oeffnen"
+            >
+              <Download className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">{exportDisplayName}</span>
+            </button>
+            </div>
           </div>
           {/* [2] Datenverzeichnis — PROJ-22 B4: Schwarzer klickbarer Link-Text */}
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 shrink-0">
             <Label className="w-56 text-xs text-sidebar-foreground flex items-center gap-1 text-left">
               Datenverzeichnis:
               {isConfigured && (
@@ -347,8 +383,30 @@ export function AppFooter() {
             </button>
           </div>
 
+          {/* [2b] Icon-Guide / Legende */}
+          <div className="flex flex-col gap-0.5 shrink-0">
+            <Label className="text-xs text-sidebar-foreground text-left">
+              Icon-Guide:
+            </Label>
+            <button
+              onClick={() => setGuideOpen(true)}
+              onMouseEnter={() => setIsGuideHovered(true)}
+              onMouseLeave={() => setIsGuideHovered(false)}
+              className="h-7 px-3 text-xs rounded-md flex items-center gap-1.5 transition-all duration-200 border"
+              style={{
+                backgroundColor: isGuideHovered ? HOVER_BG : '#c9c3b6',
+                color: isGuideHovered ? HOVER_TEXT : '#666666',
+                borderColor: isGuideHovered ? HOVER_BORDER : '#666666',
+              }}
+              title="Icon-Legende anzeigen"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Legende</span>
+            </button>
+          </div>
+
           {/* [3] Einstellungen Button — Logfile wurde in SettingsPopup Tab 1 verschoben */}
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 shrink-0">
             <Label className="text-xs text-sidebar-foreground text-left">
               Einstellungen:
             </Label>
@@ -389,6 +447,9 @@ export function AppFooter() {
           ready: matcherReady,
         }}
       />
+
+      {/* Icon-Guide Popup */}
+      <IconGuidePopup open={guideOpen} onOpenChange={setGuideOpen} />
     </>
   );
 }
