@@ -16,6 +16,12 @@ interface PriceCellProps {
   onSetPrice: (lineId: string, price: number, source: 'invoice' | 'sage' | 'custom') => void;
   /** PROJ-22 B2: When true, badge is shown but popover is disabled (Artikelliste READ-ONLY rule) */
   readOnly?: boolean;
+  /**
+   * ADD-ON PriceCheck (post-Step-4 mode): When provided, clicking the badge in RE-Positionen
+   * navigates to the first expanded article in Artikelliste instead of opening the popover.
+   * Used exclusively when currentRun.isExpanded === true.
+   */
+  onJumpToArticleList?: () => void;
 }
 
 export const BADGE_CONFIG: Record<PriceCheckStatus, { label: string; className: string; display?: string }> = {
@@ -29,7 +35,7 @@ export const BADGE_CONFIG: Record<PriceCheckStatus, { label: string; className: 
 const formatPrice = (price: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(price);
 
-export function PriceCell({ line, onSetPrice, readOnly = false }: PriceCellProps) {
+export function PriceCell({ line, onSetPrice, readOnly = false, onJumpToArticleList }: PriceCellProps) {
   const [customPrice, setCustomPrice] = useState('');
   const [open, setOpen] = useState(false);
 
@@ -92,6 +98,38 @@ export function PriceCell({ line, onSetPrice, readOnly = false }: PriceCellProps
             {renderStatusVisual(line.priceCheckStatus, 'text-[12.5px]')}
             <span className="sr-only">{badge.label}</span>
           </span>
+        )}
+      </div>
+    );
+  }
+
+  // ADD-ON PriceCheck: post-Step-4 jump mode — badge becomes a navigation button instead of popover trigger
+  if (onJumpToArticleList) {
+    return (
+      <div className="flex items-center gap-1 justify-end">
+        <span className="font-mono text-xs">{formatPrice(displayPrice)}</span>
+        {line.priceCheckStatus === 'ok' ? (
+          <button
+            type="button"
+            className={cn(
+              badgeVariants({ variant: 'default' }),
+              `px-0 py-0 cursor-pointer hover:opacity-80 transition-opacity ${okCompactSizeClass} text-[8.4375px]`
+            )}
+            aria-label="Preisstatus: OK. Zur Artikelliste springen"
+            onClick={onJumpToArticleList}
+          >
+            OK
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={`inline-flex items-center rounded-md px-1.5 py-px text-[10px] leading-4 font-medium cursor-pointer hover:opacity-80 transition-opacity ${badge.className}`}
+            aria-label={`Preisstatus: ${badge.label}. Zur Artikelliste springen`}
+            onClick={onJumpToArticleList}
+          >
+            {renderStatusVisual(line.priceCheckStatus, 'text-[12.5px]')}
+            <span className="sr-only">{badge.label}</span>
+          </button>
         )}
       </div>
     );

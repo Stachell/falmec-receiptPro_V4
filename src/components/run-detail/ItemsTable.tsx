@@ -50,6 +50,7 @@ export function ItemsTable() {
     currentRun,
     activeIssueFilterIds,
     setActiveIssueFilterIds,
+    setManualPrice,
   } = useRunStore();
   const invoiceLines = currentRun
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
@@ -154,8 +155,12 @@ export function ItemsTable() {
     };
   }, [expanded, filteredLines.length]);
 
-  const handleSetPrice = (_lineId: string, _price: number, _source: 'invoice' | 'sage' | 'custom') => {
-    // Price editing is read-only in ItemsTable.
+  // ADD-ON PriceCheck: Only write price when isExpanded (post-Step-4); readOnly guard prevents
+  // calls from pre-Step-4 state but explicit check is a safety net (see ST-3 in spec).
+  const handleSetPrice = (lineId: string, price: number, _source: 'invoice' | 'sage' | 'custom') => {
+    if (currentRun?.isExpanded) {
+      setManualPrice(lineId, price);
+    }
   };
 
   const packageCount = currentRun?.invoice?.packagesCount ?? invoiceLines.length;
@@ -393,7 +398,12 @@ export function ItemsTable() {
                       </TableCell>
 
                       <TableCell className="text-right">
-                        <PriceCell line={line} onSetPrice={handleSetPrice} readOnly />
+                        {/* ADD-ON PriceCheck: readOnly=false after Step 4 (isExpanded), readOnly=true before */}
+                        <PriceCell
+                          line={line}
+                          onSetPrice={handleSetPrice}
+                          readOnly={!currentRun?.isExpanded}
+                        />
                       </TableCell>
 
                       <TableCell className="text-xs whitespace-nowrap">

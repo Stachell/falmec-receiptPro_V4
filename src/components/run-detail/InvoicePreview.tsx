@@ -92,7 +92,7 @@ export function InvoicePreview({
   };
 
   // PROJ-20: Aggregated status from expanded lines per position
-  const { invoiceLines: allInvoiceLines, currentRun, activeIssueFilterIds, setActiveIssueFilterIds } = useRunStore();
+  const { invoiceLines: allInvoiceLines, currentRun, activeIssueFilterIds, setActiveIssueFilterIds, setManualPrice, navigateToLine } = useRunStore();
   // HOTFIX-1: Filter lines to current run only
   const invoiceLines = currentRun
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
@@ -160,10 +160,20 @@ export function InvoicePreview({
     setActiveIssueFilterIds(null);
   };
 
-  // PROJ-22 B2: PriceCell handler — ACTIVE in RE-Positionen
-  // TODO: Wire to store action when price persistence is implemented (PROJ-23 A2)
-  const handleSetPrice = (lineId: string, price: number, source: 'invoice' | 'sage' | 'custom') => {
-    console.log('setPrice (RE-Positionen):', lineId, price, source);
+  // PROJ-22 B2 / ADD-ON PriceCheck: PriceCell handler — ACTIVE in RE-Positionen (pre-Step-4 only)
+  // Guard: only write to store when NOT expanded (after Step 4, RE-Positionen uses jump mode)
+  const handleSetPrice = (lineId: string, price: number, _source: 'invoice' | 'sage' | 'custom') => {
+    if (!currentRun?.isExpanded) {
+      setManualPrice(lineId, price);
+    }
+  };
+
+  // ADD-ON PriceCheck: Post-Step-4 jump handler — scroll to first expanded article of position
+  const handlePriceJump = (positionIndex: number) => {
+    const runId = currentRun?.id;
+    if (!runId) return;
+    const targetLineId = `${runId}-line-${positionIndex}-0`;
+    navigateToLine([targetLineId]);
   };
 
   // Filter positions by search term + action filter
@@ -465,13 +475,18 @@ export function InvoicePreview({
                             {position.quantityDelivered}
                           </TableCell>
 
-                          {/* Col 9: Preis — ACTIVE (readOnly=false) in RE-Positionen */}
+                          {/* Col 9: Preis — ACTIVE (readOnly=false) pre-Step-4; Jump mode post-Step-4 */}
                           <TableCell className="text-right">
                             {posStatus ? (
                               <PriceCell
                                 line={posStatus.representativeLine}
                                 onSetPrice={handleSetPrice}
                                 readOnly={false}
+                                onJumpToArticleList={
+                                  currentRun?.isExpanded
+                                    ? () => handlePriceJump(position.positionIndex)
+                                    : undefined
+                                }
                               />
                             ) : (
                               <span className="font-mono text-xs text-right block">
