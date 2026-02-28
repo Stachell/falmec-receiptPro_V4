@@ -11,13 +11,24 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info, Search } from 'lucide-react';
+import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info, Search, Filter } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CopyableText } from '@/components/ui/CopyableText';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  FILTER_ALL, INVOICE_ACTION_FILTERS, matchesInvoiceActionFilter,
+} from '@/lib/filterConfig';
 import { useRunStore } from '@/store/runStore';
 import { PriceCell } from './PriceCell';
 import { StatusCheckbox } from './StatusCheckbox';
@@ -57,6 +68,7 @@ export function InvoicePreview({
 }: InvoicePreviewProps) {
   const [expandedPositions, setExpandedPositions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailPosition, setDetailPosition] = useState<ParsedInvoiceLineExtended | null>(null);
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
@@ -118,22 +130,53 @@ export function InvoicePreview({
     return map;
   }, [linesByPosition]);
 
+  // ADD-ON: Count per action filter option (on unfiltered data)
+  const invoiceFilterCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const opt of INVOICE_ACTION_FILTERS) {
+      let c = 0;
+      for (const pos of positions) {
+        const posStatus = positionStatusMap.get(pos.positionIndex);
+        const line = posStatus?.representativeLine ?? null;
+        if (matchesInvoiceActionFilter(pos, line, opt.value)) c++;
+      }
+      counts.set(opt.value, c);
+    }
+    return counts;
+  }, [positions, positionStatusMap]);
+
+  // ADD-ON: Reset-Guard — auto-reset when active filter drops to 0
+  useEffect(() => {
+    if (statusFilter === 'all') return;
+    const count = invoiceFilterCounts.get(statusFilter) ?? 0;
+    if (count === 0) setStatusFilter('all');
+  }, [invoiceFilterCounts, statusFilter]);
+
   // PROJ-22 B2: PriceCell handler — ACTIVE in RE-Positionen
   // TODO: Wire to store action when price persistence is implemented (PROJ-23 A2)
   const handleSetPrice = (lineId: string, price: number, source: 'invoice' | 'sage' | 'custom') => {
     console.log('setPrice (RE-Positionen):', lineId, price, source);
   };
 
-  // Filter positions by search term
+  // Filter positions by search term + action filter
   const filteredPositions = positions.filter(pos => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      String(pos.positionIndex).includes(term) ||
-      (pos.ean?.toLowerCase().includes(term)) ||
-      (pos.manufacturerArticleNo?.toLowerCase().includes(term)) ||
-      (pos.orderCandidatesText?.toLowerCase().includes(term))
-    );
+    const matchesSearch = !searchTerm || (() => {
+      const term = searchTerm.toLowerCase();
+      return (
+        String(pos.positionIndex).includes(term) ||
+        pos.ean?.toLowerCase().includes(term) ||
+        pos.manufacturerArticleNo?.toLowerCase().includes(term) ||
+        pos.orderCandidatesText?.toLowerCase().includes(term)
+      );
+    })();
+
+    if (statusFilter === 'all') return matchesSearch;
+
+    // Enriched data (can be null before Step 2)
+    const posStatus = positionStatusMap.get(pos.positionIndex);
+    const line = posStatus?.representativeLine ?? null;
+
+    return matchesSearch && matchesInvoiceActionFilter(pos, line, statusFilter);
   });
 
   useEffect(() => {
@@ -207,16 +250,36 @@ export function InvoicePreview({
 
       {/* Positions Table */}
       <Card>
-        {/* PROJ-22 B2: Suchleiste links, Ueberschrift rechtsbuendig */}
-        <CardHeader className="flex flex-row items-center gap-4 pb-2">
-          <div className="relative flex-1 max-w-xs">
+        {/* PROJ-22 B2 + PROJ-38: Suchleiste + Action-Filter links, Ueberschrift rechtsbuendig */}
+        <CardHeader className="flex flex-row flex-wrap items-center gap-4 pb-2">
+          <div className="relative w-[240px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Pos., EAN, Artikelnr. suchen..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-8 text-sm bg-surface-elevated"
+              className="pl-10 bg-surface-elevated"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[240px] bg-surface-elevated">
+                <SelectValue placeholder="Filter" />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value={FILTER_ALL.value}>{FILTER_ALL.label}</SelectItem>
+                {INVOICE_ACTION_FILTERS.map((opt) => {
+                  const count = invoiceFilterCounts.get(opt.value) ?? 0;
+                  if (count === 0) return null;
+                  return (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label} ({count})
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
           </div>
           <div className="ml-auto flex items-stretch">
             <div className="text-right">
@@ -313,9 +376,10 @@ export function InvoicePreview({
 
                           {/* Col 3: Art.-Nr. (DE from positionStatusMap) */}
                           <TableCell className="font-medium text-right">
-                            {posStatus?.representativeLine?.falmecArticleNo ?? (
-                              <span className="text-muted-foreground">--</span>
-                            )}
+                            <CopyableText
+                              value={posStatus?.representativeLine?.falmecArticleNo ?? '--'}
+                              placeholderClassName="text-muted-foreground"
+                            />
                           </TableCell>
 
                           {/* Col 4: Match status (same source and icon logic as Artikelliste) */}
@@ -327,18 +391,21 @@ export function InvoicePreview({
 
                           {/* Col 5: Herstellerartikelnr. */}
                           <TableCell className="font-mono text-xs">
-                            <div className="truncate w-full" title={position.manufacturerArticleNo}>
-                              {position.manufacturerArticleNo || (
-                                <span className="text-destructive">Fehlt</span>
-                              )}
+                            <div className="truncate w-full" title={position.manufacturerArticleNo || 'Fehlt'}>
+                              <CopyableText
+                                value={position.manufacturerArticleNo || 'Fehlt'}
+                                className="block truncate"
+                                placeholderClassName="text-destructive"
+                              />
                             </div>
                           </TableCell>
 
                           {/* Col 6: EAN */}
                           <TableCell className="font-mono text-xs">
-                            {position.ean || (
-                              <span className="text-destructive">Fehlt</span>
-                            )}
+                            <CopyableText
+                              value={position.ean || 'Fehlt'}
+                              placeholderClassName="text-destructive"
+                            />
                           </TableCell>
 
                           {/* Col 7: Bezeichnung — dynamic width, truncate by available space */}
@@ -398,9 +465,10 @@ export function InvoicePreview({
                           <TableCell className="pr-2">
                             <div className="flex flex-col gap-1">
                               {position.orderCandidatesText && (
-                                <span className={`${getOrderZoomClass(position.orderCandidatesText)} text-muted-foreground font-mono`}>
-                                  {position.orderCandidatesText}
-                                </span>
+                                <CopyableText
+                                  value={position.orderCandidatesText}
+                                  className={`${getOrderZoomClass(position.orderCandidatesText)} text-muted-foreground font-mono`}
+                                />
                               )}
                             </div>
                           </TableCell>

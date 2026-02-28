@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, Filter, Info, Barcode, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CopyableText } from '@/components/ui/CopyableText';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import lockClosedIcon from '@/assets/icons/Lock_CLOSE_STEP4.ico';
+import lockOpenIcon from '@/assets/icons/Lock_OPEN_STEP4.ico';
 import {
   TableBody,
   TableCell,
@@ -14,10 +17,16 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  FILTER_ALL, ITEMS_FILTER_GROUPS, matchesItemsStatusFilter,
+} from '@/lib/filterConfig';
 import { StatusCheckbox } from './StatusCheckbox';
 import { PriceCell } from './PriceCell';
 import { DetailPopup } from './DetailPopup';
@@ -72,24 +81,36 @@ export function ItemsTable() {
   const filteredLines = invoiceLines.filter(line => {
     const term = searchTerm.toLowerCase();
     const matchesSearch =
-      line.manufacturerArticleNo.toLowerCase().includes(term) ||
-      line.ean.includes(searchTerm) ||
-      line.descriptionIT.toLowerCase().includes(term) ||
-      (line.falmecArticleNo?.toLowerCase().includes(term)) ||
-      (line.descriptionDE?.toLowerCase().includes(term));
+      line.manufacturerArticleNo?.toLowerCase().includes(term) ||
+      line.ean?.toLowerCase().includes(term) ||
+      line.descriptionIT?.toLowerCase().includes(term) ||
+      line.falmecArticleNo?.toLowerCase().includes(term) ||
+      line.descriptionDE?.toLowerCase().includes(term);
 
-    const matchesStatus =
-      statusFilter === 'all' ||
-      (statusFilter === 'full-match' && line.matchStatus === 'full-match') ||
-      (statusFilter === 'partial-match' && (line.matchStatus === 'code-it-only' || line.matchStatus === 'ean-only')) ||
-      (statusFilter === 'no-match' && line.matchStatus === 'no-match') ||
-      (statusFilter === 'pending' && line.matchStatus === 'pending') ||
-      (statusFilter === 'price-mismatch' && line.priceCheckStatus === 'mismatch') ||
-      (statusFilter === 'price-missing' && line.priceCheckStatus === 'missing') ||
-      (statusFilter === 'not-ordered' && !line.orderNumberAssigned);
-
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesItemsStatusFilter(line, statusFilter);
   });
+
+  // ADD-ON: Count per filter option (on unfiltered data)
+  const itemsFilterCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const group of ITEMS_FILTER_GROUPS) {
+      for (const opt of group.options) {
+        let c = 0;
+        for (const line of invoiceLines) {
+          if (matchesItemsStatusFilter(line, opt.value)) c++;
+        }
+        counts.set(opt.value, c);
+      }
+    }
+    return counts;
+  }, [invoiceLines]);
+
+  // ADD-ON: Reset-Guard — auto-reset when active filter drops to 0
+  useEffect(() => {
+    if (statusFilter === 'all') return;
+    const count = itemsFilterCounts.get(statusFilter) ?? 0;
+    if (count === 0) setStatusFilter('all');
+  }, [itemsFilterCounts, statusFilter]);
 
   useEffect(() => {
     const updateCollapsedHeight = () => {
@@ -135,7 +156,7 @@ export function ItemsTable() {
   return (
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center gap-4 pb-2">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             placeholder="Suche nach Artikelnummer, EAN, Bezeichnung..."
@@ -147,18 +168,26 @@ export function ItemsTable() {
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-muted-foreground" />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px] bg-surface-elevated">
+            <SelectTrigger className="w-[240px] bg-surface-elevated">
               <SelectValue placeholder="Filter Status" />
             </SelectTrigger>
             <SelectContent className="bg-popover">
-              <SelectItem value="all">Alle anzeigen</SelectItem>
-              <SelectItem value="full-match">Match</SelectItem>
-              <SelectItem value="partial-match">Teilmatch</SelectItem>
-              <SelectItem value="no-match">Kein Match</SelectItem>
-              <SelectItem value="pending">Ausstehend</SelectItem>
-              <SelectItem value="price-mismatch">Preisabweichung</SelectItem>
-              <SelectItem value="price-missing">Preis fehlt</SelectItem>
-              <SelectItem value="not-ordered">Nicht bestellt</SelectItem>
+              <SelectItem value={FILTER_ALL.value}>{FILTER_ALL.label}</SelectItem>
+              {ITEMS_FILTER_GROUPS.map((group, groupIndex) => (
+                <SelectGroup key={group.groupLabel}>
+                  {groupIndex > 0 && <SelectSeparator />}
+                  <SelectLabel>{group.groupLabel}</SelectLabel>
+                  {group.options.map((opt) => {
+                    const count = itemsFilterCounts.get(opt.value) ?? 0;
+                    if (count === 0) return null;
+                    return (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label} ({count})
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -169,9 +198,17 @@ export function ItemsTable() {
               title={isStep4Done ? 'Artikelliste zur Bearbeitung freigegeben' : 'Gesperrt/locked: Artikelliste wird nach Abschluss von Schritt 4 ausgerollt und ist ab dann verfügbar.'}
             >
               {isStep4Done ? (
-                <span className="flex items-center justify-center leading-none select-none" style={{ fontSize: '2.156rem' }}>🔓</span>
+                <img
+                  src={lockOpenIcon}
+                  alt="Artikelliste freigegeben"
+                  className="h-[2.156rem] w-[2.156rem] select-none"
+                />
               ) : (
-                <span className="flex items-center justify-center leading-none select-none" style={{ fontSize: '2.156rem' }}>🔒</span>
+                <img
+                  src={lockClosedIcon}
+                  alt="Artikelliste gesperrt"
+                  className="h-[2.156rem] w-[2.156rem] select-none"
+                />
               )}
             </div>
             <div className="text-right">
@@ -262,9 +299,11 @@ export function ItemsTable() {
                           {line.matchStatus === 'ean-only' && (
                             <Barcode className="w-3 h-3 text-orange-400 flex-shrink-0" title="EAN-Match" />
                           )}
-                          <span className="truncate">
-                            {line.falmecArticleNo ?? <span className="text-muted-foreground">--</span>}
-                          </span>
+                          <CopyableText
+                            value={line.falmecArticleNo ?? '--'}
+                            className="truncate"
+                            placeholderClassName="text-muted-foreground"
+                          />
                         </div>
                       </TableCell>
 
@@ -278,11 +317,11 @@ export function ItemsTable() {
                       </TableCell>
 
                       <TableCell className="font-mono text-xs truncate" title={line.manufacturerArticleNo}>
-                        {line.manufacturerArticleNo}
+                        <CopyableText value={line.manufacturerArticleNo} className="block truncate" />
                       </TableCell>
 
                       <TableCell className="font-mono text-xs truncate" title={line.ean}>
-                        {line.ean}
+                        <CopyableText value={line.ean} className="block truncate" />
                       </TableCell>
 
                       <TableCell className="min-w-0">
@@ -330,7 +369,7 @@ export function ItemsTable() {
                             </Tooltip>
                           </TooltipProvider>
                           {line.serialRequired && line.serialNumber ? (
-                            <span className="font-mono whitespace-nowrap">{line.serialNumber}</span>
+                            <CopyableText value={line.serialNumber} className="font-mono whitespace-nowrap" />
                           ) : null}
                         </div>
                       </TableCell>
@@ -391,3 +430,4 @@ export function ItemsTable() {
     </Card>
   );
 }
+
