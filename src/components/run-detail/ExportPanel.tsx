@@ -122,7 +122,7 @@ ${invoiceLines.map(line => {
               <AlertTriangle className="w-5 h-5 text-status-failed" />
             )}
             <span className={openBlockingIssues.length === 0 ? 'text-foreground' : 'text-status-failed'}>
-              Keine blockierenden Issues
+              Keine blockierenden Probleme
               {openBlockingIssues.length > 0 && ` (${openBlockingIssues.length} offen)`}
             </span>
           </div>
@@ -226,7 +226,7 @@ ${invoiceLines.map(line => {
 
       {!isExportReady && (
         <p className="text-sm text-status-failed text-right">
-          Bitte lösen Sie alle blockierenden Issues und weisen Sie fehlende Lagerorte zu.
+          Bitte lösen Sie alle blockierenden Probleme und weisen Sie fehlende Lagerorte zu.
         </p>
       )}
     </div>

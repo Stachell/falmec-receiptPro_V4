@@ -159,6 +159,7 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
       warning.positionIndex ? `, Position: ${warning.positionIndex}` : ''
     }`,
     relatedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
+    affectedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
     status: 'open' as const,
     createdAt: new Date().toISOString(),
     resolvedAt: null,
@@ -180,6 +181,7 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
       warning.positionIndex ? `, Position: ${warning.positionIndex}` : ''
     }`,
     relatedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
+    affectedLineIds: warning.positionIndex ? [`${runId}-line-${warning.positionIndex}`] : [],
     status: 'open' as const,
     createdAt: new Date().toISOString(),
     resolvedAt: null,
@@ -397,6 +399,8 @@ interface RunState {
   parsingProgress: string;
   /** PROJ-17: step filter preset from KPI-Tile click navigation (null = no preset) */
   issuesStepFilter: string | null;
+  /** PROJ-37: Issue-filter — array of lineIds to isolate in ItemsTable/InvoicePreview (null = off) */
+  activeIssueFilterIds: string[] | null;
   /** PROJ-21: Jump-link highlighting — lineIds to visually highlight in ItemsTable */
   highlightedLineIds: string[];
   /** PROJ-21: Jump-link scroll target — first lineId to scroll into view */
@@ -410,6 +414,8 @@ interface RunState {
   setCurrentRun: (run: Run | null) => void;
   setActiveTab: (tab: string) => void;
   setIssuesStepFilter: (filter: string | null) => void;
+  /** PROJ-37: Set/clear the issue-isolation filter for ItemsTable + InvoicePreview */
+  setActiveIssueFilterIds: (ids: string[] | null) => void;
   /** PROJ-21: Navigate from issue to affected row(s) in ItemsTable */
   navigateToLine: (lineIds: string[]) => void;
   clearHighlightedLines: () => void;
@@ -530,6 +536,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   isProcessing: false,
   parsingProgress: '',
   issuesStepFilter: null,
+  activeIssueFilterIds: null,
   highlightedLineIds: [],
   scrollToLineId: null,
   isPaused: false,
@@ -541,6 +548,9 @@ export const useRunStore = create<RunState>((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setIssuesStepFilter: (filter) => set({ issuesStepFilter: filter }),
+
+  // PROJ-37: Issue-isolation filter
+  setActiveIssueFilterIds: (ids) => set({ activeIssueFilterIds: ids }),
 
   // PROJ-21: Jump-link navigation — highlight + scroll + tab switch
   navigateToLine: (lineIds) => {

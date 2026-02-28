@@ -342,8 +342,9 @@ export function mapAllOrders(
       stepNo: 4,
       type: 'order-no-match',
       message: `${notOrderedLines.length} Positionen ohne Bestellzuordnung`,
-      details: notOrderedLines.map(l => `Pos ${l.positionIndex}: ${l.manufacturerArticleNo || l.ean || l.lineId}`).join(', '),
+      details: `${notOrderedLines.length} Positionen ohne Bestellzuordnung`,
       relatedLineIds: notOrderedLines.map(l => l.lineId),
+      affectedLineIds: notOrderedLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,
@@ -366,11 +367,9 @@ export function mapAllOrders(
       stepNo: 4,
       type: 'order-incomplete',
       message: `${incompleteLines.length} Positionen nicht vollständig zugeordnet`,
-      details: incompleteLines.slice(0, 15).map(l => {
-        const allocated = l.allocatedOrders.reduce((s, a) => s + a.qty, 0);
-        return `Pos ${l.positionIndex}: ${allocated}/${l.qty}`;
-      }).join(', ') + (incompleteLines.length > 15 ? ` ... (+${incompleteLines.length - 15} weitere)` : ''),
+      details: `${incompleteLines.length} Positionen nicht vollständig zugeordnet`,
       relatedLineIds: incompleteLines.map(l => l.lineId),
+      affectedLineIds: incompleteLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,
@@ -389,10 +388,9 @@ export function mapAllOrders(
       stepNo: 4,
       type: 'order-multi-split',
       message: `${multiSplitLines.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      details: multiSplitLines.slice(0, 15).map(l =>
-        `Pos ${l.positionIndex}: ${l.allocatedOrders.length} Bestellungen`
-      ).join(', ') + (multiSplitLines.length > 15 ? ` ... (+${multiSplitLines.length - 15} weitere)` : ''),
+      details: `${multiSplitLines.length} Positionen auf 3+ Bestellungen aufgeteilt`,
       relatedLineIds: multiSplitLines.map(l => l.lineId),
+      affectedLineIds: multiSplitLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,
@@ -413,10 +411,9 @@ export function mapAllOrders(
       stepNo: 4,
       type: 'order-fifo-only',
       message: `${fifoOnlyLines.length} Positionen nur via FIFO zugeordnet (keine PDF-Referenz)`,
-      details: fifoOnlyLines.slice(0, 15).map(l =>
-        `Pos ${l.positionIndex}: ${l.allocatedOrders.map(a => a.orderNumber).join('+')}`
-      ).join(', ') + (fifoOnlyLines.length > 15 ? ` ... (+${fifoOnlyLines.length - 15} weitere)` : ''),
+      details: `${fifoOnlyLines.length} Positionen nur via FIFO zugeordnet`,
       relatedLineIds: fifoOnlyLines.map(l => l.lineId),
+      affectedLineIds: fifoOnlyLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,

@@ -77,11 +77,9 @@ function buildEngineIssues(
       stepNo: 4,
       type: 'order-no-match',
       message: `${positionIndices.size} Positionen (${notOrderedLines.length} Einzelartikel) ohne Bestellzuordnung`,
-      details: Array.from(positionIndices).slice(0, 15).map(pi => {
-        const sample = notOrderedLines.find(l => l.positionIndex === pi);
-        return `Pos ${pi}: ${sample?.manufacturerArticleNo || sample?.ean || '?'}`;
-      }).join(', ') + (positionIndices.size > 15 ? ` ... (+${positionIndices.size - 15} weitere)` : ''),
+      details: `${positionIndices.size} Positionen ohne Bestellzuordnung`,
       relatedLineIds: notOrderedLines.map(l => l.lineId),
+      affectedLineIds: notOrderedLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,
@@ -103,12 +101,9 @@ function buildEngineIssues(
       stepNo: 4,
       type: 'order-fifo-only',
       message: `${positionIndices.size} Positionen nur via FIFO zugeordnet (keine PDF-Referenz)`,
-      details: Array.from(positionIndices).slice(0, 15).map(pi => {
-        const lines = fifoOnlyLines.filter(l => l.positionIndex === pi);
-        const orders = new Set(lines.flatMap(l => l.allocatedOrders.map(a => a.orderNumber)));
-        return `Pos ${pi}: ${Array.from(orders).join('+')}`;
-      }).join(', ') + (positionIndices.size > 15 ? ` ... (+${positionIndices.size - 15} weitere)` : ''),
+      details: `${positionIndices.size} Positionen nur via FIFO zugeordnet`,
       relatedLineIds: fifoOnlyLines.map(l => l.lineId),
+      affectedLineIds: fifoOnlyLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,
@@ -139,10 +134,9 @@ function buildEngineIssues(
       stepNo: 4,
       type: 'order-multi-split',
       message: `${multiSplitPositions.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      details: multiSplitPositions.slice(0, 15).map(([pi, orders]) =>
-        `Pos ${pi}: ${orders.size} Bestellungen`
-      ).join(', ') + (multiSplitPositions.length > 15 ? ` ... (+${multiSplitPositions.length - 15} weitere)` : ''),
+      details: `${multiSplitPositions.length} Positionen auf 3+ Bestellungen aufgeteilt`,
       relatedLineIds: relatedLines.map(l => l.lineId),
+      affectedLineIds: relatedLines.map(l => l.lineId),
       status: 'open',
       createdAt: now,
       resolvedAt: null,

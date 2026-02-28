@@ -347,7 +347,8 @@ export interface Issue {
   type: IssueType;
   message: string;
   details: string;
-  relatedLineIds: string[];
+  relatedLineIds: string[];          // PROJ-21: for jump-link navigation + auto-resolve — DO NOT CHANGE
+  affectedLineIds: string[];         // PROJ-37: descriptive list for UI rendering only
   status: 'open' | 'resolved';
   createdAt: string;
   resolvedAt: string | null;

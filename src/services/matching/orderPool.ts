@@ -210,9 +210,9 @@ export function buildOrderPool(
       stepNo: 4,
       type: 'order-no-match',
       message: `${missingIdOrders.length} Bestellpositionen ohne EAN und Herstellerartikelnr.`,
-      details: missingIdOrders.slice(0, 20).join(', ') +
-        (missingIdOrders.length > 20 ? ` ... (+${missingIdOrders.length - 20} weitere)` : ''),
+      details: `${missingIdOrders.length} Bestellpositionen ohne EAN und Herstellerartikelnr.`,
       relatedLineIds: [],
+      affectedLineIds: [],
       status: 'open',
       createdAt: now,
       resolvedAt: null,

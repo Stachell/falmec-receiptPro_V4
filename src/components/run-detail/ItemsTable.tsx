@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, Filter, Info, Barcode, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { Search, Filter, FilterX, Info, Barcode, ChevronsDown, ChevronsUp, X } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,7 +43,14 @@ import {
 } from '@/components/ui/tooltip';
 
 export function ItemsTable() {
-  const { invoiceLines: allInvoiceLines, highlightedLineIds, scrollToLineId, currentRun } = useRunStore();
+  const {
+    invoiceLines: allInvoiceLines,
+    highlightedLineIds,
+    scrollToLineId,
+    currentRun,
+    activeIssueFilterIds,
+    setActiveIssueFilterIds,
+  } = useRunStore();
   const invoiceLines = currentRun
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
     : allInvoiceLines;
@@ -78,7 +85,18 @@ export function ItemsTable() {
     }
   }, [scrollToLineId, expanded]);
 
+  // PROJ-37: handleFilterChange wrapper — clears activeIssueFilterIds when dropdown is used
+  const handleFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setActiveIssueFilterIds(null);
+  };
+
   const filteredLines = invoiceLines.filter(line => {
+    // PROJ-37: activeIssueFilterIds overrides all other filters
+    if (activeIssueFilterIds !== null) {
+      return activeIssueFilterIds.includes(line.lineId);
+    }
+
     const term = searchTerm.toLowerCase();
     const matchesSearch =
       line.manufacturerArticleNo?.toLowerCase().includes(term) ||
@@ -106,11 +124,13 @@ export function ItemsTable() {
   }, [invoiceLines]);
 
   // ADD-ON: Reset-Guard — auto-reset when active filter drops to 0
+  // PROJ-37: Must run AFTER issue-filter-check — only matters when no issue filter is active
   useEffect(() => {
+    if (activeIssueFilterIds !== null) return;
     if (statusFilter === 'all') return;
     const count = itemsFilterCounts.get(statusFilter) ?? 0;
     if (count === 0) setStatusFilter('all');
-  }, [itemsFilterCounts, statusFilter]);
+  }, [itemsFilterCounts, statusFilter, activeIssueFilterIds]);
 
   useEffect(() => {
     const updateCollapsedHeight = () => {
@@ -166,8 +186,21 @@ export function ItemsTable() {
           />
         </div>
         <div className="flex items-center gap-2">
+          {/* PROJ-37: FilterX — visible when any filter is active, placed BEFORE Filter icon */}
+          {(statusFilter !== 'all' || activeIssueFilterIds !== null) && (
+            <button
+              className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground"
+              onClick={() => {
+                setStatusFilter('all');
+                setActiveIssueFilterIds(null);
+              }}
+              title="Alle Filter zuruecksetzen"
+            >
+              <FilterX className="w-4 h-4" />
+            </button>
+          )}
           <Filter className="w-4 h-4 text-muted-foreground" />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={handleFilterChange}>
             <SelectTrigger className="w-[240px] bg-surface-elevated">
               <SelectValue placeholder="Filter Status" />
             </SelectTrigger>
@@ -241,6 +274,20 @@ export function ItemsTable() {
       </CardHeader>
 
       <CardContent className="pt-0 pb-0">
+        {/* PROJ-37: Issue-filter banner */}
+        {activeIssueFilterIds !== null && (
+          <div className="mb-3 mt-1 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-1.5 text-xs flex items-center gap-2">
+            <span className="text-black">
+              Zeige {filteredLines.length} isolierte Problem-Zeilen
+            </span>
+            <button
+              className="ml-auto text-black hover:text-black/70 font-medium flex items-center gap-1 transition-colors"
+              onClick={() => setActiveIssueFilterIds(null)}
+            >
+              <X className="w-3.5 h-3.5" /> Filter aufheben
+            </button>
+          </div>
+        )}
         {filteredLines.length > 0 ? (
           <div className="-mx-6">
             <div

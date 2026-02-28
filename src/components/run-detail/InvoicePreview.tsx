@@ -11,7 +11,7 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, Info, Search, Filter } from 'lucide-react';
+import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, FilterX, Info, Search, Filter, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -92,7 +92,7 @@ export function InvoicePreview({
   };
 
   // PROJ-20: Aggregated status from expanded lines per position
-  const { invoiceLines: allInvoiceLines, currentRun } = useRunStore();
+  const { invoiceLines: allInvoiceLines, currentRun, activeIssueFilterIds, setActiveIssueFilterIds } = useRunStore();
   // HOTFIX-1: Filter lines to current run only
   const invoiceLines = currentRun
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
@@ -146,11 +146,19 @@ export function InvoicePreview({
   }, [positions, positionStatusMap]);
 
   // ADD-ON: Reset-Guard — auto-reset when active filter drops to 0
+  // PROJ-37: Must run AFTER issue-filter-check — only matters when no issue filter is active
   useEffect(() => {
+    if (activeIssueFilterIds !== null) return;
     if (statusFilter === 'all') return;
     const count = invoiceFilterCounts.get(statusFilter) ?? 0;
     if (count === 0) setStatusFilter('all');
-  }, [invoiceFilterCounts, statusFilter]);
+  }, [invoiceFilterCounts, statusFilter, activeIssueFilterIds]);
+
+  // PROJ-37: handleFilterChange wrapper — clears activeIssueFilterIds when dropdown is used
+  const handleFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setActiveIssueFilterIds(null);
+  };
 
   // PROJ-22 B2: PriceCell handler — ACTIVE in RE-Positionen
   // TODO: Wire to store action when price persistence is implemented (PROJ-23 A2)
@@ -159,7 +167,14 @@ export function InvoicePreview({
   };
 
   // Filter positions by search term + action filter
+  // PROJ-37: activeIssueFilterIds overrides all other filters (matches by positionIndex via lineId prefix)
   const filteredPositions = positions.filter(pos => {
+    // Issue-isolation filter: check if any affiliated line for this position is in the issue filter
+    if (activeIssueFilterIds !== null) {
+      const linesForPos = linesByPosition.get(pos.positionIndex) ?? [];
+      return linesForPos.some(l => activeIssueFilterIds.includes(l.lineId));
+    }
+
     const matchesSearch = !searchTerm || (() => {
       const term = searchTerm.toLowerCase();
       return (
@@ -262,8 +277,21 @@ export function InvoicePreview({
             />
           </div>
           <div className="flex items-center gap-2">
+            {/* PROJ-37: FilterX — visible when any filter is active, placed BEFORE Filter icon */}
+            {(statusFilter !== 'all' || activeIssueFilterIds !== null) && (
+              <button
+                className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground"
+                onClick={() => {
+                  setStatusFilter('all');
+                  setActiveIssueFilterIds(null);
+                }}
+                title="Alle Filter zuruecksetzen"
+              >
+                <FilterX className="w-4 h-4" />
+              </button>
+            )}
             <Filter className="w-4 h-4 text-muted-foreground" />
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={handleFilterChange}>
               <SelectTrigger className="w-[240px] bg-surface-elevated">
                 <SelectValue placeholder="Filter" />
               </SelectTrigger>
@@ -306,6 +334,20 @@ export function InvoicePreview({
           </div>
         </CardHeader>
         <CardContent className="pt-0 pb-0">
+          {/* PROJ-37: Issue-filter banner */}
+          {activeIssueFilterIds !== null && (
+            <div className="mb-3 mt-1 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-1.5 text-xs flex items-center gap-2">
+              <span className="text-black">
+                Zeige {filteredPositions.length} isolierte Problem-Zeilen (RE-Positionen)
+              </span>
+              <button
+                className="ml-auto text-black hover:text-black/70 font-medium flex items-center gap-1 transition-colors"
+                onClick={() => setActiveIssueFilterIds(null)}
+              >
+                <X className="w-3.5 h-3.5" /> Filter aufheben
+              </button>
+            </div>
+          )}
           {positions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />

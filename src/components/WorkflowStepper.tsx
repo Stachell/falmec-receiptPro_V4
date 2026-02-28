@@ -70,7 +70,7 @@ export function WorkflowStepper({ steps, currentStep, onStepClick, isPaused = fa
                 </span>
                 {step.issuesCount > 0 && (
                   <span className="text-xs text-status-soft-fail">
-                    {step.issuesCount} Issue{step.issuesCount > 1 ? 's' : ''}
+                    {step.issuesCount} Problem{step.issuesCount > 1 ? 'e' : ''}
                   </span>
                 )}
               </div>

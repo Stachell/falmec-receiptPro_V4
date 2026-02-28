@@ -646,7 +646,7 @@ export default function RunDetail() {
                   </div>
                   <span className="text-xs text-center mt-0.5 text-[#666666] group-hover:text-[#E3E0CF] transition-colors opacity-80">
                     {allStepsComplete
-                      ? (totalIssues > 0 ? `${totalIssues} Issues offen` : 'Keine offenen Issues')
+                      ? (totalIssues > 0 ? `${totalIssues} Probleme offen` : 'Keine offenen Probleme')
                       : (nextStep?.name ?? '')}
                   </span>
                 </>

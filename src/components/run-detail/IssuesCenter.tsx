@@ -1,5 +1,18 @@
-﻿import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Filter, ExternalLink, Download, Lightbulb, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  ChevronsDown,
+  ChevronsUp,
+  Copy,
+  Download,
+  ExternalLink,
+  Filter,
+  FilterX,
+  Lightbulb,
+  X,
+} from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { SeverityBadge } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
@@ -19,9 +32,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import type { Issue, IssueType } from '@/types';
+import type { Issue, IssueType, InvoiceLine } from '@/types';
+import { formatLineForDisplay, buildIssueClipboardText } from '@/lib/issueLineFormatter';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 
-// â”€â”€ Label map (existing + PROJ-17 new subtypes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Label map (existing + PROJ-17 new subtypes) ────────────────────────────
 const issueTypeLabels: Record<string, string> = {
   'order-assignment': 'Bestellzuordnung',
   'serial-mismatch': 'Seriennummer-Fehler',
@@ -35,38 +50,42 @@ const issueTypeLabels: Record<string, string> = {
   'order-no-match': 'Bestellung nicht zuordenbar',
   'conflict': 'Identifier-Konflikt',
   // PROJ-17 Step 2
-  'match-artno-not-found': 'ArtNo/EAN nicht im Stamm',
+  'match-artno-not-found': 'Artikelnummer/EAN nicht im Stamm',
   'match-ean-not-found': 'EAN nicht im Stamm',
-  'match-conflict-id': 'ArtNo/EAN-Konflikt',
+  'match-conflict-id': 'Artikelnummer/EAN-Konflikt',
   // PROJ-17 Step 3
   'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
   'sn-regex-failed': 'S/N Regex kein Treffer',
   'sn-insufficient-count': 'Zu wenige Seriennummern',
   // PROJ-21 Step 4
-  'order-incomplete': 'Bestellung unvollstÃ¤ndig',
+  'order-incomplete': 'Bestellung unvollständig',
   'order-multi-split': 'Mehrfach-Split (3+)',
   'order-fifo-only': 'Nur FIFO-Zuweisung',
 };
 
-// â”€â”€ Quick-Fix hints per issue type (Lightbulb banners) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Quick-Fix hints per issue type (Lightbulb banners) ────────────────────
 const quickFixHints: Partial<Record<IssueType, string>> = {
   'match-artno-not-found':
-    'Artikelstamm aktualisieren oder Artikelnummer in der Rechnung prÃ¼fen. Der Stamm muss die Lieferanten-ArtNo enthalten.',
+    'Artikelstamm aktualisieren oder Artikelnummer in der Rechnung pruefen. Der Stamm muss die Herstellerartikelnummer enthalten.',
   'match-ean-not-found':
-    'EAN im Artikelstamm fehlt oder weicht von der Rechnung ab. Stammdaten ergÃ¤nzen.',
+    'EAN im Artikelstamm fehlt oder weicht von der Rechnung ab. Stammdaten ergaenzen.',
   'match-conflict-id':
-    'ArtNo und EAN zeigen auf unterschiedliche Artikel im Stamm â€” Stammdaten bereinigen, damit ArtNo und EAN denselben Artikel referenzieren.',
+    'Artikelnummer und EAN zeigen auf unterschiedliche Artikel im Stamm - Stammdaten bereinigen, damit Artikelnummer und EAN denselben Artikel referenzieren.',
   'sn-invoice-ref-missing':
-    'Die 5-stellige Rechnungsreferenz fehlt im Warenbegleitschein. Stimmt die Rechnungsnummer im Dokument? Format: letzte 5 Ziffern der Fattura-Nr.',
+    'Die 5-stellige Rechnungsreferenz fehlt im Warenbegleitschein. Stimmt die Rechnungsnummer im Dokument? Format: letzte 5 Ziffern der Fattura-Nr. / Rechnungsnummer',
   'sn-insufficient-count':
-    'Nicht genug Seriennummern im S/N-Dokument fÃ¼r alle Pflicht-Zeilen. Weitere Zeilen im Warenbegleitschein suchen oder S/N manuell nachtragen.',
+    'Nicht genug Seriennummern im S/N-Dokument fuer alle Pflicht-Zeilen. Weitere Zeilen im Warenbegleitschein suchen oder S/N manuell nachtragen.',
   // PROJ-21 Step 4
   'order-incomplete':
-    'Position nicht vollstÃ¤ndig zugeordnet â€” Restmenge prÃ¼fen. Offene Bestellungen ergÃ¤nzen oder manuell zuweisen.',
+    'Position nicht vollständig zugeordnet - Restmenge pruefen. Offene Bestellungen ergaenzen oder manuell zuweisen.',
   'order-multi-split':
-    'Position wurde auf 3+ verschiedene Bestellungen aufgeteilt. PrÃ¼fen, ob die Splittung korrekt ist.',
+    'Position wurde auf 3+ verschiedene Bestellungen aufgeteilt. pruefen, ob die Splittung korrekt ist.',
   'order-fifo-only':
-    'Keine Belegnummer aus dem PDF erkannt â€” Zuordnung erfolgte nur nach FIFO-Regel (Ã¤lteste zuerst). Belegnummer im PDF prÃ¼fen.',
+    'Keine Belegnummer aus dem PDF erkannt. "Zuordnung erfolgte nur nach FIFO-Regel (aelterste zuerst). Belegnummer im PDF oder des offenen Bestell-Verzeichnises pruefen."',
+};
+
+const quickFixLabelOverrides: Partial<Record<IssueType, string>> = {
+  'order-fifo-only': 'STEP 4 - BESTELLZUWEISUNG FIFO Zuweisung',
 };
 
 // Step labels for section headers
@@ -78,8 +97,163 @@ const stepLabels: Record<number, string> = {
   5: 'Schritt 5 - Export',
 };
 
+const BODY_LINE_LIMIT = 30;
+
+// ── IssueCard sub-component ────────────────────────────────────────────────
+
+interface IssueCardProps {
+  issue: Issue;
+  invoiceLines: InvoiceLine[];
+  onSend: (issue: Issue) => void;
+  onIsolate: (ids: string[]) => void;
+}
+
+function IssueCard({ issue, invoiceLines, onSend, onIsolate }: IssueCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const { isCopied, copy } = useCopyToClipboard(1500);
+
+  // On-the-fly rendering: look up InvoiceLines for affectedLineIds
+  const affectedLines = useMemo(() => {
+    if (!issue.affectedLineIds || issue.affectedLineIds.length === 0) return [];
+    const lineMap = new Map(invoiceLines.map(l => [l.lineId, l]));
+    return issue.affectedLineIds
+      .map(id => lineMap.get(id))
+      .filter((l): l is InvoiceLine => l != null);
+  }, [issue.affectedLineIds, invoiceLines]);
+
+  const displayLines = affectedLines.slice(0, BODY_LINE_LIMIT);
+  const overflow = affectedLines.length - BODY_LINE_LIMIT;
+
+  const handleCopy = () => {
+    const text = buildIssueClipboardText(issue, invoiceLines);
+    copy(text);
+  };
+
+  const hasBody = affectedLines.length > 0;
+
+  return (
+    <div
+      className={`enterprise-card border-l-4 ${
+        issue.severity === 'error'
+          ? 'border-l-status-failed'
+          : issue.severity === 'warning'
+          ? 'border-l-status-soft-fail'
+          : 'border-l-blue-400'
+      }`}
+    >
+      {/* HEADER */}
+      <div className="flex items-start justify-between gap-4 px-4 pt-4 pb-2">
+        {/* Left: badges + message */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <SeverityBadge severity={issue.severity} />
+            <span className="text-xs text-white bg-muted px-2 py-0.5 rounded">
+              {issueTypeLabels[issue.type] ?? issue.type}
+            </span>
+          </div>
+          <p className="font-medium text-foreground text-sm leading-snug">{issue.message}</p>
+        </div>
+
+        {/* Right: action buttons */}
+        <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
+          {/* Betroffene Zeilen isolieren */}
+          {issue.affectedLineIds && issue.affectedLineIds.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-xs h-7 px-2"
+              onClick={() => onIsolate(issue.affectedLineIds)}
+              title="Betroffene Zeilen in Artikelliste isolieren"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              Zeilen isolieren
+            </Button>
+          )}
+
+          {/* Kopieren */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`gap-1 text-xs h-7 px-2 ${isCopied ? 'text-green-600' : ''}`}
+            onClick={handleCopy}
+            title="Problem-Details in die Zwischenablage kopieren"
+          >
+            {isCopied ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                Kopiert!
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                kopieren
+              </>
+            )}
+          </Button>
+
+          {/* Senden — bestehend, UNVERAENDERT */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 text-xs h-7 px-2"
+            onClick={() => onSend(issue)}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Senden
+          </Button>
+        </div>
+      </div>
+
+      {/* BODY — on-the-fly rendered lines from affectedLineIds */}
+      {hasBody && (
+        <div className="px-4">
+          <div
+            className={`
+              transition-all duration-500 ease-in-out overflow-y-auto
+              ${expanded ? 'max-h-[5000px]' : 'max-h-[130px]'}
+            `}
+          >
+            <pre className="whitespace-pre-wrap font-mono text-xs text-muted-foreground leading-relaxed">
+              {displayLines.map(formatLineForDisplay).join('\n')}
+              {overflow > 0 && `\n... (+${overflow} weitere Positionen)`}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {/* FOOTER — ChevronsDown/Up (only when body has content) */}
+      {hasBody && (
+        <div className="flex justify-center py-1 border-t border-border/30 mt-2">
+          <button
+            className="text-muted-foreground/50 hover:text-muted-foreground transition-colors p-1 rounded"
+            onClick={() => setExpanded(e => !e)}
+            aria-label={expanded ? 'Einklappen' : 'Ausklappen'}
+          >
+            {expanded ? (
+              <ChevronsUp className="w-5 h-5" />
+            ) : (
+              <ChevronsDown className="w-5 h-5 animate-pulse" />
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── IssuesCenter (main export) ─────────────────────────────────────────────
+
 export function IssuesCenter() {
-  const { issues, resolveIssue, currentRun, issuesStepFilter, setIssuesStepFilter, navigateToLine } = useRunStore();
+  const {
+    issues,
+    resolveIssue,
+    currentRun,
+    issuesStepFilter,
+    setIssuesStepFilter,
+    invoiceLines: allInvoiceLines,
+    setActiveIssueFilterIds,
+    setActiveTab,
+  } = useRunStore();
 
   // Sync store-driven filter (from KPI-click navigation) into local state
   const [stepFilter, setStepFilter] = useState<string>(issuesStepFilter ?? 'all');
@@ -87,6 +261,11 @@ export function IssuesCenter() {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
+
+  // Filter invoice lines to current run
+  const invoiceLines = currentRun
+    ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
+    : allInvoiceLines;
 
   // When the store filter changes (KPI navigation), sync local state
   useEffect(() => {
@@ -158,12 +337,32 @@ export function IssuesCenter() {
     a.click();
   };
 
+  // "Betroffene Zeilen isolieren" — sets filter + switches to items tab
+  const handleIsolate = (ids: string[]) => {
+    setActiveIssueFilterIds(ids);
+    setActiveTab('items');
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
       <div className="enterprise-card p-4">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
+            {/* PROJ-37: FilterX — reset all 3 dropdowns, visible when any filter is active */}
+            {(stepFilter !== 'all' || severityFilter !== 'all' || typeFilter !== 'all') && (
+              <button
+                className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground"
+                onClick={() => {
+                  setStepFilter('all');
+                  setSeverityFilter('all');
+                  setTypeFilter('all');
+                }}
+                title="Alle Filter zuruecksetzen"
+              >
+                <FilterX className="w-4 h-4" />
+              </button>
+            )}
             <Filter className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium">Filter:</span>
           </div>
@@ -231,7 +430,7 @@ export function IssuesCenter() {
         </div>
       </div>
 
-      {/* Quick-Fix Banners (Lightbulb) â€” shown when relevant issue types are open */}
+      {/* Quick-Fix Banners (Lightbulb) — shown when relevant issue types are open */}
       {presentQuickFixTypes.length > 0 && (
         <div className="space-y-2">
           {presentQuickFixTypes.map(type => (
@@ -242,9 +441,11 @@ export function IssuesCenter() {
               <Lightbulb className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" />
               <div>
                 <span className="font-medium text-amber-300">
-                  {issueTypeLabels[type] ?? type}:
+                  {(quickFixLabelOverrides[type] ?? issueTypeLabels[type] ?? type)}:
                 </span>{' '}
-                <span className="text-muted-foreground">{quickFixHints[type]}</span>
+                <span className="text-black">
+                  {quickFixHints[type]}
+                </span>
               </div>
             </div>
           ))}
@@ -256,14 +457,14 @@ export function IssuesCenter() {
         {openIssues.length === 0 && resolvedIssues.length === 0 ? (
           <div className="enterprise-card p-8 text-center">
             <CheckCircle2 className="w-12 h-12 text-status-ok mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-foreground">Keine Issues</h3>
+            <h3 className="text-lg font-semibold text-foreground">Keine Probleme</h3>
             <p className="text-muted-foreground mt-1">
               Alle Validierungen wurden erfolgreich abgeschlossen.
             </p>
           </div>
         ) : (
           <>
-            {/* Open issues â€” grouped by step */}
+            {/* Open issues — grouped by step */}
             {stepNos.map(stepNo => {
               const stepIssues = issuesByStep.get(stepNo) ?? [];
               return (
@@ -275,51 +476,13 @@ export function IssuesCenter() {
                     </span>
                   </h3>
                   {stepIssues.map(issue => (
-                    <div
+                    <IssueCard
                       key={issue.id}
-                      className={`enterprise-card p-4 border-l-4 ${
-                        issue.severity === 'error'
-                          ? 'border-l-status-failed'
-                          : issue.severity === 'warning'
-                          ? 'border-l-status-soft-fail'
-                          : 'border-l-blue-400'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <SeverityBadge severity={issue.severity} />
-                            <span className="text-xs text-white bg-muted px-2 py-0.5 rounded">
-                              {issueTypeLabels[issue.type] ?? issue.type}
-                            </span>
-                          </div>
-                          <h4 className="font-medium text-foreground mb-1">{issue.message}</h4>
-                          <p className="text-sm text-muted-foreground">{issue.details}</p>
-                        </div>
-                        <div className="flex gap-2 flex-shrink-0">
-                          {issue.relatedLineIds.length > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="gap-1"
-                              onClick={() => navigateToLine(issue.relatedLineIds)}
-                            >
-                              <ArrowRight className="w-3.5 h-3.5" />
-                              Zeile anzeigen
-                            </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1"
-                            onClick={() => setSelectedIssue(issue)}
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            Senden
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
+                      issue={issue}
+                      invoiceLines={invoiceLines}
+                      onSend={setSelectedIssue}
+                      onIsolate={handleIsolate}
+                    />
                   ))}
                 </div>
               );
@@ -339,7 +502,7 @@ export function IssuesCenter() {
                         <h4 className="font-medium text-foreground line-through">{issue.message}</h4>
                         {issue.resolutionNote && (
                           <p className="text-sm text-muted-foreground mt-1">
-                            LÃ¶sung: {issue.resolutionNote}
+                            Lösung: {issue.resolutionNote}
                           </p>
                         )}
                       </div>
@@ -356,13 +519,13 @@ export function IssuesCenter() {
       <Dialog open={!!selectedIssue} onOpenChange={() => setSelectedIssue(null)}>
         <DialogContent className="bg-card">
           <DialogHeader>
-            <DialogTitle>Issue lÃ¶sen</DialogTitle>
+            <DialogTitle>Problem lösen</DialogTitle>
             <DialogDescription>{selectedIssue?.message}</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-muted-foreground mb-4">{selectedIssue?.details}</p>
             <Textarea
-              placeholder="LÃ¶sungsnotiz (optional)..."
+              placeholder="Lösungsnotiz (optional)..."
               value={resolutionNote}
               onChange={e => setResolutionNote(e.target.value)}
               className="bg-surface-elevated"
@@ -372,12 +535,10 @@ export function IssuesCenter() {
             <Button variant="outline" onClick={() => setSelectedIssue(null)}>
               Abbrechen
             </Button>
-            <Button onClick={handleResolve}>Als gelÃ¶st markieren</Button>
+            <Button onClick={handleResolve}>Als gelöst markieren</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
-
