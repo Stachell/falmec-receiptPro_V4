@@ -70,6 +70,8 @@ interface TableRow_ {
   expandedLineCount: number;
   /** Rechnungssumme — aus stats falls verfügbar */
   invoiceTotal: number | null;
+  /** Summen-Check bestanden (true), fehlgeschlagen (false), oder ungeprüft (null) */
+  step1AmountCheckPassed: boolean | null;
   exportReady: boolean;
   /** Full run object — only present for session runs */
   run?: Run;
@@ -87,7 +89,12 @@ function toTableRow(run: Run): TableRow_ {
     totalIssues,
     parsedInvoiceLines: run.stats.parsedInvoiceLines,
     expandedLineCount: run.stats.expandedLineCount,
-    invoiceTotal: null, // computed from invoiceLines if needed — not cached in stats
+    invoiceTotal: run.invoice.invoiceTotal ?? null,
+    step1AmountCheckPassed: run.invoice.qtyValidationStatus === 'ok'
+      ? true
+      : run.invoice.qtyValidationStatus === 'mismatch'
+        ? false
+        : null,
     exportReady: run.stats.exportReady,
     run,
   };
@@ -102,7 +109,8 @@ function persistedToTableRow(s: PersistedRunSummary): TableRow_ {
     totalIssues: 0, // not stored in summary
     parsedInvoiceLines: s.stats.parsedInvoiceLines,
     expandedLineCount: s.stats.expandedLineCount,
-    invoiceTotal: null,
+    invoiceTotal: s.invoiceTotal,
+    step1AmountCheckPassed: s.step1AmountCheckPassed,
     exportReady: s.stats.exportReady,
     isPersistedOnly: true,
   };
@@ -299,7 +307,12 @@ const Index = () => {
 
                   {/* PROJ-22 B5: Rechnungssumme */}
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {row.invoiceTotal != null ? formatCurrency(row.invoiceTotal) : '–'}
+                    {row.invoiceTotal == null
+                      ? '–'
+                      : row.step1AmountCheckPassed === false
+                        ? <AlertTriangle className="w-4 h-4 text-red-500 inline" title="Summen-Konflikt" />
+                        : formatCurrency(row.invoiceTotal)
+                    }
                   </TableCell>
 
                   {/* Status */}

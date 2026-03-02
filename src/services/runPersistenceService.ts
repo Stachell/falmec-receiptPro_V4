@@ -50,6 +50,8 @@ export interface PersistedRunSummary {
   status: Run['status'];
   sizeEstimateBytes: number;
   stats: Run['stats'];
+  invoiceTotal: number | null;
+  step1AmountCheckPassed: boolean | null;
 }
 
 export interface StorageStats {
@@ -173,16 +175,30 @@ async function loadRunList(): Promise<PersistedRunSummary[]> {
 
       request.onsuccess = () => {
         const runs = request.result as PersistedRunData[];
-        const summaries: PersistedRunSummary[] = runs.map(r => ({
-          id: r.id,
-          fattura: r.run.invoice.fattura,
-          invoiceDate: r.run.invoice.invoiceDate,
-          createdAt: r.run.createdAt,
-          savedAt: r.savedAt,
-          status: r.run.status,
-          sizeEstimateBytes: r.sizeEstimateBytes,
-          stats: r.run.stats,
-        }));
+        const summaries: PersistedRunSummary[] = runs.map(r => {
+          const invoiceTotal = r.run.invoice.invoiceTotal ?? null;
+          let step1AmountCheckPassed: boolean | null = null;
+          if (invoiceTotal != null) {
+            if (r.run.invoice.qtyValidationStatus !== 'ok') {
+              step1AmountCheckPassed = false;
+            } else {
+              const lineSum = r.invoiceLines.reduce((s, l) => s + l.totalLineAmount, 0);
+              step1AmountCheckPassed = Math.abs(lineSum - invoiceTotal) < 0.10;
+            }
+          }
+          return {
+            id: r.id,
+            fattura: r.run.invoice.fattura,
+            invoiceDate: r.run.invoice.invoiceDate,
+            createdAt: r.run.createdAt,
+            savedAt: r.savedAt,
+            status: r.run.status,
+            sizeEstimateBytes: r.sizeEstimateBytes,
+            stats: r.run.stats,
+            invoiceTotal,
+            step1AmountCheckPassed,
+          };
+        });
 
         // Sort newest first
         summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

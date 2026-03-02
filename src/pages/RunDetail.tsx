@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, CheckCircle2, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, CheckCircle2, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AppLayout } from '@/components/AppLayout';
 import { WorkflowStepper } from '@/components/WorkflowStepper';
@@ -95,14 +95,34 @@ export default function RunDetail() {
     return seen.size;
   }, [currentRunLines]);
 
+  // PROJ-29 Korrektur Rev. 2: qty-basierte Zähler für Kacheln 3, 4, 5
+  // runStore.stats.*Count-Felder zählen Invoice-Lines (Zeilen), nicht qty — daher eigene Memos.
+  const priceOkQtySum = useMemo(
+    () => currentRunLines
+      .filter(l => l.priceCheckStatus === 'ok' || l.priceCheckStatus === 'custom')
+      .reduce((s, l) => s + l.qty, 0),
+    [currentRunLines]
+  );
+  const serialMatchedQtySum = useMemo(
+    () => currentRunLines
+      .filter(l => l.serialRequired === true && l.serialNumbers.length >= l.qty)
+      .reduce((s, l) => s + l.qty, 0),
+    [currentRunLines]
+  );
+  const matchedOrdersQtySum = useMemo(
+    () => currentRunLines.reduce(
+      (s, l) => s + l.allocatedOrders.reduce((a, o) => a + o.qty, 0),
+      0
+    ),
+    [currentRunLines]
+  );
+
   // ─── PROJ-29 Add-On 1: First-Check (Single Source of Truth für variant-Prop + Double-Check-Guard) ───
   // Exakte Kopie der bisherigen Inline-variant-Expressions. Werden im JSX als variant={kachelXVariant} verwendet.
   const kachel1Variant = (
-    parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
-      ? 'warning' as const
-      : parsedInvoiceResult?.header.qtyValidationStatus === 'ok'
-        ? 'success' as const
-        : 'default' as const
+    currentRun?.invoice.invoiceTotal != null
+      ? 'success' as const
+      : 'default' as const
   );
   const isKachel1FirstCheck = kachel1Variant === 'success';
 
@@ -141,22 +161,24 @@ export default function RunDetail() {
   );
   const isKachel5FirstCheck = kachel5Variant === 'success';
 
-  // 4. isKachel1Verified — First-Check + Zeilensummen vs. invoiceTotal (Toleranz < 0,10 €)
+  // 4. isKachel1Verified — First-Check + Σ(qty*unitPriceInvoice) vs. invoiceTotal (Toleranz < 0,10 €)
   const isKachel1Verified = useMemo(() => {
     if (!isKachel1FirstCheck) return false;
-    const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
+    const invoiceTotal = currentRun?.invoice.invoiceTotal;
     if (invoiceTotal == null || currentRunLines.length === 0) return false;
-    const lineSum = currentRunLines.reduce((s, l) => s + l.totalLineAmount, 0);
+    const lineSum = currentRunLines.reduce((s, l) => s + l.qty * l.unitPriceInvoice, 0);
     return Math.abs(lineSum - invoiceTotal) < 0.10;
-  }, [isKachel1FirstCheck, currentRunLines, currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal]);
+  }, [isKachel1FirstCheck, currentRunLines, currentRun?.invoice.invoiceTotal]);
 
-  // 5. isKachel2Verified — First-Check + Qty-Summe == packagesCount
+  // 5. isKachel2Verified — First-Check + Qty-Summe == packagesCount + alle Zeilen full-match
   const isKachel2Verified = useMemo(() => {
     if (!isKachel2FirstCheck) return false;
-    const pkg = parsedInvoiceResult?.header.packagesCount ?? currentRun?.invoice.packagesCount;
+    const pkg = currentRun?.invoice.packagesCount;
     if (pkg == null || pkg === 0 || currentRunLines.length === 0) return false;
-    return currentRunLines.reduce((s, l) => s + l.qty, 0) === pkg;
-  }, [isKachel2FirstCheck, currentRunLines, parsedInvoiceResult?.header.packagesCount, currentRun?.invoice.packagesCount]);
+    const qtyMatch = currentRunLines.reduce((s, l) => s + l.qty, 0) === pkg;
+    const allFullMatch = currentRunLines.every(l => l.matchStatus === 'full-match');
+    return qtyMatch && allFullMatch;
+  }, [isKachel2FirstCheck, currentRunLines, currentRun?.invoice.packagesCount]);
 
   // 6. isKachel3Verified — First-Check + 0 Preisabweichungen UND mind. 1 OK-Preis
   const isKachel3Verified = useMemo(() => {
@@ -210,15 +232,14 @@ export default function RunDetail() {
 
   // 9. SubValue-Strings (Zeile 3) für Kacheln 1, 2, 4, 5
   const kachel1SubValue = useMemo(() => {
-    const invoiceTotal = currentRun?.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal;
+    const invoiceTotal = currentRun?.invoice.invoiceTotal;
     if (invoiceTotal != null) {
       return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Rechnungssumme`;
     }
-    return parsedInvoiceResult?.header.qtyValidationStatus === 'mismatch'
+    return currentRun?.invoice.qtyValidationStatus === 'mismatch'
       ? 'Fehler: Anzahl stimmt nicht'
-      : (parsedInvoiceResult?.header.fatturaNumber ?? 'n/a');
-  }, [currentRun?.invoice.invoiceTotal, parsedInvoiceResult?.header.invoiceTotal,
-      parsedInvoiceResult?.header.qtyValidationStatus, parsedInvoiceResult?.header.fatturaNumber]);
+      : (currentRun?.invoice.fattura ?? 'n/a');
+  }, [currentRun?.invoice.invoiceTotal, currentRun?.invoice.qtyValidationStatus, currentRun?.invoice.fattura]);
 
   const kachel2SubValue = useMemo(() => {
     const pkg = parsedInvoiceResult?.header.packagesCount ?? currentRun?.invoice.packagesCount;
@@ -558,7 +579,7 @@ export default function RunDetail() {
         <KPIGrid className="mb-6">
           {/* Kachel 1: Positionen erhalten — PROJ-20 / PROJ-29 */}
           <KPITile
-            value={`${currentRun.stats.parsedInvoiceLines} / ${parsedInvoiceResult?.header.pzCount ?? parsedInvoiceResult?.header.parsedPositionsCount ?? '?'}`}
+            value={`${currentRun.stats.parsedInvoiceLines} / ${currentRun.invoice.targetPositionsCount ?? '?'}`}
             label="Positionen eingelesen"
             subValue={kachel1SubValue}
             variant={kachel1Variant}
@@ -566,7 +587,7 @@ export default function RunDetail() {
           />
           {/* Kachel 2: Artikel extrahiert — PROJ-20 / PROJ-29 */}
           <KPITile
-            value={`${currentRun.stats.articleMatchedCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            value={`${currentRun.stats.articleMatchedCount}/${currentRun.invoice.targetPositionsCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
             label="Positionen extrahiert"
             subValue={kachel2SubValue}
             variant={kachel2Variant}
@@ -578,7 +599,7 @@ export default function RunDetail() {
           />
           {/* Kachel 3: Preise checken — PROJ-29 */}
           <KPITile
-            value={`${currentRun.stats.priceOkCount}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            value={`${priceOkQtySum}/${currentRun.invoice.targetArticleCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
             label="Preise geprüft"
             subValue={kachel3SubValue}
             variant={kachel3Variant}
@@ -586,7 +607,7 @@ export default function RunDetail() {
           />
           {/* Kachel 4: Serials geparst — PROJ-20 / PROJ-29 */}
           <KPITile
-            value={`${currentRun.stats.serialMatchedCount}/${currentRun.stats.serialRequiredCount || '?'}`}
+            value={`${serialMatchedQtySum}/${serialRequiredQtySum || '?'}`}
             label="Serials geparst"
             icon={<Fingerprint className="w-4 h-4" />}
             subValue={kachel4SubValue}
@@ -599,7 +620,7 @@ export default function RunDetail() {
           />
           {/* Kachel 5: Bestellungen mappen — PROJ-29 */}
           <KPITile
-            value={`${currentRun.stats.matchedOrders}/${currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines}`}
+            value={`${matchedOrdersQtySum}/${currentRun.invoice.targetArticleCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
             label="Beleg zugeteilt"
             subValue={kachel5SubValue}
             variant={kachel5Variant}
@@ -804,6 +825,19 @@ export default function RunDetail() {
           </TabsContent>
 
           <TabsContent value="issues">
+            {/* PROJ-29 ADD-ON 13: Soft-Fail Warnung — Derived State, kein useEffect/Store-Write */}
+            {isKachel1FirstCheck && !isKachel1Verified && (
+              <div className="flex items-start gap-3 rounded-md border border-amber-400/50 bg-amber-50/10 px-4 py-3 text-sm mb-4">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" />
+                <div>
+                  <span className="font-semibold text-amber-300">Rechnungssummen-Konflikt (Soft-Fail):</span>{' '}
+                  <span className="text-muted-foreground">
+                    Zeilensumme stimmt nicht mit Rechnungsbetrag überein — mögliche Rundungsdifferenz
+                    oder versteckter Rabatt im Fremd-ERP. Bitte Positionen und Gesamtsumme manuell prüfen.
+                  </span>
+                </div>
+              </div>
+            )}
             <IssuesCenter />
           </TabsContent>
 

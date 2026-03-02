@@ -434,6 +434,8 @@ interface RunState {
   /** PROJ-20: Update ALL lines with a given positionIndex (cascading from aggregated view) */
   updatePositionLines: (positionIndex: number, updates: Partial<InvoiceLine>) => void;
   resolveIssue: (issueId: string, resolutionNote: string) => void;
+  /** PROJ-39: Mark issue as escalated (status stays 'open') */
+  escalateIssue: (issueId: string, recipientEmail: string) => void;
   addAuditEntry: (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) => void;
 
   // Parsing actions
@@ -1251,6 +1253,9 @@ export const useRunStore = create<RunState>((set, get) => ({
             packagesCount: result.header.packagesCount,
             invoiceTotal: result.header.invoiceTotal ?? null,
             totalQty: result.header.totalQty,
+            qtyValidationStatus: result.header.qtyValidationStatus,
+            targetArticleCount: invoiceLines.reduce((sum, l) => sum + l.qty, 0),
+            targetPositionsCount: result.lines.length,
           },
           // PROJ-23: invoiceLines are now aggregated (qty>1), so expandedLineCount
           // represents the total individual articles (sum of all qty values).
@@ -1762,6 +1767,19 @@ export const useRunStore = create<RunState>((set, get) => ({
             status: 'resolved' as const,
             resolvedAt: new Date().toISOString(),
             resolutionNote,
+          }
+        : issue
+    ),
+  })),
+
+  // PROJ-39: Escalate issue — status stays 'open', only sets escalatedAt + escalatedTo
+  escalateIssue: (issueId, recipientEmail) => set((state) => ({
+    issues: state.issues.map(issue =>
+      issue.id === issueId
+        ? {
+            ...issue,
+            escalatedAt: new Date().toISOString(),
+            escalatedTo: recipientEmail,
           }
         : issue
     ),

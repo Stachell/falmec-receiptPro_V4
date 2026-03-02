@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
   Select,
@@ -53,6 +54,7 @@ import {
   resolveOrderParserProfile,
 } from '@/services/matching/orderParserProfiles';
 import { OverrideEditorModal } from '@/components/OverrideEditorModal';
+import { getStoredEmailAddresses, saveEmailAddresses, isValidEmail } from '@/lib/errorHandlingConfig';
 
 interface SettingsPopupProps {
   open: boolean;
@@ -274,11 +276,35 @@ export function SettingsPopup({
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // PROJ-39: Fehlerhandling email addresses (5 slots)
+  const [emailAddresses, setEmailAddresses] = useState<string[]>(['', '', '', '', '']);
+  const handleUpdateAddress = (index: number, value: string) => {
+    setEmailAddresses(prev => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+  const handleSaveEmails = () => {
+    saveEmailAddresses(emailAddresses);
+    toast.success('E-Mail-Adressen gespeichert');
+  };
+
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
     }
   }, [open, initialTab]);
+
+  // PROJ-39: Load stored emails when popup opens
+  useEffect(() => {
+    if (open) {
+      const stored = getStoredEmailAddresses();
+      const slots: string[] = ['', '', '', '', ''];
+      stored.forEach((addr, i) => { if (i < 5) slots[i] = addr; });
+      setEmailAddresses(slots);
+    }
+  }, [open]);
 
   // Parser-Verwaltung state
   const [parserToDelete, setParserToDelete] = useState('');
@@ -617,6 +643,38 @@ export function SettingsPopup({
                       }
                       className="h-8 w-28 text-sm bg-white"
                     />
+                  </div>
+                </div>
+
+                {/* PROJ-39: Separator 3 — Fehlerhandling */}
+                <div className="border-t border-border pt-3 space-y-3">
+                  <Label className="text-sm font-semibold">Fehlerhandling</Label>
+                  <p className="text-xs text-muted-foreground">
+                    E-Mail-Adressen fuer Fehlerweiterleitung
+                  </p>
+
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-4">
+                      <Label className="text-sm whitespace-nowrap">Adresse {i + 1}</Label>
+                      <Input
+                        type="email"
+                        value={emailAddresses[i] ?? ''}
+                        onChange={(e) => handleUpdateAddress(i, e.target.value)}
+                        placeholder="name@firma.de"
+                        className={`h-8 flex-1 max-w-[280px] text-sm bg-white ${
+                          emailAddresses[i] && !isValidEmail(emailAddresses[i])
+                            ? 'border-amber-400'
+                            : ''
+                        }`}
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex items-center gap-3">
+                    <Button size="sm" onClick={handleSaveEmails}>Speichern</Button>
+                    <p className="text-xs text-muted-foreground">
+                      Gespeicherte Adressen erscheinen im Fehler-Popup als Empfaenger.
+                    </p>
                   </div>
                 </div>
               </TabsContent>

@@ -2,8 +2,77 @@
  * PROJ-37 — Issue Line Formatter
  * Pure UI-side helpers. NO backend/service imports.
  * Builds display strings from InvoiceLine objects for IssueCard body + clipboard.
+ *
+ * PROJ-39: added generateMailtoLink for escalation via mailto:
  */
 import type { InvoiceLine, Issue } from '@/types';
+
+const MAILTO_LINE_LIMIT = 10; // mailto: URI length safety
+const ISSUE_TYPE_LABELS_FOR_MAIL: Record<string, string> = {
+  'order-assignment': 'Bestellzuordnung',
+  'serial-mismatch': 'Seriennummer-Fehler',
+  'price-mismatch': 'Preisabweichung',
+  'inactive-article': 'Inaktiver Artikel',
+  'missing-storage-location': 'Fehlender Lagerort',
+  'missing-ean': 'Fehlende EAN',
+  'parser-error': 'Parser-Fehler',
+  'no-article-match': 'Artikel nicht gefunden',
+  'price-missing': 'Preis fehlt',
+  'order-no-match': 'Bestellung nicht zuordenbar',
+  'conflict': 'Identifier-Konflikt',
+  'match-artno-not-found': 'Artikelnummer/EAN nicht im Stamm',
+  'match-ean-not-found': 'EAN nicht im Stamm',
+  'match-conflict-id': 'Artikelnummer/EAN-Konflikt',
+  'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
+  'sn-regex-failed': 'S/N Regex kein Treffer',
+  'sn-insufficient-count': 'Zu wenige Seriennummern',
+  'order-incomplete': 'Bestellung unvollstaendig',
+  'order-multi-split': 'Mehrfach-Split (3+)',
+  'order-fifo-only': 'Nur FIFO-Zuweisung',
+};
+
+/**
+ * PROJ-39: Generate a mailto: link for escalating an issue via email.
+ * Body is limited to MAILTO_LINE_LIMIT affected lines to avoid URI length overflow.
+ * Returns the mailto: string — caller must also copy full text to clipboard separately.
+ */
+export function generateMailtoLink(
+  issue: Issue,
+  recipient: string,
+  allLines: InvoiceLine[],
+): string {
+  const typeLabel = ISSUE_TYPE_LABELS_FOR_MAIL[issue.type] ?? issue.type;
+  const severityLabel =
+    issue.severity === 'error' ? 'Fehler' :
+    issue.severity === 'warning' ? 'Warnung' : 'Info';
+
+  const subject = encodeURIComponent(`[FALMEC-ReceiptPro] ${severityLabel}: ${issue.message}`);
+
+  // Resolve affected lines
+  const lineMap = new Map(allLines.map(l => [l.lineId, l]));
+  const affectedLines = (issue.affectedLineIds ?? [])
+    .map(id => lineMap.get(id))
+    .filter((l): l is InvoiceLine => l != null);
+  const displayLines = affectedLines.slice(0, MAILTO_LINE_LIMIT);
+  const overflow = affectedLines.length - displayLines.length;
+
+  const bodyParts: string[] = [
+    `Fehlertyp: ${typeLabel}`,
+    `Schweregrad: ${severityLabel}`,
+    `Schritt: ${issue.stepNo}`,
+    `Meldung: ${issue.message}`,
+    `Details: ${issue.details}`,
+    '',
+    'Betroffene Positionen:',
+    ...displayLines.map(formatLineForDisplay),
+    ...(overflow > 0 ? [`... und ${overflow} weitere Positionen`] : []),
+    '',
+    '--- Automatisch generiert von FALMEC-ReceiptPro ---',
+  ];
+
+  const body = encodeURIComponent(bodyParts.join('\n'));
+  return `mailto:${encodeURIComponent(recipient)}?subject=${subject}&body=${body}`;
+}
 
 const LINE_LIMIT = 30;
 

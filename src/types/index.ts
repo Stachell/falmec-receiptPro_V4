@@ -213,6 +213,10 @@ export interface InvoiceHeader {
   pzCount?: number;
   /** Validation status: positions count vs totalQty */
   qtyValidationStatus?: 'ok' | 'mismatch' | 'unknown';
+  /** Frozen snapshot: Σ(qty) of all invoice lines at parse time. Never overwritten by later steps. */
+  targetArticleCount?: number;
+  /** Frozen snapshot: number of distinct invoice positions at parse time. Never overwritten by later steps. */
+  targetPositionsCount?: number;
 }
 
 /** Order status from invoice parsing */
@@ -360,6 +364,9 @@ export interface Issue {
     expectedValue?: string;        // Expected value (for auto-resolve check)
     actualValue?: string;          // Current value
   };
+  // PROJ-39: Escalation fields — KISS: status stays 'open' | 'resolved', no new enum value
+  escalatedAt?: string;            // ISO timestamp when issue was escalated (optional)
+  escalatedTo?: string;            // Recipient email address (optional)
 }
 
 export interface AuditLogEntry {

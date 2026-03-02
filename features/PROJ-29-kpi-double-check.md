@@ -349,6 +349,179 @@ Der alte Consumer-Effect hatte `[checkpointQueue, activeCheckpoint]` als Depende
 ### Betroffene Dateien
 - `src/pages/RunDetail.tsx` — Kachel-3-subValue angepasst, `showVerifiedIcon={false}` entfernt
 
+## ADD-ON 10: Step 1 Summen-Check Persistierung & Archiv-Fix (2026-03-01)
+
+### Kontext
+
+Zwei Architektur-Bugs blockieren den vollen Nutzen des Step-1-Checks:
+- **Bug 1:** Kachel 1 liest `qtyValidationStatus` vom flüchtigen globalen Parser-State (`parsedInvoiceResult`) statt vom persistierten `run.invoice`. Bei State-Reset oder Run-Wechsel fällt die Kachel auf `'default'` zurück.
+- **Bug 2:** Die Archiv-Tabelle zeigt immer `–` als Rechnungssumme, weil `PersistedRunSummary` kein `invoiceTotal`-Feld hat und beide Mapping-Funktionen `invoiceTotal: null` setzen.
+
+### Bugfixes
+
+**Bug 1 — `qtyValidationStatus` in `run.invoice` persistieren:**
+- In `runStore.ts`: Beim Schreiben des `invoice`-Objekts nach dem Parsen wird `qtyValidationStatus` aus `result.header` übernommen (fehlte bisher)
+- In `RunDetail.tsx`: `kachel1Variant`, `kachel1SubValue` und `isKachel1Verified` lesen ab sofort von `currentRun.invoice` statt von `parsedInvoiceResult` — vollständige Entkopplung vom flüchtigen Parser-State
+- Andere Kacheln (2–5) bleiben unverändert
+
+**Bug 2 — `PersistedRunSummary` erweitern:**
+- Interface erhält zwei neue Felder: `invoiceTotal` (number | null) und `step1AmountCheckPassed` (boolean | null)
+- `loadRunList()` befüllt diese Felder bei der Summary-Erstellung aus den persistierten Run-Daten
+- `step1AmountCheckPassed` wird analog zur `isKachel1Verified`-Logik berechnet: Toleranz < 0,10 EUR zwischen Zeilensumme und Rechnungssumme
+
+### Archiv-UX — Bedingtes Rendering Rechnungssumme
+
+- Wenn `step1AmountCheckPassed === true` → Rechnungssumme als formatierte Zahl
+- Wenn `step1AmountCheckPassed === false` → rotes AlertTriangle-Icon mit Tooltip "Summen-Konflikt"
+- Wenn `invoiceTotal` nicht vorhanden → `–` (wie bisher)
+
+### KISS-Ansatz für Session-Runs (toTableRow)
+
+Für Session-Runs in der Archiv-Tabelle wird `step1AmountCheckPassed` direkt aus `run.invoice.qtyValidationStatus === 'ok'` abgeleitet. Die aufwändige Zeilensummen-Berechnung bleibt der Live-Kachel in RunDetail vorbehalten.
+
+### Betroffene Dateien
+- `src/store/runStore.ts` — `qtyValidationStatus` in `run.invoice` übertragen
+- `src/pages/RunDetail.tsx` — Kachel 1 auf `currentRun.invoice` umstellen
+- `src/services/runPersistenceService.ts` — Interface + `loadRunList()` erweitern
+- `src/pages/Index.tsx` — `TableRow_`, `toTableRow()`, `persistedToTableRow()`, bedingtes Rendering
+
+---
+
+## ADD-ON 11: Level 1 & Level 2 Schärfung — Kachel 1 & Kachel 2 (2026-03-01)
+
+### Kachel 1 — Level 1 entkoppelt von `qtyValidationStatus`
+- `kachel1Variant` prüft ab sofort nur `currentRun?.invoice.invoiceTotal != null`
+  → `'success'` wenn vorhanden, `'default'` sonst. Kein `'warning'` mehr auf Kachel 1.
+- `isKachel1Verified` berechnet Summe neu via `Σ(l.qty * l.unitPriceInvoice)` statt `Σ(totalLineAmount)`
+  → Unabhängiger Cross-Check gegen den Parser-vorberechneten Wert.
+
+### Kachel 2 — `isKachel2Verified` von `parsedInvoiceResult` entkoppelt
+- Liest `packagesCount` ausschließlich aus `currentRun.invoice.packagesCount` (persistiert).
+- Dependency-Array bereinigt: `parsedInvoiceResult?.header.packagesCount` entfernt.
+- Neue UND-Bedingung: `currentRunLines.every(l => l.matchStatus === 'full-match')`
+  → Siegel nur wenn Mengensumme stimmt UND alle Positionen Perfect-Match haben.
+
+### Betroffene Dateien
+- `src/pages/RunDetail.tsx` — `kachel1Variant` + 2 useMemo-Blöcke (`isKachel1Verified`, `isKachel2Verified`)
+
+---
+
+## ADD-ON 12: Frozen Denominator Snapshots — Kachel 1, 2, 3, 5 (2026-03-01)
+
+### Problem
+
+Step 4 überschreibt `currentRun.stats.expandedLineCount` mit `result.lines.length` (runStore.ts:2353). Dadurch verändern sich die Nenner von Kachel 2, 3 und 5 bei erneuter Step-4-Ausführung. Kachel 1 zeigt `'?'` als Nenner, wenn `parsedInvoiceResult` gecleart wird (flüchtiger State).
+
+### Fix — Frozen Snapshots in `run.invoice`
+
+Zwei neue Felder werden bei Step 1 einmalig beschrieben und danach nie überschrieben:
+- `targetArticleCount` = `Σ(l.qty)` über alle geparsten InvoiceLines
+- `targetPositionsCount` = `result.lines.length` (Anzahl distinkte Positionen)
+
+Diese Snapshots ersetzen die volatilen `currentRun.stats.expandedLineCount`- und `parsedInvoiceResult`-Quellen als Nenner in den KPI-Kacheln.
+
+### Betroffene Dateien
+- `src/types/index.ts` — `InvoiceHeader` um `targetArticleCount?` + `targetPositionsCount?` erweitern
+- `src/store/runStore.ts` — Step-1-Handler: 2 neue Felder in `invoice:{}` schreiben
+- `src/pages/RunDetail.tsx` — 4× JSX-Nenner: K1 (pzCount→targetPositionsCount), K2/K3/K5 (expandedLineCount→targetArticleCount)
+
+---
+
+## Korrektur zu ADD-ON 12: Nenner-Fix Kachel 2, 3, 5 (2026-03-01)
+
+ADD-ON 12 führte `targetPositionsCount` (Anzahl distinkte Rechnungspositionen) und
+`targetArticleCount` (Σ qty = Gesamtstückzahl) als Frozen Snapshots ein.
+Kachel 2, 3 und 5 wurden irrtümlich mit `targetArticleCount` verdrahtet,
+obwohl ihre Zähler (`articleMatchedCount`, `priceOkCount`, `matchedOrders`) *Positionen* zählen.
+
+Korrektur: alle drei Kacheln auf `targetPositionsCount` als primären Nenner umgestellt.
+Fallback `(expandedLineCount || parsedInvoiceLines)` bleibt unverändert.
+
+Betroffene Datei: `src/pages/RunDetail.tsx` — Z. 568, 580, 601
+
+---
+
+## Korrektur zu ADD-ON 12 Rev. 2: Kachel 3/4/5 Zähler+Nenner auf qty-Basis (2026-03-02)
+
+Die erste Korrektur (Rev. 1) hatte nur den Nenner-Typ gefixt, aber die Zähler blieben
+linienzahl-basiert (`priceOkCount`, `serialMatchedCount`, `matchedOrders` — alle `.length`
+aus runStore.ts). Kacheln 3, 4 und 5 arbeiten fachlich auf Artikelebene (Stückzahl/`qty`).
+
+### Neue useMemos (nach `allocatedOrderCount` eingefügt)
+
+```typescript
+// Kachel 3: qty aller Zeilen mit erfolgreichem Preischeck
+const priceOkQtySum = useMemo(
+  () => currentRunLines
+    .filter(l => l.priceCheckStatus === 'ok' || l.priceCheckStatus === 'custom')
+    .reduce((s, l) => s + l.qty, 0),
+  [currentRunLines]
+);
+
+// Kachel 4: qty aller SN-Pflicht-Zeilen mit vollständiger SN-Abdeckung
+const serialMatchedQtySum = useMemo(
+  () => currentRunLines
+    .filter(l => l.serialRequired === true && l.serialNumbers.length >= l.qty)
+    .reduce((s, l) => s + l.qty, 0),
+  [currentRunLines]
+);
+
+// Kachel 5: Σ zugeteilte qty aus allocatedOrders aller Zeilen
+const matchedOrdersQtySum = useMemo(
+  () => currentRunLines.reduce(
+    (s, l) => s + l.allocatedOrders.reduce((a, o) => a + o.qty, 0),
+    0
+  ),
+  [currentRunLines]
+);
+```
+
+### Geänderte KPITile value-Props
+
+| Kachel | Zähler alt → neu | Nenner alt → neu |
+|---|---|---|
+| K3 | `priceOkCount` → `priceOkQtySum` | `targetPositionsCount` → `targetArticleCount` |
+| K4 | `serialMatchedCount` → `serialMatchedQtySum` | `serialRequiredCount \|\| '?'` → `serialRequiredQtySum \|\| '?'` |
+| K5 | `matchedOrders` → `matchedOrdersQtySum` | `targetPositionsCount` → `targetArticleCount` |
+
+Unverändert: `isKachel3/4/5Verified`, alle subValues, Kacheln 1 & 2.
+
+Betroffene Datei: `src/pages/RunDetail.tsx`
+
+---
+
+## ADD-ON 13: Soft-Fail Warnung im Issues-Tab (2026-03-01)
+
+### Ziel
+
+Wenn Kachel 1 den First-Check besteht (`invoiceTotal` vorhanden), aber den Double-Check nicht besteht
+(Zeilensumme weicht ≥ 0,10 € ab), erscheint im Issues-Tab ein gelbes Soft-Fail-Banner.
+Der User sieht sofort: "Rechnungssumme erkannt, aber Positionen stimmen nicht überein."
+
+### Architektur — Derived State, kein useEffect/Store-Write
+
+Einhängepunkt: `src/pages/RunDetail.tsx` — `<TabsContent value="issues">` (direkt vor `<IssuesCenter />`)
+
+Bedingung: `isKachel1FirstCheck && !isKachel1Verified`
+
+Beide Variablen existieren bereits als lokale `const`/`useMemo` in RunDetail.tsx (Z. 105 und 143–149).
+Kein neuer Store-State, kein useEffect, keine Store-Schreiboperation nötig.
+
+Banner-Text:
+> **Rechnungssummen-Konflikt (Soft-Fail):** Zeilensumme stimmt nicht mit Rechnungsbetrag überein —
+> mögliche Rundungsdifferenz oder versteckter Rabatt im Fremd-ERP. Bitte Positionen und Gesamtsumme
+> manuell prüfen.
+
+Styling: `amber-400 / bg-amber-50/10 / border-amber-400/50` — identisch zu Quick-Fix-Bannern in
+`IssuesCenter.tsx` (Z. 626–636), `AlertTriangle`-Icon (bereits importiert).
+
+### Betroffene Dateien
+
+- `src/pages/RunDetail.tsx` — ~8 Zeilen JSX vor `<IssuesCenter />`
+- `features/PROJ-29-kpi-double-check.md` — diese Dokumentation
+
+---
+
 ## Status
 
 In Progress
