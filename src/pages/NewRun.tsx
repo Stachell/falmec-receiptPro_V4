@@ -151,9 +151,15 @@ export default function NewRun() {
               required
             />
             <FileUploadZone
-              label="offene Bestellungen / offene Wareneingaenge (CSV)"
-              description="Exportdatei aus Modul *offene Wareneingaenge*"
-              accept={{ 'text/csv': ['.csv'], 'application/vnd.ms-excel': ['.csv'] }}
+              label="offene Bestellungen / offene Wareneingaenge (CSV / XLSX / XML)"
+              description="Exportdatei aus Modul *offene Wareneingaenge* — CSV, XLSX, XLS oder XML"
+              accept={{
+                'text/csv': ['.csv'],
+                'application/vnd.ms-excel': ['.xls', '.csv'],
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                'application/xml': ['.xml'],
+                'text/xml': ['.xml'],
+              }}
               fileType="openWE"
               onFileAccepted={(file) => addUploadedFile(file)}
               onFileRemoved={() => removeUploadedFile('openWE')}
@@ -197,7 +203,7 @@ export default function NewRun() {
                   Bitte laden Sie alle erforderlichen Dateien hoch
                 </p>
               )}
-              {allFilesUploaded && !isDirectoryConfigured && (
+              {allFilesUploaded && !canStartProcessing && (
                 <p className="text-sm text-yellow-600 flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4" />
                   Bitte waehlen Sie ein Datenverzeichnis im Footer

@@ -41,7 +41,7 @@ interface ManualOrderPopupProps {
 }
 
 export function ManualOrderPopup({ line, labelClassName }: ManualOrderPopupProps) {
-  const { orderPool, reassignOrder } = useRunStore();
+  const { orderPool, reassignOrder, parsedPositions } = useRunStore();
   const [open, setOpen] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState<string>('');
   const [freeText, setFreeText] = useState('');
@@ -49,6 +49,11 @@ export function ManualOrderPopup({ line, labelClassName }: ManualOrderPopupProps
   const artNoDE = line.falmecArticleNo ?? '';
   const available =
     orderPool && artNoDE ? getAvailableForArticle(orderPool, artNoDE) : [];
+
+  // PDF-Rohwert aus Step 1 — persistiert in parsedPositions, nie überschrieben
+  const pdfOrderText = parsedPositions
+    .find(p => p.positionIndex === line.positionIndex)
+    ?.orderCandidatesText ?? '';
 
   const isNew = selectedPositionId === 'NEW';
   const canConfirm =
@@ -102,6 +107,14 @@ export function ManualOrderPopup({ line, labelClassName }: ManualOrderPopupProps
       <PopoverContent className="w-80 p-4" align="start">
         <div className="space-y-3">
           <h4 className="text-sm font-semibold">Bestellung zuweisen</h4>
+
+          {/* PDF order hint — raw value from Step 1, never overwritten by matching */}
+          <div className="text-xs text-muted-foreground">
+            PDF übermittelt:{' '}
+            <span className="font-mono text-foreground">
+              {pdfOrderText || '(keine Angabe)'}
+            </span>
+          </div>
 
           {/* Current assignment hint */}
           {line.orderNumberAssigned && (

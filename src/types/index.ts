@@ -438,6 +438,8 @@ export interface OrderParseResult {
   rowCount: number;
   warnings: string[];
   diagnostics?: OrderParserSelectionDiagnostics;
+  /** Set wenn der Pre-Check einen harten Validierungsfehler erkannt hat. Trigger für Step-4-Abort im runStore. */
+  validationError?: string;
 }
 
 // PROJ-20: Pre-filtered serial row (from serialFinder pre-filter step)

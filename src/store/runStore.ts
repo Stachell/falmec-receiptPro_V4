@@ -1497,6 +1497,41 @@ export const useRunStore = create<RunState>((set, get) => ({
                         });
                       }
 
+                      // Pre-Check Validierungsfehler (wissenschaftliche Notation / fehlende IDs)
+                      if (parseResult.validationError) {
+                        const parserIssue = buildOrderParserFailureIssue(
+                          runId,
+                          parseResult.diagnostics,
+                          `Datei-Validierung fehlgeschlagen: ${parseResult.validationError}`,
+                        );
+                        set((state) => {
+                          const updatedRun = state.runs.find(r => r.id === runId);
+                          if (!updatedRun) return state;
+                          const newRun: Run = {
+                            ...updatedRun,
+                            status: 'soft-fail',
+                            steps: updatedRun.steps.map((step) =>
+                              step.stepNo === 4
+                                ? { ...step, status: 'failed', issuesCount: 1 }
+                                : step,
+                            ),
+                          };
+                          return {
+                            runs: state.runs.map(r => r.id === runId ? newRun : r),
+                            currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+                            issues: [
+                              ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+                              parserIssue,
+                            ],
+                          };
+                        });
+                        logService.error(
+                          `[OrderParser] Validierungsfehler blockiert Step 4: ${parseResult.validationError}`,
+                          { runId, step: 'Bestellungen mappen' },
+                        );
+                        return;
+                      }
+
                       const lowConfidence = parseResult.diagnostics?.confidence === 'low';
                       if (parseResult.positions.length === 0 || lowConfidence) {
                         const detailsPrefix = parseResult.positions.length === 0
@@ -1652,6 +1687,41 @@ export const useRunStore = create<RunState>((set, get) => ({
                         summary: `${parseResult.positions.length} Bestellpositionen, Spalte: ${parseResult.diagnostics.selectedHeader || 'n/a'}`,
                         timestamp: new Date().toISOString(),
                       });
+                    }
+
+                    // Pre-Check Validierungsfehler (wissenschaftliche Notation / fehlende IDs)
+                    if (parseResult.validationError) {
+                      const parserIssue = buildOrderParserFailureIssue(
+                        runId,
+                        parseResult.diagnostics,
+                        `Datei-Validierung fehlgeschlagen: ${parseResult.validationError}`,
+                      );
+                      set((state) => {
+                        const updatedRun = state.runs.find(r => r.id === runId);
+                        if (!updatedRun) return state;
+                        const newRun: Run = {
+                          ...updatedRun,
+                          status: 'soft-fail',
+                          steps: updatedRun.steps.map((step) =>
+                            step.stepNo === 4
+                              ? { ...step, status: 'failed', issuesCount: 1 }
+                              : step,
+                          ),
+                        };
+                        return {
+                          runs: state.runs.map(r => r.id === runId ? newRun : r),
+                          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+                          issues: [
+                            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+                            parserIssue,
+                          ],
+                        };
+                      });
+                      logService.error(
+                        `[OrderParser] Validierungsfehler blockiert Step 4: ${parseResult.validationError}`,
+                        { runId, step: 'Bestellungen mappen' },
+                      );
+                      return;
                     }
 
                     const lowConfidence = parseResult.diagnostics?.confidence === 'low';
@@ -1903,6 +1973,42 @@ export const useRunStore = create<RunState>((set, get) => ({
                         timestamp: new Date().toISOString(),
                       });
                     }
+
+                    // Pre-Check Validierungsfehler (wissenschaftliche Notation / fehlende IDs)
+                    if (parseResult.validationError) {
+                      const parserIssue = buildOrderParserFailureIssue(
+                        runId,
+                        parseResult.diagnostics,
+                        `Datei-Validierung fehlgeschlagen: ${parseResult.validationError}`,
+                      );
+                      set((state) => {
+                        const updatedRun = state.runs.find(r => r.id === runId);
+                        if (!updatedRun) return state;
+                        const newRun: Run = {
+                          ...updatedRun,
+                          status: 'soft-fail',
+                          steps: updatedRun.steps.map((step) =>
+                            step.stepNo === 4
+                              ? { ...step, status: 'failed', issuesCount: 1 }
+                              : step,
+                          ),
+                        };
+                        return {
+                          runs: state.runs.map(r => r.id === runId ? newRun : r),
+                          currentRun: state.currentRun?.id === runId ? newRun : state.currentRun,
+                          issues: [
+                            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4)),
+                            parserIssue,
+                          ],
+                        };
+                      });
+                      logService.error(
+                        `[OrderParser] Validierungsfehler blockiert Step 4: ${parseResult.validationError}`,
+                        { runId, step: 'Bestellungen mappen' },
+                      );
+                      return;
+                    }
+
                     const lowConfidence = parseResult.diagnostics?.confidence === 'low';
                     if (parseResult.positions.length === 0 || lowConfidence) {
                       const detailsPrefix = parseResult.positions.length === 0
