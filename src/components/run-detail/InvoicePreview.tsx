@@ -112,6 +112,54 @@ export function InvoicePreview({
     return map;
   }, [invoiceLines]);
 
+  const parsedPositionByIndex = useMemo(() => {
+    const map = new Map<number, ParsedInvoiceLineExtended>();
+    for (const pos of positions) {
+      map.set(pos.positionIndex, pos);
+    }
+    return map;
+  }, [positions]);
+
+  // KISS: After Step 4 (isExpanded) use persistent invoiceLines as primary
+  // source for RE-Positionen rows, while keeping parse-only fields as fallback.
+  const persistentPositions = useMemo<ParsedInvoiceLineExtended[]>(() => {
+    const rows: ParsedInvoiceLineExtended[] = [];
+
+    for (const [positionIndex, lines] of linesByPosition.entries()) {
+      if (lines.length === 0) continue;
+
+      const representativeLine = lines[0];
+      const parsedFallback = parsedPositionByIndex.get(positionIndex);
+      const quantityDelivered = lines.reduce((sum, line) => sum + line.qty, 0);
+      const totalPrice = lines.reduce((sum, line) => sum + line.totalLineAmount, 0);
+      const fallbackQty = parsedFallback?.quantityDelivered ?? 0;
+      const finalQty = quantityDelivered || fallbackQty;
+      const unitPrice = representativeLine.unitPriceInvoice ?? parsedFallback?.unitPrice ?? 0;
+
+      rows.push({
+        positionIndex,
+        manufacturerArticleNo: representativeLine.manufacturerArticleNo ?? parsedFallback?.manufacturerArticleNo ?? '',
+        ean: representativeLine.ean ?? parsedFallback?.ean ?? '',
+        descriptionIT: representativeLine.descriptionIT ?? parsedFallback?.descriptionIT ?? '',
+        quantityDelivered: finalQty,
+        unitPrice,
+        totalPrice: totalPrice || parsedFallback?.totalPrice || (unitPrice * finalQty),
+        orderCandidates: parsedFallback?.orderCandidates ?? [],
+        orderCandidatesText: parsedFallback?.orderCandidatesText ?? representativeLine.orderNumberAssigned ?? '',
+        orderStatus: parsedFallback?.orderStatus ?? (representativeLine.orderNumberAssigned ? 'YES' : 'NO'),
+      });
+    }
+
+    return rows.sort((a, b) => a.positionIndex - b.positionIndex);
+  }, [linesByPosition, parsedPositionByIndex]);
+
+  const tablePositions = useMemo(() => {
+    if (currentRun?.isExpanded && persistentPositions.length > 0) {
+      return persistentPositions;
+    }
+    return positions;
+  }, [currentRun?.isExpanded, persistentPositions, positions]);
+
   const positionStatusMap = useMemo(() => {
     const map = new Map<number, {
       priceCheckStatus: PriceCheckStatus;
@@ -136,7 +184,7 @@ export function InvoicePreview({
     const counts = new Map<string, number>();
     for (const opt of INVOICE_ACTION_FILTERS) {
       let c = 0;
-      for (const pos of positions) {
+      for (const pos of tablePositions) {
         const posStatus = positionStatusMap.get(pos.positionIndex);
         const line = posStatus?.representativeLine ?? null;
         if (matchesInvoiceActionFilter(pos, line, opt.value)) c++;
@@ -144,7 +192,7 @@ export function InvoicePreview({
       counts.set(opt.value, c);
     }
     return counts;
-  }, [positions, positionStatusMap]);
+  }, [tablePositions, positionStatusMap]);
 
   // ADD-ON: Reset-Guard — auto-reset when active filter drops to 0
   // PROJ-37: Must run AFTER issue-filter-check — only matters when no issue filter is active
@@ -179,12 +227,16 @@ export function InvoicePreview({
 
   // Filter positions by search term + action filter
   // PROJ-37: activeIssueFilterIds overrides all other filters (matches by positionIndex via lineId prefix)
-  const filteredPositions = positions.filter(pos => {
+  const filteredPositions = tablePositions.filter(pos => {
     // Issue-isolation filter: check if any affiliated line for this position is in the issue filter
     if (activeIssueFilterIds !== null) {
       const linesForPos = linesByPosition.get(pos.positionIndex) ?? [];
       return linesForPos.some(l => activeIssueFilterIds.includes(l.lineId));
     }
+
+    // Enriched data (can be null before Step 2)
+    const posStatus = positionStatusMap.get(pos.positionIndex);
+    const line = posStatus?.representativeLine ?? null;
 
     const matchesSearch = !searchTerm || (() => {
       const term = normalizeSearchTerm(searchTerm);
@@ -192,15 +244,12 @@ export function InvoicePreview({
         normalizeSearchTerm(String(pos.positionIndex)).includes(term) ||
         normalizeSearchTerm(pos.ean).includes(term) ||
         normalizeSearchTerm(pos.manufacturerArticleNo).includes(term) ||
+        normalizeSearchTerm(line?.falmecArticleNo).includes(term) ||
         normalizeSearchTerm(pos.orderCandidatesText).includes(term)
       );
     })();
 
     if (statusFilter === 'all') return matchesSearch;
-
-    // Enriched data (can be null before Step 2)
-    const posStatus = positionStatusMap.get(pos.positionIndex);
-    const line = posStatus?.representativeLine ?? null;
 
     return matchesSearch && matchesInvoiceActionFilter(pos, line, statusFilter);
   });
@@ -323,9 +372,9 @@ export function InvoicePreview({
           <div className="ml-auto flex items-stretch">
             <div className="text-right">
               <CardTitle>Rechnungspositionen</CardTitle>
-              <CardDescription>/invoicelines ({positions.length})</CardDescription>
+              <CardDescription>/invoicelines ({tablePositions.length})</CardDescription>
             </div>
-            {positions.length > 0 && (
+            {tablePositions.length > 0 && (
               <div className={`${bestellungWidthClass} flex items-center justify-center self-stretch border-l border-transparent`}>
                 <Button
                   variant="ghost"
@@ -359,7 +408,7 @@ export function InvoicePreview({
               </button>
             </div>
           )}
-          {positions.length === 0 ? (
+          {tablePositions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>Keine Positionen gefunden</p>
