@@ -16,7 +16,8 @@
  *   price            → unitPriceNet
  *   serialRequired   → serialRequirement
  *   storageLocation  → storageLocation
- *   supplierId       → supplierId (ignored — comes from OpenWE)
+ *   supplierId       → supplierId (5-stellige Lieferantennummer, PROJ-40)
+ *   descriptionDE    → descriptionDE (Artikelmatchcode aus Sage, PROJ-40)
  */
 
 import * as XLSX from 'xlsx';
@@ -242,6 +243,8 @@ export async function parseMasterDataFile(
       serialRequirement: idx('serialRequired') >= 0 ? cellBool(row[idx('serialRequired')]) : false,
       storageLocation: idx('storageLocation') >= 0 ? cellStr(row[idx('storageLocation')]) : '',
       activeFlag: true, // Excel does not carry this; assume active
+      supplierId: idx('supplierId') >= 0 ? (cellStr(row[idx('supplierId')]) || null) : null,
+      descriptionDE: idx('descriptionDE') >= 0 ? (cellStr(row[idx('descriptionDE')]) || null) : null,
     };
 
     articles.push(article);

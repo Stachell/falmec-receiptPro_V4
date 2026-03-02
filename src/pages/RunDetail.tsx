@@ -289,6 +289,21 @@ export default function RunDetail() {
     return () => setCurrentRun(null);
   }, [decodedRunId, runs, setCurrentRun]);
 
+  // ─── PROJ-40 6B: URL-Fallback — IndexedDB-Nachladen wenn Run nicht im Memory ─
+  const [loadingPersisted, setLoadingPersisted] = useState(false);
+  useEffect(() => {
+    if (!decodedRunId) return;
+    const inMemory = runs.find(r => r.id === decodedRunId) || mockRuns.find(r => r.id === decodedRunId);
+    if (inMemory) return; // Guard: Run already in memory, no IndexedDB lookup needed
+
+    setLoadingPersisted(true);
+    useRunStore.getState().loadPersistedRun(decodedRunId)
+      .then((found) => {
+        if (!found) console.warn(`[RunDetail] Run ${decodedRunId} weder in Memory noch IndexedDB`);
+      })
+      .finally(() => setLoadingPersisted(false));
+  }, [decodedRunId, runs]);
+
   // ─── PROJ-29 Add-On 2: Parse-Error Toast (nur noch für Fehlerfälle) ─────────
   const [showParseError, setShowParseError] = useState(false);
   const mountedAtRef = useRef(Date.now());

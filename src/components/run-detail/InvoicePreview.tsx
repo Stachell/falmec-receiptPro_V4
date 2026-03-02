@@ -29,6 +29,7 @@ import {
 import {
   FILTER_ALL, INVOICE_ACTION_FILTERS, matchesInvoiceActionFilter,
 } from '@/lib/filterConfig';
+import { normalizeSearchTerm } from '@/lib/searchNormalization';
 import { useRunStore } from '@/store/runStore';
 import { PriceCell } from './PriceCell';
 import { StatusCheckbox } from './StatusCheckbox';
@@ -186,12 +187,12 @@ export function InvoicePreview({
     }
 
     const matchesSearch = !searchTerm || (() => {
-      const term = searchTerm.toLowerCase();
+      const term = normalizeSearchTerm(searchTerm);
       return (
-        String(pos.positionIndex).includes(term) ||
-        pos.ean?.toLowerCase().includes(term) ||
-        pos.manufacturerArticleNo?.toLowerCase().includes(term) ||
-        pos.orderCandidatesText?.toLowerCase().includes(term)
+        normalizeSearchTerm(String(pos.positionIndex)).includes(term) ||
+        normalizeSearchTerm(pos.ean).includes(term) ||
+        normalizeSearchTerm(pos.manufacturerArticleNo).includes(term) ||
+        normalizeSearchTerm(pos.orderCandidatesText).includes(term)
       );
     })();
 

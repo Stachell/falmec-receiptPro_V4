@@ -90,6 +90,7 @@ export function run2PartialFillup(
             orderYear: entry.position.orderYear,
             qty: take,
             reason: 'reference-match' as OrderAssignmentReason,
+            vorgang: entry.position.vorgang || undefined,
           });
           remainingQty -= take;
           referenceMatchCount++;
@@ -108,6 +109,7 @@ export function run2PartialFillup(
           orderYear: entry.position.orderYear,
           qty: remainingQty,
           reason: 'smart-qty-match' as OrderAssignmentReason,
+          vorgang: entry.position.vorgang || undefined,
         });
         remainingQty -= remainingQty;
         smartQtyMatchCount++;
@@ -126,6 +128,7 @@ export function run2PartialFillup(
         orderNumberAssigned: firstAlloc.orderNumber,
         orderYear: firstAlloc.orderYear,
         orderCode: firstAlloc.orderNumber.split('-').pop() ?? null,
+        orderVorgang: firstAlloc.vorgang ?? null,
       };
     }
 

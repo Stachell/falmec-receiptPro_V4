@@ -390,6 +390,9 @@ interface RunState {
   // PROJ-23: Persisted run summaries from IndexedDB (Phase A2)
   persistedRunSummaries: PersistedRunSummary[];
 
+  // PROJ-40: Run-Isolierung Guard — tracks which run's parsedPositions/parserWarnings are loaded
+  currentParsedRunId: string | null;
+
   // Global Config
   globalConfig: RunConfig;
 
@@ -514,6 +517,9 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   // PROJ-23: Persisted run summaries from IndexedDB (Phase A2)
   persistedRunSummaries: [],
+
+  // PROJ-40: Run-Isolierung Guard
+  currentParsedRunId: null,
 
   // Global Config
   globalConfig: {
@@ -1185,6 +1191,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         parsedInvoiceResult: result,
         parsedPositions: positions,
         parserWarnings: warnings,
+        currentParsedRunId: get().currentRun?.id ?? null,  // PROJ-40 6A: Run-Isolierung
       });
     } else {
       set({
@@ -3149,6 +3156,9 @@ export const useRunStore = create<RunState>((set, get) => ({
           auditLog: [...data.auditLog, ...otherAudit],
           parsedPositions: data.parsedPositions,
           parserWarnings: data.parserWarnings,
+          parsedInvoiceResult: data.parsedInvoiceResult ?? null,   // PROJ-40 5C: PDF-Preview
+          serialDocument: data.serialDocument ?? null,              // PROJ-40 5C: S/N-Excel
+          currentParsedRunId: runId,                                // PROJ-40 5C: Run-Isolierung
         };
       });
 

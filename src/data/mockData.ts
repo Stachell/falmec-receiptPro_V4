@@ -343,6 +343,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 459.99,
     activeFlag: true,
     serialRequirement: true,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-002',
@@ -353,6 +355,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 330.00,
     activeFlag: true,
     serialRequirement: true,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-003',
@@ -363,6 +367,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 24.99,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
   // ── Echte Falmec-Artikel aus Test-PDF (PROJ-18) ────────────────────
   // Hinweis: unitPriceNet=0 → priceCheckStatus='missing' (korrekt, Preise kommen aus Excel-Upload)
@@ -375,6 +381,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 0,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-fal-002',
@@ -385,6 +393,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 0,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-fal-003',
@@ -395,6 +405,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 0,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-fal-004',
@@ -405,6 +417,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 0,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
   {
     id: 'art-fal-005',
@@ -415,6 +429,8 @@ export const mockArticleMaster: ArticleMaster[] = [
     unitPriceNet: 0,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
   },
 ];
 

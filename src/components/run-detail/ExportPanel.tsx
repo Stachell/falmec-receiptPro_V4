@@ -48,7 +48,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
       case 'falmecArticleNo':       return { tag: 'FalmecArticleNo', value: line.falmecArticleNo || '' };
       case 'descriptionDE':         return { tag: 'DescriptionDE', value: line.descriptionDE || '' };
       case 'descriptionIT':         return { tag: 'DescriptionIT', value: line.descriptionIT };
-      case 'qty':                   return { tag: 'Quantity', value: String(line.qty) };
+      case 'supplierId':            return { tag: 'Lieferant', value: line.supplierId || '' };
       case 'unitPriceInvoice':      return { tag: 'UnitPrice', value: String(line.unitPriceInvoice) };
       case 'unitPriceOrder':        return { tag: 'UnitPriceOrder', value: String(line.unitPriceSage ?? '') };
       case 'totalPrice':            return { tag: 'TotalPrice', value: String(line.totalLineAmount) };
@@ -56,7 +56,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
       case 'orderDate':             return { tag: 'OrderDate', value: line.orderYear ? String(line.orderYear) : '' };
       case 'serialNumber':          return { tag: 'SerialNumber', value: line.serialNumber || '' };
       case 'storageLocation':       return { tag: 'StorageLocation', value: line.storageLocation || '' };
-      case 'eingangsart':           return { tag: 'Eingangsart', value: run.config.eingangsart };
+      case 'orderVorgang':          return { tag: 'Vorgang', value: line.orderVorgang || '' };
       case 'fattura':               return { tag: 'Fattura', value: run.invoice.fattura };
     }
   };

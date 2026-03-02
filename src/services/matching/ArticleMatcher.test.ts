@@ -51,6 +51,8 @@ function makeArticle(overrides: Partial<ArticleMaster> = {}): ArticleMaster {
     unitPriceNet: 100,
     activeFlag: true,
     serialRequirement: false,
+    descriptionDE: null,
+    supplierId: null,
     ...overrides,
   };
 }

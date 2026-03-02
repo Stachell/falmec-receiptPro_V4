@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type {
+  Issue,
   OrderParseResult,
   OrderParserCandidateScore,
   OrderParserConfidence,
@@ -25,6 +26,7 @@ interface ColumnMapping {
   orderNumber: number;
   orderYear: number;
   belegnummer: number;
+  vorgang: number;        // PROJ-40
 }
 
 export interface ParseOrderFileOptions {
@@ -238,6 +240,7 @@ function detectColumns(
     orderNumber: -1,
     orderYear: -1,
     belegnummer: -1,
+    vorgang: -1,
   };
 
   const orderNumberRegex = parseRegex(profile.orderNumberRegex, FALLBACK_ORDER_NUMBER_REGEX);
@@ -266,6 +269,7 @@ function detectColumns(
   mapping.ean = detectSingleColumn(headers, profile.aliases.ean);
   mapping.supplierId = detectSingleColumn(headers, profile.aliases.supplierId);
   mapping.belegnummer = detectSingleColumn(headers, profile.aliases.belegnummer);
+  mapping.vorgang = detectSingleColumn(headers, profile.aliases.vorgang);
 
   if (mapping.openQuantity === -1) {
     warnings.push('Spalte "Offene Menge" nicht erkannt');
@@ -366,6 +370,9 @@ export async function parseOrderFile(
   }
 
   const positions: ParsedOrderPosition[] = [];
+  const parseIssues: Issue[] = [];
+  const VORGANG_REGEX = /^\d{4}$/;
+  const invalidVorgangRows: string[] = [];
   let skippedByRegex = 0;
 
   for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
@@ -391,6 +398,12 @@ export async function parseOrderFile(
     const ean = mapping.ean >= 0 ? cellStr(row[mapping.ean]) : '';
     const supplierId = mapping.supplierId >= 0 ? cellStr(row[mapping.supplierId]) : '';
     const belegnummerRaw = mapping.belegnummer >= 0 ? cellStr(row[mapping.belegnummer]) : orderNumberRaw;
+    const vorgang = mapping.vorgang >= 0 ? cellStr(row[mapping.vorgang]) : '';
+
+    // 2F: Vorgang 4-stellig Validierung (Warning, nicht Error)
+    if (vorgang && !VORGANG_REGEX.test(vorgang)) {
+      invalidVorgangRows.push(`${orderNumber} ("${vorgang}")`);
+    }
 
     positions.push({
       id: `op-${rowIndex}-${orderNumber}`,
@@ -402,6 +415,25 @@ export async function parseOrderFile(
       orderNumber,
       orderYear,
       belegnummer: belegnummerRaw,
+      vorgang,
+    });
+  }
+
+  // 2F: Rollup-Issue für ungültige Vorgang-Werte
+  if (invalidVorgangRows.length > 0) {
+    parseIssues.push({
+      id: `issue-step4-vorgang-invalid-${Date.now()}`,
+      severity: 'warning',
+      stepNo: 4,
+      type: 'parser-error',
+      message: `Vorgang ungueltig bei ${invalidVorgangRows.length} Zeilen (erwartet: 4-stellig numerisch)`,
+      details: `Ungueltige Vorgangs-Nr.: ${invalidVorgangRows.join(', ')}`,
+      relatedLineIds: [],
+      affectedLineIds: [],
+      status: 'open',
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+      resolutionNote: null,
     });
   }
 
@@ -417,6 +449,7 @@ export async function parseOrderFile(
     positions,
     rowCount: positions.length,
     warnings,
+    issues: parseIssues.length > 0 ? parseIssues : undefined,
     diagnostics,
   };
 }

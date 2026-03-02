@@ -121,7 +121,16 @@ export const FALMEC_SCHEMA: SchemaDefinition = {
     {
       fieldId: 'supplierId',
       label: 'Lieferant',
-      aliases: ['Lieferant', 'Supplier', 'Fornitore', 'Hauptlieferant'],
+      aliases: [
+        'Lieferant', 'Supplier', 'Fornitore', 'Hauptlieferant',
+        'Hersteller', 'Lieferantennummer', 'Lieferanten-Nr.', 'Lieferantennr.', 'fornitore',
+      ],
+      required: false,
+    },
+    {
+      fieldId: 'descriptionDE',
+      label: 'Bezeichnung (DE)',
+      aliases: ['Artikelmatchcode', 'Matchcode', 'Bezeichnung DE', 'Beschreibung', 'Beschreibung DE'],
       required: false,
     },
   ],
@@ -145,6 +154,76 @@ export class FalmecMatcher_Master implements MatcherModule {
   ): CrossMatchResult {
     const warnings: MatcherWarning[] = [];
     const issues: Issue[] = [];
+
+    // ── FAIL-FAST: Lieferant-Validierung (PROJ-40, 3 Blocker) ─────────
+    const SUPPLIER_REGEX = /^\d{5}$/;
+    const now2C = new Date().toISOString();
+
+    // Blocker 1: Spalte komplett fehlend (alle ArticleMaster haben supplierId === null)
+    if (articles.length > 0 && articles.every(a => a.supplierId === null)) {
+      issues.push({
+        id: `issue-${runId}-step2-supplier-col-${Date.now()}`,
+        runId,
+        severity: 'error',
+        stepNo: 2,
+        type: 'parser-error',
+        message: 'Lieferant-Spalte nicht gefunden in Artikelliste',
+        details: 'Die Artikelliste enthält keine Spalte für die Lieferantennummer (5-stellig). Bitte Spalte "Lieferant" bzw. Alias hinzufügen und erneut hochladen.',
+        relatedLineIds: [],
+        affectedLineIds: [],
+        status: 'open',
+        createdAt: now2C,
+        resolvedAt: null,
+        resolutionNote: null,
+      });
+    } else {
+      // Blocker 2: Zeile hat supplierId null (Spalte vorhanden, Zelle leer)
+      const missingSupplier = articles.filter(a => a.supplierId === null);
+      if (missingSupplier.length > 0) {
+        const artNos = missingSupplier.map(a => a.falmecArticleNo || a.manufacturerArticleNo).join(', ');
+        issues.push({
+          id: `issue-${runId}-step2-supplier-missing-${Date.now()}`,
+          runId,
+          severity: 'error',
+          stepNo: 2,
+          type: 'parser-error',
+          message: `Lieferant fehlt für ${missingSupplier.length} Artikel`,
+          details: `Lieferant fehlt für Artikel: ${artNos}`,
+          relatedLineIds: [],
+          affectedLineIds: [],
+          status: 'open',
+          createdAt: now2C,
+          resolvedAt: null,
+          resolutionNote: null,
+        });
+      }
+
+      // Blocker 3: supplierId vorhanden aber nicht 5-stellig numerisch
+      const invalidSupplier = articles.filter(
+        a => a.supplierId !== null && !SUPPLIER_REGEX.test(a.supplierId),
+      );
+      if (invalidSupplier.length > 0) {
+        const artNos = invalidSupplier
+          .map(a => `${a.falmecArticleNo || a.manufacturerArticleNo} ("${a.supplierId}")`)
+          .join(', ');
+        issues.push({
+          id: `issue-${runId}-step2-supplier-invalid-${Date.now()}`,
+          runId,
+          severity: 'error',
+          stepNo: 2,
+          type: 'parser-error',
+          message: `Lieferant ungueltig bei ${invalidSupplier.length} Artikel (erwartet: 5-stellig numerisch)`,
+          details: `Ungueltige Lieferantennummern: ${artNos}`,
+          relatedLineIds: [],
+          affectedLineIds: [],
+          status: 'open',
+          createdAt: now2C,
+          resolvedAt: null,
+          resolutionNote: null,
+        });
+      }
+    }
+    // ── Ende Fail-Fast ────────────────────────────────────────────────
 
     // Pre-index articles by normalized ArtNo and EAN for O(1) lookups
     const byArtNo = new Map<string, ArticleMaster>();
@@ -411,12 +490,12 @@ export class FalmecMatcher_Master implements MatcherModule {
         ...line,
         matchStatus,
         falmecArticleNo: matchedArticle.falmecArticleNo ?? null,
-        descriptionDE: null, // ArticleMaster doesn't carry descriptionDE currently
+        descriptionDE: matchedArticle.descriptionDE ?? null,
         unitPriceSage: sagePrice || null,
         serialRequired: matchedArticle.serialRequirement ?? false,
         activeFlag: matchedArticle.activeFlag ?? true,
         storageLocation: matchedArticle.storageLocation ?? null,
-        supplierId: null, // Comes from OpenWE, not ArticleMaster
+        supplierId: matchedArticle.supplierId ?? null,
         priceCheckStatus,
         unitPriceFinal: priceCheckStatus === 'ok' ? invoicePrice : null,
       },

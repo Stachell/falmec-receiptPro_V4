@@ -20,6 +20,8 @@ import type {
   ParsedInvoiceLineExtended,
   InvoiceParserWarning,
 } from '@/types';
+import type { ParsedInvoiceResult } from '@/services/parsers';
+import type { SerialDocument } from '@/services/matchers/types';
 
 const DB_NAME = 'falmec-receiptpro-runs';
 const DB_VERSION = 1;
@@ -36,8 +38,20 @@ export interface PersistedRunData {
   auditLog: AuditLogEntry[];
   parsedPositions: ParsedInvoiceLineExtended[];
   parserWarnings: InvoiceParserWarning[];
+  // ── NEU für vollständige Rehydrierung (PROJ-40) ──────────────────────
+  parsedInvoiceResult: ParsedInvoiceResult | null;  // PDF-Preview
+  serialDocument: SerialDocument | null;             // S/N-Excel für Neu-Verarbeiten
+  uploadMetadata: PersistedUploadMeta[];             // Dateinamen + Typen der Uploads
   savedAt: string;                               // ISO timestamp
   sizeEstimateBytes: number;                     // JSON.stringify(data).length * 2
+}
+
+/** Lean upload metadata (kein File-Binary — das liegt in fileStorageService). PROJ-40. */
+export interface PersistedUploadMeta {
+  type: 'invoice' | 'openWE' | 'serialList' | 'articleList';
+  name: string;
+  size: number;
+  uploadedAt: string;
 }
 
 /** Lightweight summary for archive listing (no line data). */

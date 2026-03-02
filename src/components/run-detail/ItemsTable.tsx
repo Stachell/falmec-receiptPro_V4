@@ -27,12 +27,14 @@ import {
 import {
   FILTER_ALL, ITEMS_FILTER_GROUPS, matchesItemsStatusFilter,
 } from '@/lib/filterConfig';
+import { normalizeSearchTerm } from '@/lib/searchNormalization';
 import { StatusCheckbox } from './StatusCheckbox';
 import { PriceCell } from './PriceCell';
 import { DetailPopup } from './DetailPopup';
 import { ManualOrderPopup } from './ManualOrderPopup';
 import { getOrderReasonStyle } from './orderReasonStyle';
 import { SerialStatusDot } from './SerialStatusDot';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { InvoiceLine } from '@/types';
 import {
@@ -61,6 +63,7 @@ export function ItemsTable() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
+  const [showDE, setShowDE] = useState(true);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
   const bestellungWidthClass = 'w-[106px]';
@@ -98,13 +101,14 @@ export function ItemsTable() {
       return activeIssueFilterIds.includes(line.lineId);
     }
 
-    const term = searchTerm.toLowerCase();
-    const matchesSearch =
-      line.manufacturerArticleNo?.toLowerCase().includes(term) ||
-      line.ean?.toLowerCase().includes(term) ||
-      line.descriptionIT?.toLowerCase().includes(term) ||
-      line.falmecArticleNo?.toLowerCase().includes(term) ||
-      line.descriptionDE?.toLowerCase().includes(term);
+    const term = normalizeSearchTerm(searchTerm);
+    const matchesSearch = !term || (
+      normalizeSearchTerm(line.manufacturerArticleNo).includes(term) ||
+      normalizeSearchTerm(line.ean).includes(term) ||
+      normalizeSearchTerm(line.descriptionIT).includes(term) ||
+      normalizeSearchTerm(line.falmecArticleNo).includes(term) ||
+      normalizeSearchTerm(line.descriptionDE).includes(term)
+    );
 
     return matchesSearch && matchesItemsStatusFilter(line, statusFilter);
   });
@@ -311,7 +315,13 @@ export function ItemsTable() {
                     <TableHead className={`w-[calc(8ch-9px)] whitespace-nowrap pl-0 ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>- MATCH</TableHead>
                     <TableHead className={`w-[157px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLNUMMER</TableHead>
                     <TableHead className={`w-[115px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>EAN</TableHead>
-                    <TableHead className={expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>BEZEICHNUNG</TableHead>
+                    <TableHead className={expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>
+                      <div className="flex items-center gap-1.5">
+                        <span>BEZEICHNUNG</span>
+                        <Switch checked={showDE} onCheckedChange={setShowDE} className="scale-75" />
+                        <span className="text-[10px] text-muted-foreground">{showDE ? 'DE' : 'IT'}</span>
+                      </div>
+                    </TableHead>
                     <TableHead className={`w-[53px] text-center ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
                     <TableHead className={`w-[114px] text-right ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
                     <TableHead className={`w-[120px] ${expanded ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SN / SERIAL</TableHead>
@@ -377,16 +387,27 @@ export function ItemsTable() {
                       </TableCell>
 
                       <TableCell className="min-w-0">
-                        <div
-                          className="text-xs truncate w-full"
-                          title={line.descriptionDE ?? line.descriptionIT}
-                        >
-                          {line.descriptionDE ?? line.descriptionIT}
-                        </div>
-                        {line.descriptionDE && (
+                        {showDE ? (
+                          <>
+                            <div
+                              className="text-xs truncate w-full"
+                              title={line.descriptionDE ?? line.descriptionIT ?? undefined}
+                            >
+                              {line.descriptionDE ?? line.descriptionIT}
+                            </div>
+                            {line.descriptionDE && (
+                              <div
+                                className="text-[11px] text-muted-foreground truncate w-full"
+                                title={line.descriptionIT ?? undefined}
+                              >
+                                {line.descriptionIT}
+                              </div>
+                            )}
+                          </>
+                        ) : (
                           <div
-                            className="text-[11px] text-muted-foreground truncate w-full"
-                            title={line.descriptionIT}
+                            className="text-xs truncate w-full"
+                            title={line.descriptionIT ?? undefined}
                           >
                             {line.descriptionIT}
                           </div>

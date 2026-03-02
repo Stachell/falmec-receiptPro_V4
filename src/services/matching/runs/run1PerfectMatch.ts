@@ -87,6 +87,7 @@ export function run1PerfectMatch(
           orderYear: matchEntry.position.orderYear,
           qty: line.qty,
           reason: 'perfect-match' as OrderAssignmentReason,
+          vorgang: matchEntry.position.vorgang || undefined,
         };
 
         return {
@@ -96,6 +97,7 @@ export function run1PerfectMatch(
           orderNumberAssigned: allocation.orderNumber,
           orderYear: allocation.orderYear,
           orderCode: matchEntry.position.orderNumber,
+          orderVorgang: allocation.vorgang ?? null,
         };
       }
     }

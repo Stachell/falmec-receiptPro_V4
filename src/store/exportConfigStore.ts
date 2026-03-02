@@ -18,7 +18,7 @@ export const DEFAULT_COLUMN_ORDER: ExportColumnMapping[] = [
   { position: 3,  columnKey: 'falmecArticleNo',       label: 'Falmec-Art.-Nr.' },
   { position: 4,  columnKey: 'descriptionDE',         label: 'Bezeichnung (DE)' },
   { position: 5,  columnKey: 'descriptionIT',         label: 'Bezeichnung (IT)' },
-  { position: 6,  columnKey: 'qty',                   label: 'Menge' },
+  { position: 6,  columnKey: 'supplierId',             label: 'Lieferant' },
   { position: 7,  columnKey: 'unitPriceInvoice',      label: 'Einzelpreis (RE)' },
   { position: 8,  columnKey: 'unitPriceOrder',        label: 'Einzelpreis (Best.)' },
   { position: 9,  columnKey: 'totalPrice',            label: 'Gesamtpreis' },
@@ -26,7 +26,7 @@ export const DEFAULT_COLUMN_ORDER: ExportColumnMapping[] = [
   { position: 11, columnKey: 'orderDate',             label: 'Bestelldatum' },
   { position: 12, columnKey: 'serialNumber',          label: 'Seriennummer' },
   { position: 13, columnKey: 'storageLocation',       label: 'Lagerort' },
-  { position: 14, columnKey: 'eingangsart',           label: 'Eingangsart' },
+  { position: 14, columnKey: 'orderVorgang',           label: 'Vorgang' },
   { position: 15, columnKey: 'fattura',               label: 'Rechnungsnummer' },
 ];
 

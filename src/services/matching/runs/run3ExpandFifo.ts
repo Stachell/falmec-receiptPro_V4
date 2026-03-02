@@ -112,7 +112,7 @@ function expandAggregatedLines(
         orderAssignmentReason,
         orderYear,
         orderCode,
-        orderVorgang: null,
+        orderVorgang: allocOrder?.vorgang ?? null,
         orderOpenQty: null,
       });
     }
@@ -152,6 +152,7 @@ function fifoFillExpanded(
         orderYear: entry.position.orderYear,
         qty: 1,
         reason: 'fifo-fallback' as OrderAssignmentReason,
+        vorgang: entry.position.vorgang || undefined,
       };
 
       return {
@@ -161,6 +162,7 @@ function fifoFillExpanded(
         orderNumberAssigned: allocation.orderNumber,
         orderYear: allocation.orderYear,
         orderCode: entry.position.orderNumber,
+        orderVorgang: entry.position.vorgang || null,
       };
     }
 

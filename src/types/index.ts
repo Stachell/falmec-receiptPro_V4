@@ -61,6 +61,7 @@ export interface AllocatedOrder {
   orderYear: number;
   qty: number;            // Partial quantity from this order
   reason: OrderAssignmentReason;
+  vorgang?: string;       // 4-stellige Vorgangs-Nr. aus OpenWE (PROJ-40)
 }
 
 export type OrderParserConfidence = 'high' | 'medium' | 'low';
@@ -74,6 +75,7 @@ export interface OrderParserFieldAliases {
   ean: string[];
   supplierId: string[];
   belegnummer: string[];
+  vorgang: string[];    // 4-stellige Vorgangs-Nr. (PROJ-40)
 }
 
 export interface OrderParserProfile {
@@ -341,6 +343,8 @@ export interface ArticleMaster {
   unitPriceNet: number;
   activeFlag: boolean;
   serialRequirement: boolean;
+  descriptionDE: string | null;   // "Artikelmatchcode" aus Sage-Artikelliste (PROJ-40)
+  supplierId: string | null;      // 5-stellige Lieferantennummer aus Sage (PROJ-40)
 }
 
 export interface Issue {
@@ -431,12 +435,14 @@ export interface ParsedOrderPosition {
   orderNumber: string;    // Regex /^1\d{4}$/
   orderYear: number;      // Regex /^\d{4}$/
   belegnummer: string;
+  vorgang: string;        // 4-stellige Vorgangs-Nr. (PROJ-40)
 }
 
 export interface OrderParseResult {
   positions: ParsedOrderPosition[];
   rowCount: number;
   warnings: string[];
+  issues?: Issue[];       // PROJ-40: strukturierte Issues (z.B. Vorgang-Validierung)
   diagnostics?: OrderParserSelectionDiagnostics;
   /** Set wenn der Pre-Check einen harten Validierungsfehler erkannt hat. Trigger für Step-4-Abort im runStore. */
   validationError?: string;
@@ -460,13 +466,14 @@ export interface LeanSerialArchiveEntry {
 }
 
 // PROJ-35: Export column configuration types
+// PROJ-40: 'qty' → 'supplierId', 'eingangsart' → 'orderVorgang'
 export type ExportColumnKey =
   | 'manufacturerArticleNo'
   | 'ean'
   | 'falmecArticleNo'
   | 'descriptionDE'
   | 'descriptionIT'
-  | 'qty'
+  | 'supplierId'
   | 'unitPriceInvoice'
   | 'unitPriceOrder'
   | 'totalPrice'
@@ -474,7 +481,7 @@ export type ExportColumnKey =
   | 'orderDate'
   | 'serialNumber'
   | 'storageLocation'
-  | 'eingangsart'
+  | 'orderVorgang'
   | 'fattura';
 
 export interface ExportColumnMapping {

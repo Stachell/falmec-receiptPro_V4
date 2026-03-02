@@ -15,6 +15,7 @@ export const ORDER_PARSER_ALIAS_FIELDS: Array<keyof OrderParserFieldAliases> = [
   'ean',
   'supplierId',
   'belegnummer',
+  'vorgang',
 ];
 
 const DEFAULT_PROFILE: OrderParserProfile = {
@@ -22,14 +23,15 @@ const DEFAULT_PROFILE: OrderParserProfile = {
   label: 'Sage OpenWE v1',
   description: 'Default profile for offene Bestellungen / offene Wareneingaenge exports',
   aliases: {
-    orderNumberCandidates: ['BELEGNUMMER', 'BELEG-NR', 'BESTELLNUMMER', 'ORDER-NO', 'BESTELLUNG'],
+    orderNumberCandidates: ['BELEGNUMMER', 'BELEG-NR', 'ORDER-NO', 'BESTELLUNG'],
     orderYear: ['BESTELLJAHR', 'ORDER-YEAR', 'JAHR'],
     openQuantity: ['OFFENE MENGE', 'OPEN QTY', 'RESTMENGE', 'OFFEN', '<OFFENE MENGE (VORGANGSBEZOGEN)', 'OFFENE MENGE (VORGANGSBEZOGEN)'],
     artNoDE: ['ART-# (DE)', 'ART-DE', 'FALMEC-ART', 'ARTIKELNR', 'ARTIKEL-NR', 'ARTIKELNUMMER'],
     artNoIT: ['ART-# (IT)', 'ART-IT', 'CODICE', 'HERSTELLERARTIKELNR', 'BESTELLNUMMER'],
     ean: ['EAN', 'BARCODE', 'EAN-CODE', 'GTIN', 'EAN13', 'EAN-NUMMER'],
     supplierId: ['LIEFERANT', 'SUPPLIER', 'KREDITORNR', 'KREDITOR'],
-    belegnummer: ['BELEGNUMMER', 'BELEG-NR', 'BESTELLNUMMER', 'ORDER-NO', 'BESTELLUNG'],
+    belegnummer: ['BELEGNUMMER', 'BELEG-NR', 'ORDER-NO', 'BESTELLUNG'],
+    vorgang: ['VORGANG', 'VORGANGSNUMMER', 'VORGANG-NR', 'VORGANGS-NR'],
   },
   orderNumberRegex: '^1\\d{4}$',
   orderYearRegex: '^\\d{4}$',
@@ -48,6 +50,7 @@ function cloneAliases(aliases: OrderParserFieldAliases): OrderParserFieldAliases
     ean: [...aliases.ean],
     supplierId: [...aliases.supplierId],
     belegnummer: [...aliases.belegnummer],
+    vorgang: [...aliases.vorgang],
   };
 }
 
