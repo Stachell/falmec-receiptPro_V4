@@ -28,7 +28,9 @@ export type IssueType =
   | 'order-multi-split'
   | 'order-fifo-only'
   // PROJ-23 ADDON: Pool-empty guard
-  | 'pool-empty-mismatch';
+  | 'pool-empty-mismatch'
+  // PROJ-40 ADD-ON: Per-line supplier validation
+  | 'supplier-missing';
 
 export type MatchStatus =
   | 'pending'

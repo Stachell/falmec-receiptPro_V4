@@ -42,7 +42,7 @@ import { matchAllOrders } from '@/services/matching/OrderMatcher';
 import { mapAllOrders as mapAllOrdersWaterfall } from '@/services/matching/orderMapper';
 import { getMatcher } from '@/services/matchers';
 import { matcherRegistryService } from '@/services/matcherRegistryService';
-import type { SerialDocument } from '@/services/matchers/types';
+import type { SerialDocument, SerialDocumentRow } from '@/services/matchers/types';
 import type { PreFilteredSerialRow } from '@/types';
 import { validateAgainstInvoice } from '@/services/serialFinder';
 import {
@@ -625,7 +625,19 @@ export const useRunStore = create<RunState>((set, get) => ({
       import('@/services/serialFinder').then(({ preFilterSerialExcel }) => {
         preFilterSerialExcel(fileWithTimestamp.file!)
           .then((result) => {
-            set({ preFilteredSerials: result.filteredRows });
+            const serialDocRows: SerialDocumentRow[] = result.filteredRows.map(row => ({
+              rowIndex: row.sourceRowIndex,
+              invoiceRef: row.invoiceReference.replace(/\D/g, '').slice(-5),
+              serialRaw: row.serialNumber,
+              serialCandidate: row.serialNumber,
+              consumed: false,
+            }));
+            const serialDoc: SerialDocument = {
+              rows: serialDocRows,
+              fileName: fileWithTimestamp.name,
+              columnMapping: {},
+            };
+            set({ preFilteredSerials: result.filteredRows, serialDocument: serialDoc });
             logService.info(
               `S/N Pre-Filter: ${result.regexMatchCount}/${result.totalRowsScanned} Zeilen mit gültigem S/N`,
               { step: 'Seriennummer anfuegen' },
@@ -2486,10 +2498,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         };
       });
 
-      // Cache cleanup after Step 4 success
-      set({ preFilteredSerials: [], serialDocument: null });
-      console.log('[RunStore] Cache cleanup: preFilteredSerials and serialDocument cleared');
-
       logService.info(
         `MatchingEngine (3-Run): ${result.stats.matchedOrders} zugeordnet, ${result.stats.notOrderedCount} ohne Bestellung ` +
         `(P:${result.stats.perfectMatchCount} R:${result.stats.referenceMatchCount} S:${result.stats.smartQtyMatchCount} F:${result.stats.fifoFallbackCount}) ` +
@@ -3044,6 +3052,10 @@ export const useRunStore = create<RunState>((set, get) => ({
       }
 
       console.log(`[RunStore] executeMatcherSerialExtract (legacy): ${runLines.length} lines, ${serialDocument.rows.length} S/N rows, matcher=${matcher.moduleId}`);
+
+      // Fix C: Reset consumed-flags before each matching run (in-place mutation by serialExtract
+      // can persist to IndexedDB via AutoSave, which would mark all rows as consumed on reload)
+      serialDocument.rows.forEach(r => { r.consumed = false; });
 
       const invoiceNumber = currentRun.invoice.fattura;
       const result = matcher.serialExtract(runLines, serialDocument, invoiceNumber);

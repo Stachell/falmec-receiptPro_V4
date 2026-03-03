@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CopyableText } from '@/components/ui/CopyableText';
+import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Select,
@@ -72,6 +73,7 @@ export function InvoicePreview({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailPosition, setDetailPosition] = useState<ParsedInvoiceLineExtended | null>(null);
+  const [showDE, setShowDE] = useState(true);
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
@@ -441,7 +443,13 @@ export function InvoicePreview({
                       <TableHead className={`w-[8ch] whitespace-nowrap ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>- MATCH</TableHead>
                       <TableHead className={`w-[172px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>BESTELLNUMMER</TableHead>
                       <TableHead className={`w-[124px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>EAN</TableHead>
-                      <TableHead className={expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>BEZEICHNUNG</TableHead>
+                      <TableHead className={expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>
+                        <div className="flex items-center gap-1.5">
+                          <span>BEZEICHNUNG</span>
+                          <Switch checked={showDE} onCheckedChange={setShowDE} className="scale-75" />
+                          <span className="text-[10px] text-muted-foreground">{showDE ? 'DE' : 'IT'}</span>
+                        </div>
+                      </TableHead>
                       <TableHead className={`text-center w-[67px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>MENGE</TableHead>
                       <TableHead className={`text-right w-[119px] ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>PREIS / CHECK</TableHead>
                       <TableHead className={`w-[61px] text-center ${expandedPositions ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}>SERIAL</TableHead>
@@ -510,14 +518,27 @@ export function InvoicePreview({
                             />
                           </TableCell>
 
-                          {/* Col 7: Bezeichnung — dynamic width, truncate by available space */}
+                          {/* Col 7: Bezeichnung — dynamic width, DE/IT toggle */}
                           <TableCell className="min-w-0">
-                            <div
-                              className="text-xs truncate w-full"
-                              title={position.descriptionIT || position.manufacturerArticleNo}
-                            >
-                              {position.descriptionIT || position.manufacturerArticleNo || ''}
-                            </div>
+                            {showDE ? (
+                              <>
+                                <div className="text-xs truncate w-full"
+                                     title={posStatus?.representativeLine?.descriptionDE ?? position.descriptionIT ?? undefined}>
+                                  {posStatus?.representativeLine?.descriptionDE ?? position.descriptionIT ?? ''}
+                                </div>
+                                {posStatus?.representativeLine?.descriptionDE && position.descriptionIT && (
+                                  <div className="text-[11px] text-muted-foreground truncate w-full"
+                                       title={position.descriptionIT ?? undefined}>
+                                    {position.descriptionIT}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="text-xs truncate w-full"
+                                   title={position.descriptionIT ?? position.manufacturerArticleNo}>
+                                {position.descriptionIT || position.manufacturerArticleNo || ''}
+                              </div>
+                            )}
                           </TableCell>
 
                           {/* Col 8: Menge */}

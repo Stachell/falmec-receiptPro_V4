@@ -130,7 +130,13 @@ export const FALMEC_SCHEMA: SchemaDefinition = {
     {
       fieldId: 'descriptionDE',
       label: 'Bezeichnung (DE)',
-      aliases: ['Artikelmatchcode', 'Matchcode', 'Bezeichnung DE', 'Beschreibung', 'Beschreibung DE'],
+      aliases: [
+        'Artikelmatchcode', 'Matchcode',
+        'Bezeichnung DE', 'Beschreibung', 'Beschreibung DE',
+        'Matchcode_Artikel', 'Matchcode Artikel',
+        'Artikelbezeichnung', 'Bezeichnung', 'Kurztext',
+        'Artikelname', 'Langtext',
+      ],
       required: false,
     },
   ],
@@ -176,52 +182,6 @@ export class FalmecMatcher_Master implements MatcherModule {
         resolvedAt: null,
         resolutionNote: null,
       });
-    } else {
-      // Blocker 2: Zeile hat supplierId null (Spalte vorhanden, Zelle leer)
-      const missingSupplier = articles.filter(a => a.supplierId === null);
-      if (missingSupplier.length > 0) {
-        const artNos = missingSupplier.map(a => a.falmecArticleNo || a.manufacturerArticleNo).join(', ');
-        issues.push({
-          id: `issue-${runId}-step2-supplier-missing-${Date.now()}`,
-          runId,
-          severity: 'error',
-          stepNo: 2,
-          type: 'parser-error',
-          message: `Lieferant fehlt für ${missingSupplier.length} Artikel`,
-          details: `Lieferant fehlt für Artikel: ${artNos}`,
-          relatedLineIds: [],
-          affectedLineIds: [],
-          status: 'open',
-          createdAt: now2C,
-          resolvedAt: null,
-          resolutionNote: null,
-        });
-      }
-
-      // Blocker 3: supplierId vorhanden aber nicht 5-stellig numerisch
-      const invalidSupplier = articles.filter(
-        a => a.supplierId !== null && !SUPPLIER_REGEX.test(a.supplierId),
-      );
-      if (invalidSupplier.length > 0) {
-        const artNos = invalidSupplier
-          .map(a => `${a.falmecArticleNo || a.manufacturerArticleNo} ("${a.supplierId}")`)
-          .join(', ');
-        issues.push({
-          id: `issue-${runId}-step2-supplier-invalid-${Date.now()}`,
-          runId,
-          severity: 'error',
-          stepNo: 2,
-          type: 'parser-error',
-          message: `Lieferant ungueltig bei ${invalidSupplier.length} Artikel (erwartet: 5-stellig numerisch)`,
-          details: `Ungueltige Lieferantennummern: ${artNos}`,
-          relatedLineIds: [],
-          affectedLineIds: [],
-          status: 'open',
-          createdAt: now2C,
-          resolvedAt: null,
-          resolutionNote: null,
-        });
-      }
     }
     // ── Ende Fail-Fast ────────────────────────────────────────────────
 
@@ -255,6 +215,33 @@ export class FalmecMatcher_Master implements MatcherModule {
     });
 
     const updatedLines: InvoiceLine[] = matchResults.map(r => r.line);
+    const now = new Date().toISOString();
+
+    // ── Post-Match: Per-Line Supplier-Validierung (PROJ-40 ADD-ON) ──
+    const supplierIssueLines = updatedLines.filter(
+      l => l.matchStatus !== 'no-match' && l.matchStatus !== 'pending'
+        && (!l.supplierId || !SUPPLIER_REGEX.test(l.supplierId))
+    );
+
+    if (supplierIssueLines.length > 0) {
+      issues.push({
+        id: `issue-${runId}-step2-supplier-item-${Date.now()}`,
+        runId,
+        severity: 'warning',
+        stepNo: 2,
+        type: 'supplier-missing',
+        message: `Lieferant fehlt/ungültig bei ${supplierIssueLines.length} gematchten Artikeln`,
+        details: supplierIssueLines
+          .map(l => `${l.falmecArticleNo || l.manufacturerArticleNo}: "${l.supplierId ?? 'leer'}"`)
+          .join(', '),
+        relatedLineIds: supplierIssueLines.map(l => l.lineId),
+        affectedLineIds: supplierIssueLines.map(l => l.lineId),
+        status: 'open',
+        createdAt: now,
+        resolvedAt: null,
+        resolutionNote: null,
+      });
+    }
 
     // Compute stats
     const stats = this.computeStats(updatedLines);
@@ -274,7 +261,6 @@ export class FalmecMatcher_Master implements MatcherModule {
     // PROJ-17: Categorized issues instead of single summary
     const noMatchNoConflict = matchResults.filter(r => r.line.matchStatus === 'no-match' && !r.isConflict);
     const conflictResults = matchResults.filter(r => r.isConflict);
-    const now = new Date().toISOString();
 
     // Rollup: no-article-match (backwards-compatible summary)
     const allNoMatch = matchResults.filter(r => r.line.matchStatus === 'no-match');

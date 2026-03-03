@@ -18,8 +18,8 @@ Die Export-Datei muss angepasst werden, es fehlen Werte wie "Lieferant", "Vorgan
 8. Die Logik der Preis-Anpassung mit enstprechendem Impact im Worfkflow muss hinterlegt werden und in Punkt 2 integriert
 
 OPTISCHE MÄNGEL:
-
->> 
+>> in der manuellen Preiszuweisung im Re-Position/Artikelliste muss unter den Button "Sage Preis" aber überhalb des Separators noch ein Hinweis als Text erstellt werden, in klein gedruckter Schrift: „Achtung: Der Rechnungspreis muss vor dem Import in Sage hinterlegt sein.“
+>> In Re-Position > Body > S/N > Checkboxfelder mit Mouse-Effekt verlinken, Seriennummern sollen im Mauszeigerinfo angezeigt werden, mit Koma getrennt wenn man mit der Maus über die Checkbox fährt, sobald die Werte verfügbar sind, falls nicht soll einfach ein "folgt ..." (KISS-REGEL) gezeigt werden
 >> 
 
 
