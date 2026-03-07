@@ -83,7 +83,7 @@ export function matchAllOrders(
       orderCode,
       orderVorgang: chosen.vorgang,
       orderOpenQty: chosen.openQty,
-      supplierId: chosen.supplierId,
+      supplierId: chosen.supplierId || line.supplierId,
       orderAssignmentReason: exactMatch ? 'exact-qty-match' : 'oldest-first',
     };
   }

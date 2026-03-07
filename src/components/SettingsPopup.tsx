@@ -169,7 +169,7 @@ function DiagnosticsBlock({ diag }: { diag: StepDiagnostics | undefined }) {
 
 /** PROJ-35: Export column order configuration tab */
 function ExportConfigTab() {
-  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics, csvDelimiter, setCsvDelimiter } = useExportConfigStore();
+  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics, csvDelimiter, setCsvDelimiter, csvIncludeHeader, setCsvIncludeHeader } = useExportConfigStore();
 
   return (
     <TabsContent value="export" className="mt-0 space-y-3">
@@ -254,6 +254,17 @@ function ExportConfigTab() {
             <SelectItem value={'\t'}>Tab</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Headerzeile */}
+      <div className="border-t border-border pt-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-semibold">Headerzeile einfuegen:</Label>
+          <Switch checked={csvIncludeHeader} onCheckedChange={setCsvIncludeHeader} />
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Wenn aktiviert, wird eine Kopfzeile mit Spaltennamen in die CSV-Datei eingefuegt.
+        </p>
       </div>
 
       {/* Aktionsleiste */}

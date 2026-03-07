@@ -13,6 +13,7 @@ export interface RunExportMeta {
   deliveryDate: string | null;
   eingangsart: string;
   runId: string;
+  bookingDate: string;  // DD.MM.YYYY, persistent aus Run.stats.bookingDate
 }
 
 /** Escape special XML characters in a value */
@@ -46,8 +47,8 @@ export function resolveColumnValue(
     case 'descriptionDE':         return { tag: 'DescriptionDE', value: line.descriptionDE || '' };
     case 'descriptionIT':         return { tag: 'DescriptionIT', value: line.descriptionIT };
     case 'supplierId':            return { tag: 'Lieferant', value: line.supplierId || '' };
-    case 'unitPriceInvoice':      return { tag: 'UnitPrice', value: String(line.unitPriceInvoice) };
-    case 'unitPriceOrder':        return { tag: 'UnitPriceOrder', value: String(line.unitPriceSage ?? '') };
+    case 'unitPrice':             return { tag: 'UnitPrice', value: String(line.unitPriceFinal ?? line.unitPriceInvoice) };
+    case 'bookingDate':           return { tag: 'BookingDate', value: meta.bookingDate ?? '' };
     case 'totalPrice':            return { tag: 'TotalPrice', value: String(line.totalLineAmount) };
     case 'orderNumberAssigned':   return { tag: 'OrderNumber', value: line.orderNumberAssigned || '' };
     case 'orderDate':             return { tag: 'OrderDate', value: line.orderYear ? String(line.orderYear) : '' };
@@ -87,12 +88,13 @@ ${items}
 </Sage100Import>`;
 }
 
-/** Generate CSV with UTF-8 BOM, header row, and CRLF line endings */
+/** Generate CSV with UTF-8 BOM, optional header row, and CRLF line endings */
 export function generateCSV(
   lines: InvoiceLine[],
   columnOrder: ExportColumnMapping[],
   meta: RunExportMeta,
   delimiter: string,
+  includeHeader: boolean,
 ): string {
   const bom = '\uFEFF';
   const header = columnOrder.map(col => csvQuote(col.label, delimiter)).join(delimiter);
@@ -102,7 +104,8 @@ export function generateCSV(
       return csvQuote(value, delimiter);
     }).join(delimiter)
   );
-  return bom + [header, ...rows].join('\r\n');
+  const parts = includeHeader ? [header, ...rows] : rows;
+  return bom + parts.join('\r\n');
 }
 
 /** Build the export file name: "{runId}-Wareneingang.{ext}" */

@@ -108,7 +108,7 @@ type StatusFilterValue = 'all' | Run['status'];
 
 const Index = () => {
   const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines } = useRunStore();
-  const { columnOrder, csvDelimiter } = useExportConfigStore();
+  const { columnOrder, csvDelimiter, csvIncludeHeader } = useExportConfigStore();
   const navigate = useNavigate();
 
   const [selectedArchiveRun, setSelectedArchiveRun] = useState<ArchiveRun | null>(null);
@@ -158,10 +158,11 @@ const Index = () => {
       deliveryDate: run.invoice.deliveryDate ?? null,
       eingangsart: run.config.eingangsart,
       runId: run.id,
+      bookingDate: run.stats.bookingDate ?? '',
     };
     const content = type === 'xml'
       ? generateXML(runLines, columnOrder, meta)
-      : generateCSV(runLines, columnOrder, meta, csvDelimiter);
+      : generateCSV(runLines, columnOrder, meta, csvDelimiter, csvIncludeHeader);
     const mimeType = type === 'xml' ? 'application/xml' : 'text/csv';
     const fileName = buildExportFileName(run.id, type);
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });

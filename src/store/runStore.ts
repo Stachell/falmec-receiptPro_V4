@@ -467,6 +467,8 @@ interface RunState {
   // PROJ-11 Phase B: Article matching (Step 2) — legacy, kept for backwards compat
   executeArticleMatching: (articles: ArticleMaster[]) => void;
   setManualPrice: (lineId: string, price: number) => void;
+  /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
+  setBookingDate: (runId: string, date: string) => Run | null;
 
   // PROJ-16/19: Matcher-based actions (replace executeArticleMatching)
   // Articles are now sourced from masterDataStore — no parameter needed
@@ -2330,6 +2332,28 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
         : state.currentRun,
     }));
+  },
+
+  // ─── PROJ-42-ADD-ON: Buchungsdatum (einmalig beim ersten Export) ───
+
+  setBookingDate: (runId, date) => {
+    const { runs, currentRun } = get();
+    const targetRun = runs.find(r => r.id === runId);
+    if (!targetRun) return null;
+    // Einmaliges Setzen: nur wenn noch nicht vorhanden
+    if (targetRun.stats.bookingDate) return targetRun;
+
+    const updatedStats = { ...targetRun.stats, bookingDate: date };
+    const updatedRun = { ...targetRun, stats: updatedStats };
+
+    set({
+      runs: runs.map(r => r.id === runId ? updatedRun : r),
+      currentRun: currentRun?.id === runId
+        ? { ...currentRun, stats: updatedStats }
+        : currentRun,
+    });
+
+    return updatedRun;
   },
 
   // ─── PROJ-11 Phase C: Order Matching (Step 4) ─────────────────────

@@ -14,7 +14,7 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ run }: ExportPanelProps) {
-  const { invoiceLines: allInvoiceLines, issues, addAuditEntry } = useRunStore();
+  const { invoiceLines: allInvoiceLines, issues, addAuditEntry, setBookingDate } = useRunStore();
   // Filter lines to current run only
   const invoiceLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
   const [copied, setCopied] = useState(false);
@@ -23,7 +23,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
   const [expandedXml, setExpandedXml] = useState(false);
   const { wrap, isLocked } = useClickLock();
 
-  const { columnOrder, csvDelimiter, setLastDiagnostics } = useExportConfigStore();
+  const { columnOrder, csvDelimiter, csvIncludeHeader, setLastDiagnostics } = useExportConfigStore();
 
   useEffect(() => {
     if (!expandedXml) return;
@@ -44,6 +44,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
     deliveryDate: run.invoice.deliveryDate ?? null,
     eingangsart: run.config.eingangsart,
     runId: run.id,
+    bookingDate: run.stats.bookingDate ?? '',
   };
 
   // Build XML preview for the copy/expand section (generated on render)
@@ -57,10 +58,24 @@ export function ExportPanel({ run }: ExportPanelProps) {
 
   const handleDownload = (format: 'xml' | 'csv') => {
     const isXml = format === 'xml';
+
+    // Buchungsdatum: einmalig setzen, frischen Run zurueck bekommen
+    const freshRun = setBookingDate(run.id, new Date().toLocaleDateString('de-DE'));
+    const effectiveRun = freshRun ?? run;
+
+    const effectiveMeta: RunExportMeta = {
+      fattura: effectiveRun.invoice.fattura,
+      invoiceDate: effectiveRun.invoice.invoiceDate,
+      deliveryDate: effectiveRun.invoice.deliveryDate ?? null,
+      eingangsart: effectiveRun.config.eingangsart,
+      runId: effectiveRun.id,
+      bookingDate: effectiveRun.stats.bookingDate ?? '',
+    };
+
     const content = isXml
-      ? xmlPreview
-      : generateCSV(invoiceLines, columnOrder, runMeta, csvDelimiter);
-    const fileName = buildExportFileName(run.id, format);
+      ? generateXML(invoiceLines, columnOrder, effectiveMeta)
+      : generateCSV(invoiceLines, columnOrder, effectiveMeta, csvDelimiter, csvIncludeHeader);
+    const fileName = buildExportFileName(effectiveRun.id, format);
     const mimeType = isXml ? 'application/xml' : 'text/csv';
 
     // 1. Blob + anchor download (always first, universell)
@@ -76,7 +91,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
     const archiveOptions = isXml
       ? { exportXml: content }
       : { exportCsv: content };
-    archiveService.writeArchivePackage(run, invoiceLines, archiveOptions).catch(() => {
+    archiveService.writeArchivePackage(effectiveRun, invoiceLines, archiveOptions).catch(() => {
       // Archive failure must not block download
     });
 
@@ -85,7 +100,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
     logService.info(
       `Export durchgefuehrt: ${fileName}`,
       {
-        runId: run.id,
+        runId: effectiveRun.id,
         step: 'Export',
         details: `Format: ${format.toUpperCase()}, Positionen: ${invoiceLines.length}, Spalten: ${columnOrder.length}${delimiterLabel}`,
       },
@@ -93,7 +108,7 @@ export function ExportPanel({ run }: ExportPanelProps) {
 
     // 4. Audit-Log
     addAuditEntry({
-      runId: run.id,
+      runId: effectiveRun.id,
       action: 'export-download',
       details: `${format.toUpperCase()}: ${fileName} (${invoiceLines.length} Zeilen)`,
       userId: 'system',

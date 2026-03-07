@@ -11,6 +11,7 @@ import type { ExportColumnMapping, ExportDiagnostics, ExportColumnKey } from '@/
 const STORAGE_KEY = 'exportColumnConfig';
 const DIAGNOSTICS_KEY = 'exportDiagnostics';
 const DELIMITER_KEY = 'exportCsvDelimiter';
+const HEADER_KEY = 'exportCsvIncludeHeader';
 const VALID_DELIMITERS = [',', ';', '\t'];
 
 /** Default column order (position 1–15) */
@@ -21,8 +22,8 @@ export const DEFAULT_COLUMN_ORDER: ExportColumnMapping[] = [
   { position: 4,  columnKey: 'descriptionDE',         label: 'Bezeichnung (DE)' },
   { position: 5,  columnKey: 'descriptionIT',         label: 'Bezeichnung (IT)' },
   { position: 6,  columnKey: 'supplierId',             label: 'Lieferant' },
-  { position: 7,  columnKey: 'unitPriceInvoice',      label: 'Einzelpreis (RE)' },
-  { position: 8,  columnKey: 'unitPriceOrder',        label: 'Einzelpreis (Best.)' },
+  { position: 7,  columnKey: 'unitPrice',              label: 'Einzelpreis' },
+  { position: 8,  columnKey: 'bookingDate',            label: 'Datum der Buchung' },
   { position: 9,  columnKey: 'totalPrice',            label: 'Gesamtpreis' },
   { position: 10, columnKey: 'orderNumberAssigned',   label: 'Bestellnummer' },
   { position: 11, columnKey: 'orderDate',             label: 'Bestelldatum' },
@@ -37,6 +38,7 @@ interface ExportConfigState {
   lastDiagnostics: ExportDiagnostics | null;
   isDirty: boolean;
   csvDelimiter: string;
+  csvIncludeHeader: boolean;
 
   setColumnOrder: (order: ExportColumnMapping[]) => void;
   moveColumn: (fromIndex: number, toIndex: number) => void;
@@ -44,6 +46,7 @@ interface ExportConfigState {
   resetToDefault: () => void;
   setLastDiagnostics: (d: ExportDiagnostics) => void;
   setCsvDelimiter: (d: string) => void;
+  setCsvIncludeHeader: (v: boolean) => void;
 }
 
 /** Load persisted column order from localStorage, fallback to default */
@@ -75,6 +78,15 @@ function loadPersistedDelimiter(): string {
   }
 }
 
+function loadPersistedHeaderFlag(): boolean {
+  try {
+    const raw = localStorage.getItem(HEADER_KEY);
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function loadPersistedDiagnostics(): ExportDiagnostics | null {
   try {
     const raw = localStorage.getItem(DIAGNOSTICS_KEY);
@@ -95,6 +107,7 @@ export const useExportConfigStore = create<ExportConfigState>((set, get) => ({
   lastDiagnostics: loadPersistedDiagnostics(),
   isDirty: false,
   csvDelimiter: loadPersistedDelimiter(),
+  csvIncludeHeader: loadPersistedHeaderFlag(),
 
   setColumnOrder: (order) => set({ columnOrder: reindex(order), isDirty: true }),
 
@@ -128,5 +141,10 @@ export const useExportConfigStore = create<ExportConfigState>((set, get) => ({
     if (!VALID_DELIMITERS.includes(d)) return;
     localStorage.setItem(DELIMITER_KEY, d);
     set({ csvDelimiter: d });
+  },
+
+  setCsvIncludeHeader: (v) => {
+    localStorage.setItem(HEADER_KEY, String(v));
+    set({ csvIncludeHeader: v });
   },
 }));

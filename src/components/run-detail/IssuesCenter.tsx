@@ -767,7 +767,7 @@ export function IssuesCenter() {
                 <div className="space-y-0.5">
                   {customPriceLines.map(l => (
                     <p key={l.lineId} className="text-xs font-mono text-foreground">
-                      Pos. {l.positionIndex}: {l.unitPriceInvoice?.toFixed(2)} EUR → {l.unitPriceSage?.toFixed(2)} EUR (manuell)
+                      Pos. {l.positionIndex}: RE {l.unitPriceInvoice?.toFixed(2)} EUR → Final {(l.unitPriceFinal ?? l.unitPriceInvoice)?.toFixed(2)} EUR (manuell)
                     </p>
                   ))}
                 </div>

@@ -18,6 +18,7 @@ import { ExportPanel } from '@/components/run-detail/ExportPanel';
 import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
 import { useExportConfigStore } from '@/store/exportConfigStore';
 import { logService } from '@/services/logService';
+import { archiveService } from '@/services/archiveService';
 import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 import { RunLogTab } from '@/components/run-detail/RunLogTab';
@@ -63,12 +64,13 @@ export default function RunDetail() {
     pauseRun,
     resumeRun,
     addAuditEntry,
+    setBookingDate,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
   const getStoreState = useRunStore.getState;
   const navigate = useNavigate();
   const { wrap, isLocked } = useClickLock();
-  const { columnOrder, csvDelimiter } = useExportConfigStore();
+  const { columnOrder, csvDelimiter, csvIncludeHeader, setLastDiagnostics } = useExportConfigStore();
 
   // ─── PROJ-29: Double-Check-Logik ─────────────────────────────────────────────
   // Alle useMemo-Hooks müssen VOR dem ersten useEffect stehen (React Hook-Regeln)
@@ -295,52 +297,46 @@ export default function RunDetail() {
   }, [allocatedOrderCount, currentRun?.stats.notOrderedCount]);
   // ─── Ende PROJ-29 ─────────────────────────────────────────────────────────────
 
-  // PROJ-42: Toolbar-Export-Handler (XML + CSV)
-  const handleToolbarExport = () => {
-    if (!currentRun) return;
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`));
+  // PROJ-42-ADD-ON: Kachel-Export-Handler (CSV, Race-Condition-sicher)
+  const handleTileExport = () => {
+    if (!currentRun || !isExportReady) return;
+
+    // 1. Buchungsdatum: setBookingDate gibt frischen Run zurueck (sync!)
+    const freshRun = setBookingDate(currentRun.id, new Date().toLocaleDateString('de-DE'));
+    if (!freshRun) return;
+
+    // 2. RunMeta mit frischem bookingDate aufbauen
     const runMeta: RunExportMeta = {
-      fattura: currentRun.invoice.fattura,
-      invoiceDate: currentRun.invoice.invoiceDate,
-      deliveryDate: currentRun.invoice.deliveryDate ?? null,
-      eingangsart: currentRun.config.eingangsart,
-      runId: currentRun.id,
+      fattura: freshRun.invoice.fattura,
+      invoiceDate: freshRun.invoice.invoiceDate,
+      deliveryDate: freshRun.invoice.deliveryDate ?? null,
+      eingangsart: freshRun.config.eingangsart,
+      runId: freshRun.id,
+      bookingDate: freshRun.stats.bookingDate ?? new Date().toLocaleDateString('de-DE'),
     };
-    const xmlContent = generateXML(runLines, columnOrder, runMeta);
-    const csvContent = generateCSV(runLines, columnOrder, runMeta, csvDelimiter);
-    const xmlFileName = buildExportFileName(currentRun.id, 'xml');
-    const csvFileName = buildExportFileName(currentRun.id, 'csv');
 
-    // XML download
-    const xmlBlob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
-    const xmlUrl = URL.createObjectURL(xmlBlob);
-    const xmlLink = document.createElement('a');
-    xmlLink.href = xmlUrl;
-    xmlLink.download = xmlFileName;
-    xmlLink.click();
-    URL.revokeObjectURL(xmlUrl);
+    // 3. CSV generieren + Download
+    const csvContent = generateCSV(currentRunLines, columnOrder, runMeta, csvDelimiter, csvIncludeHeader);
+    const csvFileName = buildExportFileName(freshRun.id, 'csv');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = csvFileName;
+    a.click();
+    URL.revokeObjectURL(url);
 
-    // CSV download
-    const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-    const csvUrl = URL.createObjectURL(csvBlob);
-    const csvLink = document.createElement('a');
-    csvLink.href = csvUrl;
-    csvLink.download = csvFileName;
-    csvLink.click();
-    URL.revokeObjectURL(csvUrl);
+    // 4. Archive mit frischem Run
+    archiveService.writeArchivePackage(freshRun, currentRunLines, { exportCsv: csvContent }).catch(() => {});
 
-    // Logging + Audit
-    logService.info(`Export durchgefuehrt: ${xmlFileName} + ${csvFileName}`, {
-      runId: currentRun.id,
+    // 5. Log + Audit + Diagnostics
+    logService.info(`Export durchgefuehrt: ${csvFileName}`, {
+      runId: freshRun.id,
       step: 'Export',
-      details: `Format: XML+CSV, Positionen: ${runLines.length}`,
+      details: `Format: CSV, Positionen: ${currentRunLines.length}, Spalten: ${columnOrder.length}`,
     });
-    addAuditEntry({
-      runId: currentRun.id,
-      action: 'export-download',
-      details: `XML+CSV: ${xmlFileName} (${runLines.length} Zeilen)`,
-      userId: 'system',
-    });
+    addAuditEntry({ runId: freshRun.id, action: 'export-download', details: `CSV: ${csvFileName}`, userId: 'system' });
+    setLastDiagnostics({ timestamp: new Date().toISOString(), fileName: csvFileName, lineCount: currentRunLines.length, status: 'success' });
   };
 
   useEffect(() => {
@@ -639,17 +635,6 @@ export default function RunDetail() {
               <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
               {isProcessing ? 'Verarbeite...' : 'Neu verarbeiten'}
             </Button>
-            {isExportReady && (
-              <Button
-                size="sm"
-                className="gap-2 bg-[#008C99] text-white hover:bg-[#007080]"
-                disabled={isLocked('toolbar-export')}
-                onClick={wrap('toolbar-export', handleToolbarExport)}
-              >
-                <Download className="w-4 h-4" />
-                XML + CSV Export
-              </Button>
-            )}
           </div>
         </div>
 
@@ -710,15 +695,20 @@ export default function RunDetail() {
             isVerified={isKachel5Verified}
           />
           {/* Dynamic Next Step Button — PROJ-25: hover unified + pause badge */}
+          {/* PROJ-42-ADD-ON: teal + CSV-Download wenn allStepsComplete && isExportReady */}
           <div
             className={
               isPaused
                 ? 'kpi-tile flex flex-col justify-center items-center cursor-not-allowed bg-[#FD7C6E] text-white transition-colors'
-                : 'kpi-tile group flex flex-col justify-center items-center cursor-pointer bg-[#c9c3b6] hover:bg-[#008C99] transition-colors'
+                : (allStepsComplete && isExportReady)
+                  ? 'kpi-tile group flex flex-col justify-center items-center cursor-pointer bg-[#008C99] hover:bg-[#007080] transition-colors'
+                  : 'kpi-tile group flex flex-col justify-center items-center cursor-pointer bg-[#c9c3b6] hover:bg-[#008C99] transition-colors'
             }
             onClick={wrap('next-step', () => {
               if (isPaused) return;
-              if (allStepsComplete) {
+              if (allStepsComplete && isExportReady) {
+                handleTileExport();
+              } else if (allStepsComplete) {
                 setActiveTab('export');
               } else if (currentRun && hasFailedStep && nextStep) {
                 // HOTFIX-2: Dedicated retry action for failed steps
@@ -736,6 +726,18 @@ export default function RunDetail() {
                     pausiert
                   </span>
                 </div>
+              ) : (allStepsComplete && isExportReady) ? (
+                <>
+                  <div className="flex items-center justify-center gap-2">
+                    <Download className="w-[42px] h-[42px] text-white transition-colors" />
+                    <span className="text-base font-semibold leading-none translate-y-[1px] text-white transition-colors">
+                      Export
+                    </span>
+                  </div>
+                  <span className="text-xs text-center mt-0.5 text-white opacity-80 transition-colors">
+                    CSV herunterladen
+                  </span>
+                </>
               ) : (
                 <>
                   <div className="flex items-center justify-center gap-2">

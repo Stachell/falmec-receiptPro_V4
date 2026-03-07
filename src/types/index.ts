@@ -192,6 +192,9 @@ export interface RunStats {
   referenceMatchCount: number;
   smartQtyMatchCount: number;
   fifoFallbackCount: number;
+
+  /** PROJ-42-ADD-ON: Buchungsdatum DD.MM.YYYY, einmalig beim ersten Export gesetzt. */
+  bookingDate?: string;
 }
 
 export interface WorkflowStep {
@@ -469,6 +472,7 @@ export interface LeanSerialArchiveEntry {
 
 // PROJ-35: Export column configuration types
 // PROJ-40: 'qty' → 'supplierId', 'eingangsart' → 'orderVorgang'
+// PROJ-42-ADD-ON: 'unitPriceInvoice'+'unitPriceOrder' → 'unitPrice', added 'bookingDate'
 export type ExportColumnKey =
   | 'manufacturerArticleNo'
   | 'ean'
@@ -476,8 +480,8 @@ export type ExportColumnKey =
   | 'descriptionDE'
   | 'descriptionIT'
   | 'supplierId'
-  | 'unitPriceInvoice'
-  | 'unitPriceOrder'
+  | 'unitPrice'
+  | 'bookingDate'
   | 'totalPrice'
   | 'orderNumberAssigned'
   | 'orderDate'
