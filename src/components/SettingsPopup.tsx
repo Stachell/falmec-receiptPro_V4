@@ -165,7 +165,7 @@ function DiagnosticsBlock({ diag }: { diag: StepDiagnostics | undefined }) {
 
 /** PROJ-35: Export column order configuration tab */
 function ExportConfigTab() {
-  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics } = useExportConfigStore();
+  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics, csvDelimiter, setCsvDelimiter } = useExportConfigStore();
 
   return (
     <TabsContent value="export" className="mt-0 space-y-3">
@@ -235,6 +235,21 @@ function ExportConfigTab() {
         ) : (
           <p className="text-xs text-muted-foreground mt-1">Noch kein Export durchgefuehrt.</p>
         )}
+      </div>
+
+      {/* CSV-Trennzeichen */}
+      <div className="border-t border-border pt-3">
+        <Label className="text-xs font-semibold">CSV-Trennzeichen</Label>
+        <Select value={csvDelimiter} onValueChange={setCsvDelimiter}>
+          <SelectTrigger className="mt-1 h-8 text-xs w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value=",">Komma (,)</SelectItem>
+            <SelectItem value=";">Semikolon (;)</SelectItem>
+            <SelectItem value={'\t'}>Tab</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Aktionsleiste */}
@@ -488,7 +503,7 @@ export function SettingsPopup({
   const matcherOverrideEnabled = !!globalConfig.matcherProfileOverrides?.enabled;
   const matcherProfileOverrides = globalConfig.matcherProfileOverrides;
   const blockStep2OnPriceMismatch = globalConfig.blockStep2OnPriceMismatch ?? false;
-  const blockStep4OnMissingOrder = globalConfig.blockStep4OnMissingOrder ?? false;
+
 
   // PROJ-28 Phase D: handlers for OverrideEditorModal
   const openOverrideModal = (stepNo: 2 | 4) => {
@@ -964,19 +979,6 @@ export function SettingsPopup({
                     <DiagnosticsBlock diag={latestDiagnostics[4]} />
                   </div>
 
-                  {/* [F] Block-Toggle Step 4 */}
-                  <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
-                    <div className="space-y-1">
-                      <Label className="text-sm whitespace-nowrap">Fehlende Bestellzuweisung blockiert Step 4</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Wenn aktiv: Step 4 kann nicht abgeschlossen werden, solange Bestellzuordnungen fehlen.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={blockStep4OnMissingOrder}
-                      onCheckedChange={(checked) => setGlobalConfig({ blockStep4OnMissingOrder: checked })}
-                    />
-                  </div>
                 </div>
 
               </TabsContent>

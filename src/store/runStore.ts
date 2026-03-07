@@ -640,17 +640,17 @@ export const useRunStore = create<RunState>((set, get) => ({
             set({ preFilteredSerials: result.filteredRows, serialDocument: serialDoc });
             logService.info(
               `S/N Pre-Filter: ${result.regexMatchCount}/${result.totalRowsScanned} Zeilen mit gültigem S/N`,
-              { step: 'Seriennummer anfuegen' },
+              { runId: get().currentRun?.id, step: 'Seriennummer anfuegen' },
             );
             for (const w of result.warnings) {
-              logService.warn(`[SerialFinder] ${w}`, { step: 'Seriennummer anfuegen' });
+              logService.warn(`[SerialFinder] ${w}`, { runId: get().currentRun?.id, step: 'Seriennummer anfuegen' });
             }
           })
           .catch((err) => {
             console.error('[RunStore] serialFinder preFilter failed:', err);
             logService.error(
               `S/N Pre-Filter fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
-              { step: 'Seriennummer anfuegen' },
+              { runId: get().currentRun?.id, step: 'Seriennummer anfuegen' },
             );
           });
       });
@@ -1406,20 +1406,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         }
       }
 
-      // Block leaving Step 4 when order-assignment errors are unresolved
-      if (runningStep.stepNo === 4 && globalConfig.blockStep4OnMissingOrder) {
-        const openOrderErrors = issues.filter(
-          i => i.type === 'order-assignment' && i.status === 'open' && i.severity === 'error' && i.runId === runId,
-        );
-        if (openOrderErrors.length > 0) {
-          logService.warn(
-            `Block-Guard: Step 4 → Step 5 blockiert (${openOrderErrors.length} offene Bestellzuordnungen)`,
-            { runId, step: 'Bestellungen mappen' },
-          );
-          return;
-        }
-      }
-
       // Set current step to 'ok'
       get().updateStepStatus(runId, runningStep.stepNo, 'ok');
     }
@@ -1502,6 +1488,16 @@ export const useRunStore = create<RunState>((set, get) => ({
                     .then((parseResult) => {
                       for (const w of parseResult.warnings) {
                         logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+                      }
+
+                      // PROJ-41: Strukturierte Parser-Issues in State übernehmen
+                      if (parseResult.issues && parseResult.issues.length > 0) {
+                        set((state) => ({
+                          issues: [
+                            ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4 && i.type === 'parser-error')),
+                            ...parseResult.issues!.map(issue => ({ ...issue, runId })),
+                          ],
+                        }));
                       }
 
                       set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
@@ -1696,6 +1692,17 @@ export const useRunStore = create<RunState>((set, get) => ({
                     for (const w of parseResult.warnings) {
                       logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
                     }
+
+                    // PROJ-41: Strukturierte Parser-Issues in State übernehmen
+                    if (parseResult.issues && parseResult.issues.length > 0) {
+                      set((state) => ({
+                        issues: [
+                          ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4 && i.type === 'parser-error')),
+                          ...parseResult.issues!.map(issue => ({ ...issue, runId })),
+                        ],
+                      }));
+                    }
+
                     set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
                     // PROJ-28: Step 4 diagnostics
                     if (parseResult.diagnostics) {
@@ -1848,31 +1855,36 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (resolved !== issues) set({ issues: resolved });
   },
 
-  resolveIssue: (issueId, resolutionNote) => set((state) => ({
-    issues: state.issues.map(issue =>
-      issue.id === issueId
-        ? {
-            ...issue,
-            status: 'resolved' as const,
-            resolvedAt: new Date().toISOString(),
-            resolutionNote,
-          }
-        : issue
-    ),
-  })),
+  resolveIssue: (issueId, resolutionNote) => {
+    set((state) => ({
+      issues: state.issues.map(issue =>
+        issue.id === issueId
+          ? { ...issue, status: 'resolved' as const, resolvedAt: new Date().toISOString(), resolutionNote }
+          : issue
+      ),
+    }));
+    const runId = get().issues.find(i => i.id === issueId)?.runId ?? get().currentRun?.id;
+    if (runId) {
+      logService.info(`Issue gelöst: ${issueId}`, { runId, step: 'Issues', details: resolutionNote ?? '' });
+      get().addAuditEntry({ runId, action: 'resolveIssue', details: `issueId=${issueId}, note=${resolutionNote ?? ''}`, userId: 'system' });
+    }
+  },
 
   // PROJ-39: Escalate issue — status stays 'open', only sets escalatedAt + escalatedTo
-  escalateIssue: (issueId, recipientEmail) => set((state) => ({
-    issues: state.issues.map(issue =>
-      issue.id === issueId
-        ? {
-            ...issue,
-            escalatedAt: new Date().toISOString(),
-            escalatedTo: recipientEmail,
-          }
-        : issue
-    ),
-  })),
+  escalateIssue: (issueId, recipientEmail) => {
+    set((state) => ({
+      issues: state.issues.map(issue =>
+        issue.id === issueId
+          ? { ...issue, escalatedAt: new Date().toISOString(), escalatedTo: recipientEmail }
+          : issue
+      ),
+    }));
+    const runId = get().issues.find(i => i.id === issueId)?.runId ?? get().currentRun?.id;
+    if (runId) {
+      logService.info(`Issue eskaliert an ${recipientEmail}`, { runId, step: 'Issues', details: `issueId=${issueId}` });
+      get().addAuditEntry({ runId, action: 'escalateIssue', details: `issueId=${issueId}, to=${recipientEmail}`, userId: 'system' });
+    }
+  },
 
   deleteRun: (runId) => {
     logService.info('Run gelöscht', { runId, step: 'System' });
@@ -1981,6 +1993,17 @@ export const useRunStore = create<RunState>((set, get) => ({
                     for (const w of parseResult.warnings) {
                       logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
                     }
+
+                    // PROJ-41: Strukturierte Parser-Issues in State übernehmen
+                    if (parseResult.issues && parseResult.issues.length > 0) {
+                      set((state) => ({
+                        issues: [
+                          ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4 && i.type === 'parser-error')),
+                          ...parseResult.issues!.map(issue => ({ ...issue, runId })),
+                        ],
+                      }));
+                    }
+
                     set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
                     // PROJ-28: Step 4 diagnostics
                     if (parseResult.diagnostics) {
@@ -2259,7 +2282,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         { runId, step: 'Artikel extrahieren' }
       );
     } catch (error) {
-      console.error('[RunStore] executeArticleMatching error:', error);
       logService.error(`Artikel-Matching fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
         runId,
         step: 'Artikel extrahieren',
@@ -2282,6 +2304,12 @@ export const useRunStore = create<RunState>((set, get) => ({
           : line
       ),
     }));
+
+    const runId = get().currentRun?.id;
+    if (runId) {
+      logService.info(`Manueller Preis: ${price}`, { runId, step: 'Artikel extrahieren', details: `lineId=${lineId}` });
+      get().addAuditEntry({ runId, action: 'setManualPrice', details: `lineId=${lineId}, price=${price}`, userId: 'system' });
+    }
 
     // Update price stats for the current run
     const { invoiceLines, currentRun, runs } = get();
@@ -2361,7 +2389,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         { runId, step: 'Bestellungen mappen' }
       );
     } catch (error) {
-      console.error('[RunStore] executeOrderMatching error:', error);
       logService.error(`Bestell-Matching fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
         runId,
         step: 'Bestellungen mappen',
@@ -2505,7 +2532,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         { runId, step: 'Bestellungen mappen' },
       );
     } catch (error) {
-      console.error('[RunStore] executeOrderMapping error:', error);
       logService.error(`MatchingEngine fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
         runId,
         step: 'Bestellungen mappen',
@@ -2542,6 +2568,10 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
         : state.currentRun,
     }));
+
+    const runId = currentRun.id;
+    logService.info(`Manuelle Bestellung: ${orderYear}-${orderCode}`, { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}` });
+    get().addAuditEntry({ runId, action: 'setManualOrder', details: `lineId=${lineId}, order=${orderYear}-${orderCode}`, userId: 'system' });
   },
 
   confirmNoOrder: (lineId) => {
@@ -2569,6 +2599,10 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
         : state.currentRun,
     }));
+
+    const runId = currentRun.id;
+    logService.info('Keine Bestellung bestätigt', { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}` });
+    get().addAuditEntry({ runId, action: 'confirmNoOrder', details: `lineId=${lineId}`, userId: 'system' });
   },
 
   // ─── PROJ-23 Phase A5: Manual Reassignment ───────────────────────────
@@ -2658,6 +2692,9 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
         : state.currentRun,
     }));
+
+    logService.info(`Bestellung umgewiesen`, { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}, target=${newOrderPositionId ?? freeText ?? 'none'}` });
+    get().addAuditEntry({ runId, action: 'reassignOrder', details: `lineId=${lineId}, target=${newOrderPositionId ?? freeText ?? 'none'}`, userId: 'system' });
   },
 
   // ─── PROJ-16/19: Matcher-based Cross-Match (Step 2) ──────────────────
@@ -2893,7 +2930,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         logFn(`[Matcher] ${w.code}: ${w.message}`, { runId, step: 'Artikel extrahieren' });
       }
     } catch (error) {
-      console.error('[RunStore] executeMatcherCrossMatch error:', error);
       logService.error(`Matcher Cross-Match fehlgeschlagen: ${error instanceof Error ? error.message : error}`, {
         runId,
         step: 'Artikel extrahieren',
@@ -2990,12 +3026,20 @@ export const useRunStore = create<RunState>((set, get) => ({
               `Pos ${l.positionIndex}: ${l.serialNumbers.length}/${l.qty} S/N`
             ).join(', ') + (underServedLines.length > 20 ? ` ... (+${underServedLines.length - 20} weitere)` : ''),
             relatedLineIds: underServedLines.map(l => l.lineId),
+            affectedLineIds: underServedLines.map(l => l.lineId),  // PROJ-41: Fehlercenter-Rendering
             status: 'open',
             createdAt: new Date().toISOString(),
             resolvedAt: null,
             resolutionNote: null,
             context: { field: 'serialNumbers', expectedValue: 'qty', actualValue: `${assignedCount}/${requiredCount}` },
           });
+
+          // PROJ-41: Mismatch als WARN/ERROR loggen
+          const logFn = shouldHardFail ? logService.error.bind(logService) : logService.warn.bind(logService);
+          logFn(
+            `S/N-Mismatch: ${assignedCount}/${requiredCount} zugewiesen (${underServedLines.length} Positionen betroffen)`,
+            { runId, step: 'Seriennummer anfuegen' },
+          );
         }
 
         set((state) => {
@@ -3031,6 +3075,18 @@ export const useRunStore = create<RunState>((set, get) => ({
           `SerialFinder: ${assignedCount}/${requiredCount} S/N zugewiesen (Checksum: ${checksumMatch ? 'OK' : 'MISMATCH'}, strict=${strictSerialRequiredFailure})`,
           { runId, step: 'Seriennummer anfuegen' },
         );
+
+        // PROJ-41: Step-3 Diagnostics für Settings "Letzte Diagnose"
+        get().setStepDiagnostics(3, {
+          stepNo: 3,
+          moduleName: 'SerialFinder (preFiltered)',
+          confidence: checksumMatch ? 'high' : (assignedCount > 0 ? 'medium' : 'low'),
+          summary: requiredCount === 0
+            ? 'Keine S/N-Pflicht'
+            : `${assignedCount}/${requiredCount} S/N zugewiesen`,
+          timestamp: new Date().toISOString(),
+        });
+
         return;
       }
 
@@ -3039,7 +3095,7 @@ export const useRunStore = create<RunState>((set, get) => ({
       const matcherId = matcherRegistryService.getSelectedMatcherId();
       const matcher = getMatcher(matcherId);
       if (!matcher) {
-        console.error('[RunStore] executeMatcherSerialExtract: matcher not found for id', matcherId);
+        logService.error(`Matcher nicht gefunden: ${matcherId}`, { runId, step: 'Seriennummer anfuegen' });
         get().updateStepStatus(runId, 3, 'failed');
         return;
       }
@@ -3173,6 +3229,11 @@ export const useRunStore = create<RunState>((set, get) => ({
           currentParsedRunId: runId,                                // PROJ-40 5C: Run-Isolierung
         };
       });
+
+      // PROJ-41: Run-Log aus IndexedDB wiederherstellen
+      if (data.runLog && data.runLog.length > 0) {
+        logService.restoreRunBuffer(runId, data.runLog);
+      }
 
       console.log(`[RunStore] Persisted run loaded: ${runId}`);
       return true;

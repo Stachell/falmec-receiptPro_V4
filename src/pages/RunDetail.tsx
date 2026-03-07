@@ -15,6 +15,9 @@ import { ItemsTable } from '@/components/run-detail/ItemsTable';
 import { IssuesCenter } from '@/components/run-detail/IssuesCenter';
 import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
 import { ExportPanel } from '@/components/run-detail/ExportPanel';
+import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { useExportConfigStore } from '@/store/exportConfigStore';
+import { logService } from '@/services/logService';
 import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 import { RunLogTab } from '@/components/run-detail/RunLogTab';
@@ -43,6 +46,7 @@ export default function RunDetail() {
     runs,
     currentRun,
     invoiceLines,           // PROJ-29: für Double-Check-Berechnungen
+    issues,
     setCurrentRun,
     activeTab,
     setActiveTab,
@@ -58,11 +62,13 @@ export default function RunDetail() {
     isPaused,
     pauseRun,
     resumeRun,
+    addAuditEntry,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
   const getStoreState = useRunStore.getState;
   const navigate = useNavigate();
   const { wrap, isLocked } = useClickLock();
+  const { columnOrder, csvDelimiter } = useExportConfigStore();
 
   // ─── PROJ-29: Double-Check-Logik ─────────────────────────────────────────────
   // Alle useMemo-Hooks müssen VOR dem ersten useEffect stehen (React Hook-Regeln)
@@ -230,6 +236,15 @@ export default function RunDetail() {
   const allTilesVerified = isKachel1Verified && isKachel2Verified && isKachel3Verified
                           && isKachel4Verified && isKachel5Verified;
 
+  // PROJ-42: isExportReady — Toolbar-Button-Bedingung
+  const isExportReady = useMemo(() => {
+    if (!currentRun) return false;
+    const runIssues = issues.filter(i => !i.runId || i.runId === currentRun.id);
+    const blocking = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
+    const missingLoc = currentRunLines.filter(l => !l.storageLocation);
+    return blocking.length === 0 && missingLoc.length === 0 && currentRunLines.length > 0;
+  }, [currentRun, issues, currentRunLines]);
+
   // 9. SubValue-Strings (Zeile 3) für Kacheln 1, 2, 4, 5
   const kachel1SubValue = useMemo(() => {
     const invoiceTotal = currentRun?.invoice.invoiceTotal;
@@ -279,6 +294,54 @@ export default function RunDetail() {
     return undefined;
   }, [allocatedOrderCount, currentRun?.stats.notOrderedCount]);
   // ─── Ende PROJ-29 ─────────────────────────────────────────────────────────────
+
+  // PROJ-42: Toolbar-Export-Handler (XML + CSV)
+  const handleToolbarExport = () => {
+    if (!currentRun) return;
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`));
+    const runMeta: RunExportMeta = {
+      fattura: currentRun.invoice.fattura,
+      invoiceDate: currentRun.invoice.invoiceDate,
+      deliveryDate: currentRun.invoice.deliveryDate ?? null,
+      eingangsart: currentRun.config.eingangsart,
+      runId: currentRun.id,
+    };
+    const xmlContent = generateXML(runLines, columnOrder, runMeta);
+    const csvContent = generateCSV(runLines, columnOrder, runMeta, csvDelimiter);
+    const xmlFileName = buildExportFileName(currentRun.id, 'xml');
+    const csvFileName = buildExportFileName(currentRun.id, 'csv');
+
+    // XML download
+    const xmlBlob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+    const xmlUrl = URL.createObjectURL(xmlBlob);
+    const xmlLink = document.createElement('a');
+    xmlLink.href = xmlUrl;
+    xmlLink.download = xmlFileName;
+    xmlLink.click();
+    URL.revokeObjectURL(xmlUrl);
+
+    // CSV download
+    const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const csvUrl = URL.createObjectURL(csvBlob);
+    const csvLink = document.createElement('a');
+    csvLink.href = csvUrl;
+    csvLink.download = csvFileName;
+    csvLink.click();
+    URL.revokeObjectURL(csvUrl);
+
+    // Logging + Audit
+    logService.info(`Export durchgefuehrt: ${xmlFileName} + ${csvFileName}`, {
+      runId: currentRun.id,
+      step: 'Export',
+      details: `Format: XML+CSV, Positionen: ${runLines.length}`,
+    });
+    addAuditEntry({
+      runId: currentRun.id,
+      action: 'export-download',
+      details: `XML+CSV: ${xmlFileName} (${runLines.length} Zeilen)`,
+      userId: 'system',
+    });
+  };
 
   useEffect(() => {
     // Find run by ID - first search in store runs (real runs), then fallback to mock data
@@ -576,10 +639,15 @@ export default function RunDetail() {
               <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
               {isProcessing ? 'Verarbeite...' : 'Neu verarbeiten'}
             </Button>
-            {currentRun.stats.exportReady && (
-              <Button size="sm" className="gap-2">
+            {isExportReady && (
+              <Button
+                size="sm"
+                className="gap-2 bg-[#008C99] text-white hover:bg-[#007080]"
+                disabled={isLocked('toolbar-export')}
+                onClick={wrap('toolbar-export', handleToolbarExport)}
+              >
                 <Download className="w-4 h-4" />
-                XML Export
+                XML + CSV Export
               </Button>
             )}
           </div>

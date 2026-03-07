@@ -16,6 +16,7 @@
 import { useEffect, useRef } from 'react';
 import { useRunStore } from '@/store/runStore';
 import { runPersistenceService } from '@/services/runPersistenceService';
+import { logService } from '@/services/logService';
 
 const DEBOUNCE_MS = 2000;
 
@@ -87,6 +88,7 @@ export function useRunAutoSave(): void {
             size: f.size,
             uploadedAt: f.uploadedAt,
           })),
+          runLog: logService.getRunBuffer(runId),
         }).catch(err => {
           console.error('[AutoSave] Failed to save run:', err);
         });

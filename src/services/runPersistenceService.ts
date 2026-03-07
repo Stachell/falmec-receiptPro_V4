@@ -22,6 +22,7 @@ import type {
 } from '@/types';
 import type { ParsedInvoiceResult } from '@/services/parsers';
 import type { SerialDocument } from '@/services/matchers/types';
+import type { LogEntry } from '@/services/logService';
 
 const DB_NAME = 'falmec-receiptpro-runs';
 const DB_VERSION = 1;
@@ -42,6 +43,7 @@ export interface PersistedRunData {
   parsedInvoiceResult: ParsedInvoiceResult | null;  // PDF-Preview
   serialDocument: SerialDocument | null;             // S/N-Excel für Neu-Verarbeiten
   uploadMetadata: PersistedUploadMeta[];             // Dateinamen + Typen der Uploads
+  runLog?: LogEntry[];                           // PROJ-41: Run-Log für IndexedDB-Persistenz
   savedAt: string;                               // ISO timestamp
   sizeEstimateBytes: number;                     // JSON.stringify(data).length * 2
 }

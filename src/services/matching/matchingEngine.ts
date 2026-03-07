@@ -34,6 +34,7 @@ import type { OrderPool } from './orderPool';
 import { run1PerfectMatch } from './runs/run1PerfectMatch';
 import { run2PartialFillup } from './runs/run2PartialFillup';
 import { run3ExpandFifo } from './runs/run3ExpandFifo';
+import { logService } from '@/services/logService';
 
 // ── Result type ──────────────────────────────────────────────────────
 
@@ -164,19 +165,19 @@ export function executeMatchingEngine(
   parsedPositions: ParsedInvoiceLineExtended[],
   runId: string,
 ): MatchingEngineResult {
-  console.log(`[MatchingEngine] Starting 3-Run pipeline: ${aggregatedLines.length} aggregated lines, pool remaining: ${pool.totalRemaining}`);
+  logService.debug(`[MatchingEngine] Starting 3-Run pipeline...`, { runId, step: 'Bestellungen mappen' });
 
   // ── Run 1: Perfect Match (Aggregated) ──
   const r1 = run1PerfectMatch(aggregatedLines, pool, parsedPositions);
-  console.log(`[MatchingEngine] Run 1 complete: ${r1.perfectMatchCount} perfect matches, pool remaining: ${pool.totalRemaining}`);
+  logService.debug(`[MatchingEngine] Run 1 complete...`, { runId, step: 'Bestellungen mappen' });
 
   // ── Run 2: Partial Fillup (Aggregated) ──
   const r2 = run2PartialFillup(r1.lines, pool, parsedPositions);
-  console.log(`[MatchingEngine] Run 2 complete: ${r2.referenceMatchCount} ref matches, ${r2.smartQtyMatchCount} smart-qty, pool remaining: ${pool.totalRemaining}`);
+  logService.debug(`[MatchingEngine] Run 2 complete...`, { runId, step: 'Bestellungen mappen' });
 
   // ── Run 3: Expand + FIFO (CRITICAL TRANSITION) ──
   const r3 = run3ExpandFifo(r2.lines, pool, runId);
-  console.log(`[MatchingEngine] Run 3 complete: ${r3.expandedLineCount} expanded lines, ${r3.fifoFallbackCount} FIFO fills, pool remaining: ${pool.totalRemaining}`);
+  logService.debug(`[MatchingEngine] Run 3 complete...`, { runId, step: 'Bestellungen mappen' });
 
   // ── Build issues from expanded lines ──
   const issues = buildEngineIssues(r3.lines, runId);
@@ -196,12 +197,7 @@ export function executeMatchingEngine(
     notOrderedCount,
   };
 
-  console.log(
-    `[MatchingEngine] Pipeline complete — P:${stats.perfectMatchCount} R:${stats.referenceMatchCount} ` +
-    `S:${stats.smartQtyMatchCount} F:${stats.fifoFallbackCount} | ` +
-    `Matched:${stats.matchedOrders} NotOrdered:${stats.notOrderedCount} | ` +
-    `Issues:${issues.length}`
-  );
+  logService.debug(`[MatchingEngine] Pipeline result...`, { runId, step: 'Bestellungen mappen' });
 
   return {
     lines: r3.lines,

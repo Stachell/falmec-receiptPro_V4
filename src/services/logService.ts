@@ -272,6 +272,11 @@ class LogService {
     return this.runBuffers.get(runId) || [];
   }
 
+  /** PROJ-41: Restore run buffer from IndexedDB persistence */
+  restoreRunBuffer(runId: string, entries: LogEntry[]): void {
+    this.runBuffers.set(runId, [...entries]);
+  }
+
   // Rename run buffer + localStorage key when runId changes (e.g. run-123 → Fattura-Nr-date)
   renameRunBuffer(oldRunId: string, newRunId: string): void {
     // Move in-memory buffer

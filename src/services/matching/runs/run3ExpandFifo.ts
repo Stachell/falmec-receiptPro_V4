@@ -78,6 +78,7 @@ function expandAggregatedLines(
             orderYear: allocOrder.orderYear,
             qty: 1,
             reason: allocOrder.reason,
+            vorgang: allocOrder.vorgang,       // PROJ-42 Bug-A-Fix: vorgang durchreichen
           }]
         : [];
 

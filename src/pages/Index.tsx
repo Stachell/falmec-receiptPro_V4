@@ -33,6 +33,9 @@ import {
 } from '@/components/ui/select';
 import type { Run } from '@/types';
 import type { PersistedRunSummary } from '@/services/runPersistenceService';
+import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { useExportConfigStore } from '@/store/exportConfigStore';
+import { toast } from 'sonner';
 
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
@@ -41,21 +44,6 @@ const FORMAT_TYPES: Array<'xml' | 'csv'> = ['xml', 'csv'];
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
-
-function generateRunExport(run: Run, type: 'xml' | 'csv' | 'json'): string {
-  const ts = new Date().toISOString();
-  if (type === 'xml') {
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<BelegImport>\n  <Fattura>${run.invoice.fattura}</Fattura>\n  <InvoiceDate>${run.invoice.invoiceDate}</InvoiceDate>\n  <Eingangsart>${run.config.eingangsart}</Eingangsart>\n  <ExportedAt>${ts}</ExportedAt>\n</BelegImport>`;
-  }
-  if (type === 'csv') {
-    return `"Fattura";"Datum";"Eingangsart";"Exportiert"\n"${run.invoice.fattura}";"${run.invoice.invoiceDate}";"${run.config.eingangsart}";"${ts}"`;
-  }
-  return JSON.stringify(
-    { fattura: run.invoice.fattura, invoiceDate: run.invoice.invoiceDate, eingangsart: run.config.eingangsart, exportedAt: ts },
-    null,
-    2
-  );
-}
 
 /** Unified row shape for both session runs and persisted-only runs */
 interface TableRow_ {
@@ -95,7 +83,7 @@ function toTableRow(run: Run): TableRow_ {
       : run.invoice.qtyValidationStatus === 'mismatch'
         ? false
         : null,
-    exportReady: run.stats.exportReady,
+    exportReady: run.steps.every(s => s.status === 'ok' || s.status === 'soft-fail'),
     run,
   };
 }
@@ -119,7 +107,8 @@ function persistedToTableRow(s: PersistedRunSummary): TableRow_ {
 type StatusFilterValue = 'all' | Run['status'];
 
 const Index = () => {
-  const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun } = useRunStore();
+  const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines } = useRunStore();
+  const { columnOrder, csvDelimiter } = useExportConfigStore();
   const navigate = useNavigate();
 
   const [selectedArchiveRun, setSelectedArchiveRun] = useState<ArchiveRun | null>(null);
@@ -157,10 +146,24 @@ const Index = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDownloadFormat = (run: Run, type: 'xml' | 'csv' | 'json') => {
-    const content = generateRunExport(run, type);
-    const mimeType = type === 'xml' ? 'text/xml' : type === 'json' ? 'application/json' : 'text/csv';
-    const fileName = `Fattura-${run.invoice.fattura.replace(/[^a-zA-Z0-9]/g, '')}_${type}.${type}`;
+  const handleDownloadFormat = (run: Run, type: 'xml' | 'csv') => {
+    const runLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
+    if (runLines.length === 0) {
+      toast.info('Bitte laden Sie diesen Run zuerst, um den Export zu starten.');
+      return;
+    }
+    const meta: RunExportMeta = {
+      fattura: run.invoice.fattura,
+      invoiceDate: run.invoice.invoiceDate,
+      deliveryDate: run.invoice.deliveryDate ?? null,
+      eingangsart: run.config.eingangsart,
+      runId: run.id,
+    };
+    const content = type === 'xml'
+      ? generateXML(runLines, columnOrder, meta)
+      : generateCSV(runLines, columnOrder, meta, csvDelimiter);
+    const mimeType = type === 'xml' ? 'application/xml' : 'text/csv';
+    const fileName = buildExportFileName(run.id, type);
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

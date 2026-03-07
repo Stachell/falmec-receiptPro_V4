@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
-import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsDown, ChevronsUp } from 'lucide-react';
-import { format } from 'date-fns';
+import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsDown, ChevronsUp, FileSpreadsheet } from 'lucide-react';
 import { Run } from '@/types';
-import type { ExportColumnKey } from '@/types';
 import { useRunStore } from '@/store/runStore';
 import { useExportConfigStore } from '@/store/exportConfigStore';
+import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { logService } from '@/services/logService';
+import { archiveService } from '@/services/archiveService';
 import { Button } from '@/components/ui/button';
 
 interface ExportPanelProps {
@@ -13,74 +14,40 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ run }: ExportPanelProps) {
-  const { invoiceLines: allInvoiceLines, issues } = useRunStore();
-  // HOTFIX-1: Filter lines to current run only (uses run prop — always available)
+  const { invoiceLines: allInvoiceLines, issues, addAuditEntry } = useRunStore();
+  // Filter lines to current run only
   const invoiceLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
   const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingXml, setDownloadingXml] = useState(false);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [expandedXml, setExpandedXml] = useState(false);
   const { wrap, isLocked } = useClickLock();
+
+  const { columnOrder, csvDelimiter, setLastDiagnostics } = useExportConfigStore();
 
   useEffect(() => {
     if (!expandedXml) return;
     const timerId = window.setTimeout(() => {
       setExpandedXml(false);
     }, 120000);
-
     return () => window.clearTimeout(timerId);
   }, [expandedXml]);
 
   const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
   const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
   const missingLocations = invoiceLines.filter(line => !line.storageLocation);
-  const isExportReady = openBlockingIssues.length === 0 && missingLocations.length === 0;
+  const isExportReady = openBlockingIssues.length === 0 && missingLocations.length === 0 && invoiceLines.length > 0;
 
-  const exportFileName = `Fattura-${run.invoice.fattura.replace(/[^a-zA-Z0-9]/g, '')}_${format(new Date(), 'dd-MM-yyyy')}-${run.config.eingangsart}.xml`;
-
-  // PROJ-35: Read configured column order
-  const columnOrder = useExportConfigStore((s) => s.columnOrder);
-
-  /** Map a columnKey to its XML tag name + value for a given line */
-  const resolveColumn = (key: ExportColumnKey, line: typeof invoiceLines[number]): { tag: string; value: string } => {
-    switch (key) {
-      case 'manufacturerArticleNo': return { tag: 'ManufacturerArticleNo', value: line.manufacturerArticleNo };
-      case 'ean':                   return { tag: 'EAN', value: line.ean };
-      case 'falmecArticleNo':       return { tag: 'FalmecArticleNo', value: line.falmecArticleNo || '' };
-      case 'descriptionDE':         return { tag: 'DescriptionDE', value: line.descriptionDE || '' };
-      case 'descriptionIT':         return { tag: 'DescriptionIT', value: line.descriptionIT };
-      case 'supplierId':            return { tag: 'Lieferant', value: line.supplierId || '' };
-      case 'unitPriceInvoice':      return { tag: 'UnitPrice', value: String(line.unitPriceInvoice) };
-      case 'unitPriceOrder':        return { tag: 'UnitPriceOrder', value: String(line.unitPriceSage ?? '') };
-      case 'totalPrice':            return { tag: 'TotalPrice', value: String(line.totalLineAmount) };
-      case 'orderNumberAssigned':   return { tag: 'OrderNumber', value: line.orderNumberAssigned || '' };
-      case 'orderDate':             return { tag: 'OrderDate', value: line.orderYear ? String(line.orderYear) : '' };
-      case 'serialNumber':          return { tag: 'SerialNumber', value: line.serialNumber || '' };
-      case 'storageLocation':       return { tag: 'StorageLocation', value: line.storageLocation || '' };
-      case 'orderVorgang':          return { tag: 'Vorgang', value: line.orderVorgang || '' };
-      case 'fattura':               return { tag: 'Fattura', value: run.invoice.fattura };
-    }
+  const runMeta: RunExportMeta = {
+    fattura: run.invoice.fattura,
+    invoiceDate: run.invoice.invoiceDate,
+    deliveryDate: run.invoice.deliveryDate ?? null,
+    eingangsart: run.config.eingangsart,
+    runId: run.id,
   };
 
-  // Generate XML preview with configured column order
-  const xmlPreview = `<?xml version="1.0" encoding="UTF-8"?>
-<Sage100Import>
-  <Header>
-    <Fattura>${run.invoice.fattura}</Fattura>
-    <InvoiceDate>${run.invoice.invoiceDate}</InvoiceDate>
-    <DeliveryDate>${run.invoice.deliveryDate || ''}</DeliveryDate>
-    <Eingangsart>${run.config.eingangsart}</Eingangsart>
-    <CreatedAt>${new Date().toISOString()}</CreatedAt>
-  </Header>
-  <Items>
-${invoiceLines.map(line => {
-    const fields = columnOrder.map(col => {
-      const { tag, value } = resolveColumn(col.columnKey, line);
-      return `      <${tag}>${value}</${tag}>`;
-    }).join('\n');
-    return `    <Item>\n${fields}\n    </Item>`;
-  }).join('\n')}
-  </Items>
-</Sage100Import>`;
+  // Build XML preview for the copy/expand section (generated on render)
+  const xmlPreview = generateXML(invoiceLines, columnOrder, runMeta);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(xmlPreview);
@@ -88,25 +55,65 @@ ${invoiceLines.map(line => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownload = () => {
-    setDownloading(true);
-    const blob = new Blob([xmlPreview], { type: 'application/xml' });
+  const handleDownload = (format: 'xml' | 'csv') => {
+    const isXml = format === 'xml';
+    const content = isXml
+      ? xmlPreview
+      : generateCSV(invoiceLines, columnOrder, runMeta, csvDelimiter);
+    const fileName = buildExportFileName(run.id, format);
+    const mimeType = isXml ? 'application/xml' : 'text/csv';
+
+    // 1. Blob + anchor download (always first, universell)
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = exportFileName;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
 
-    // PROJ-35: Write export diagnostics
-    useExportConfigStore.getState().setLastDiagnostics({
+    // 2. Archive — fire-and-forget
+    const archiveOptions = isXml
+      ? { exportXml: content }
+      : { exportCsv: content };
+    archiveService.writeArchivePackage(run, invoiceLines, archiveOptions).catch(() => {
+      // Archive failure must not block download
+    });
+
+    // 3. Run-Log
+    const delimiterLabel = isXml ? '' : `, Delimiter: ${csvDelimiter === '\t' ? 'Tab' : csvDelimiter}`;
+    logService.info(
+      `Export durchgefuehrt: ${fileName}`,
+      {
+        runId: run.id,
+        step: 'Export',
+        details: `Format: ${format.toUpperCase()}, Positionen: ${invoiceLines.length}, Spalten: ${columnOrder.length}${delimiterLabel}`,
+      },
+    );
+
+    // 4. Audit-Log
+    addAuditEntry({
+      runId: run.id,
+      action: 'export-download',
+      details: `${format.toUpperCase()}: ${fileName} (${invoiceLines.length} Zeilen)`,
+      userId: 'system',
+    });
+
+    // 5. Export-Diagnostics
+    setLastDiagnostics({
       timestamp: new Date().toISOString(),
-      fileName: exportFileName,
+      fileName,
       lineCount: invoiceLines.length,
       status: 'success',
     });
 
-    setTimeout(() => setDownloading(false), 1000);
+    if (isXml) {
+      setDownloadingXml(true);
+      setTimeout(() => setDownloadingXml(false), 1000);
+    } else {
+      setDownloadingCsv(true);
+      setTimeout(() => setDownloadingCsv(false), 1000);
+    }
   };
 
   return (
@@ -150,13 +157,19 @@ ${invoiceLines.map(line => {
       <div className="enterprise-card p-6">
         <div className="flex items-center gap-2 mb-4">
           <FileCode className="w-5 h-5 text-muted-foreground" />
-          <h3 className="font-semibold text-foreground">Export-Datei</h3>
+          <h3 className="font-semibold text-foreground">Export-Dateien</h3>
         </div>
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-muted-foreground">Dateiname</label>
+            <label className="text-sm text-muted-foreground">Dateiname (XML)</label>
             <p className="font-mono text-sm bg-surface-sunken px-3 py-2 rounded mt-1">
-              {exportFileName}
+              {buildExportFileName(run.id, 'xml')}
+            </p>
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground">Dateiname (CSV)</label>
+            <p className="font-mono text-sm bg-surface-sunken px-3 py-2 rounded mt-1">
+              {buildExportFileName(run.id, 'csv')}
             </p>
           </div>
           <div>
@@ -211,16 +224,26 @@ ${invoiceLines.map(line => {
         </div>
       </div>
 
-      {/* Export Button */}
-      <div className="flex justify-end">
-        <Button 
-          size="lg" 
+      {/* Export Buttons */}
+      <div className="flex justify-end gap-3">
+        <Button
+          size="lg"
+          variant="outline"
           className="gap-2"
-          disabled={!isExportReady || downloading || isLocked('xml-export')}
-          onClick={wrap('xml-export', handleDownload)}
+          disabled={!isExportReady || downloadingCsv || isLocked('csv-export')}
+          onClick={wrap('csv-export', () => handleDownload('csv'))}
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          {downloadingCsv ? 'Wird exportiert...' : 'CSV exportieren'}
+        </Button>
+        <Button
+          size="lg"
+          className="gap-2"
+          disabled={!isExportReady || downloadingXml || isLocked('xml-export')}
+          onClick={wrap('xml-export', () => handleDownload('xml'))}
         >
           <Download className="w-4 h-4" />
-          {downloading ? 'Wird exportiert...' : 'XML exportieren'}
+          {downloadingXml ? 'Wird exportiert...' : 'XML exportieren'}
         </Button>
       </div>
 

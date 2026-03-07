@@ -10,6 +10,8 @@ import type { ExportColumnMapping, ExportDiagnostics, ExportColumnKey } from '@/
 
 const STORAGE_KEY = 'exportColumnConfig';
 const DIAGNOSTICS_KEY = 'exportDiagnostics';
+const DELIMITER_KEY = 'exportCsvDelimiter';
+const VALID_DELIMITERS = [',', ';', '\t'];
 
 /** Default column order (position 1–15) */
 export const DEFAULT_COLUMN_ORDER: ExportColumnMapping[] = [
@@ -34,12 +36,14 @@ interface ExportConfigState {
   columnOrder: ExportColumnMapping[];
   lastDiagnostics: ExportDiagnostics | null;
   isDirty: boolean;
+  csvDelimiter: string;
 
   setColumnOrder: (order: ExportColumnMapping[]) => void;
   moveColumn: (fromIndex: number, toIndex: number) => void;
   saveConfig: () => void;
   resetToDefault: () => void;
   setLastDiagnostics: (d: ExportDiagnostics) => void;
+  setCsvDelimiter: (d: string) => void;
 }
 
 /** Load persisted column order from localStorage, fallback to default */
@@ -62,6 +66,15 @@ function loadPersistedOrder(): ExportColumnMapping[] {
   }
 }
 
+function loadPersistedDelimiter(): string {
+  try {
+    const raw = localStorage.getItem(DELIMITER_KEY);
+    return VALID_DELIMITERS.includes(raw ?? '') ? raw! : ',';
+  } catch {
+    return ',';
+  }
+}
+
 function loadPersistedDiagnostics(): ExportDiagnostics | null {
   try {
     const raw = localStorage.getItem(DIAGNOSTICS_KEY);
@@ -81,6 +94,7 @@ export const useExportConfigStore = create<ExportConfigState>((set, get) => ({
   columnOrder: loadPersistedOrder(),
   lastDiagnostics: loadPersistedDiagnostics(),
   isDirty: false,
+  csvDelimiter: loadPersistedDelimiter(),
 
   setColumnOrder: (order) => set({ columnOrder: reindex(order), isDirty: true }),
 
@@ -108,5 +122,11 @@ export const useExportConfigStore = create<ExportConfigState>((set, get) => ({
   setLastDiagnostics: (d) => {
     localStorage.setItem(DIAGNOSTICS_KEY, JSON.stringify(d));
     set({ lastDiagnostics: d });
+  },
+
+  setCsvDelimiter: (d) => {
+    if (!VALID_DELIMITERS.includes(d)) return;
+    localStorage.setItem(DELIMITER_KEY, d);
+    set({ csvDelimiter: d });
   },
 }));
