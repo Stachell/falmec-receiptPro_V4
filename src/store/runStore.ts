@@ -58,6 +58,7 @@ import {
 } from '@/services/matching/orderPool';
 import { executeMatchingEngine } from '@/services/matching/matchingEngine';
 import { DEFAULT_ORDER_PARSER_PROFILE_ID } from '@/services/matching/orderParserProfiles';
+import { buildAutoSavePayload } from '@/hooks/buildAutoSavePayload';
 
 // LocalStorage key for persisting uploaded files metadata
 const UPLOADED_FILES_KEY = 'falmec-uploaded-files';
@@ -470,7 +471,7 @@ interface RunState {
   // PROJ-16/19: Matcher-based actions (replace executeArticleMatching)
   // Articles are now sourced from masterDataStore — no parameter needed
   executeMatcherCrossMatch: () => void;
-  executeMatcherSerialExtract: () => void;
+  executeMatcherSerialExtract: () => Promise<void>;
 
   // PROJ-11 Phase C: Order matching (Step 4) — legacy
   executeOrderMatching: (openPositions: OpenWEPosition[]) => void;
@@ -2940,7 +2941,7 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   // ─── PROJ-16: Matcher-based Serial Extraction (Step 3) ────────────
 
-  executeMatcherSerialExtract: () => {
+  executeMatcherSerialExtract: async () => {
     const { invoiceLines, currentRun, preFilteredSerials, serialDocument } = get();
     if (!currentRun) {
       console.warn('[RunStore] executeMatcherSerialExtract: no currentRun');
@@ -3071,6 +3072,20 @@ export const useRunStore = create<RunState>((set, get) => ({
           };
         });
 
+        // PROJ-40 ADD-ON-3: Hard Checkpoint — S/N-Daten sofort persistieren
+        if (runPersistenceService.isAvailable()) {
+          try {
+            const payload = buildAutoSavePayload(runId);
+            if (payload) {
+              await runPersistenceService.saveRun(payload);
+              logService.info('Hard-Checkpoint: S/N-Daten nach Step 3 persistiert',
+                { runId, step: 'Seriennummer anfuegen' });
+            }
+          } catch (err) {
+            console.error('[RunStore] Step 3 hard checkpoint failed:', err);
+          }
+        }
+
         logService.info(
           `SerialFinder: ${assignedCount}/${requiredCount} S/N zugewiesen (Checksum: ${checksumMatch ? 'OK' : 'MISMATCH'}, strict=${strictSerialRequiredFailure})`,
           { runId, step: 'Seriennummer anfuegen' },
@@ -3155,6 +3170,20 @@ export const useRunStore = create<RunState>((set, get) => ({
           ],
         };
       });
+
+      // PROJ-40 ADD-ON-3: Hard Checkpoint — S/N-Daten sofort persistieren
+      if (runPersistenceService.isAvailable()) {
+        try {
+          const payload = buildAutoSavePayload(runId);
+          if (payload) {
+            await runPersistenceService.saveRun(payload);
+            logService.info('Hard-Checkpoint: S/N-Daten nach Step 3 persistiert',
+              { runId, step: 'Seriennummer anfuegen' });
+          }
+        } catch (err) {
+          console.error('[RunStore] Step 3 hard checkpoint failed:', err);
+        }
+      }
 
       logService.info(
         `Matcher Serial-Extraktion abgeschlossen: ${result.stats.assignedCount}/${result.stats.requiredCount} S/N zugewiesen (${matcher.moduleId})`,
