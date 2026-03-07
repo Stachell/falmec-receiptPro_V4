@@ -39,7 +39,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive } from 'lucide-react';
+import { runPersistenceService } from '@/services/runPersistenceService';
+import type { PersistedRunData } from '@/services/runPersistenceService';
+import { fileSystemService } from '@/services/fileSystemService';
+import type { ArchiveMetadata } from '@/types';
 import { useExportConfigStore } from '@/store/exportConfigStore';
 import { toast } from 'sonner';
 import { getAllParsers } from '@/services/parsers';
@@ -321,10 +325,30 @@ export function SettingsPopup({
     }
   }, [open]);
 
+  // PROJ-27 ADD-ON: Diagnostics laden wenn Dialog öffnet
+  useEffect(() => {
+    if (!open) return;
+    runPersistenceService.loadRunList().then(list => {
+      setDiagRunCount(list.length);
+    }).catch(() => setDiagRunCount(null));
+    try {
+      const raw = localStorage.getItem('falmec-archive-stats');
+      setDiagArchiveStats(raw ? JSON.parse(raw) : null);
+    } catch { setDiagArchiveStats(null); }
+  }, [open]);
+
   // Parser-Verwaltung state
   const [parserToDelete, setParserToDelete] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [cacheConfirmOpen, setCacheConfirmOpen] = useState(false);
+  const [diagRunCount, setDiagRunCount] = useState<number | null>(null);
+  const [diagArchiveStats, setDiagArchiveStats] = useState<{
+    lastExportDate: string;
+    exportedCount: number;
+  } | null>(null);
+  const [archiveForceConfirmOpen, setArchiveForceConfirmOpen] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveRetention, setArchiveRetention] = useState<'6' | '12' | 'all'>('6');
   const [parsers, setParsers] = useState<Array<{ moduleId: string; moduleName: string; version: string }>>([]);
 
   useEffect(() => {
@@ -414,14 +438,196 @@ export function SettingsPopup({
     logService.viewLogWithSnapshot();
   };
 
-  const handleClearCache = () => {
-    // Clear localStorage + reload
+  // PROJ-27 ADD-ON: Diagnostics aktualisieren (nach Export/Import)
+  const refreshDiagnostics = async () => {
     try {
-      localStorage.clear();
-      toast.success('Speicher/Cache geleert');
+      const list = await runPersistenceService.loadRunList();
+      setDiagRunCount(list.length);
+    } catch { setDiagRunCount(null); }
+    try {
+      const raw = localStorage.getItem('falmec-archive-stats');
+      setDiagArchiveStats(raw ? JSON.parse(raw) : null);
+    } catch { setDiagArchiveStats(null); }
+  };
+
+  // PROJ-27 ADD-ON Pillar 1: Selective Clear (nur volatile Keys)
+  const handleClearCache = () => {
+    try {
+      const VOLATILE_KEYS = [
+        'falmec-uploaded-files',
+        'falmec-parsed-invoice',
+        'falmec-system-log',
+        'falmec-log-snapshots',
+      ];
+      for (const key of VOLATILE_KEYS) {
+        localStorage.removeItem(key);
+      }
+      // Dynamische Run-Log Keys
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('falmec-run-log-')) {
+          localStorage.removeItem(key);
+        }
+      }
+      toast.success('Cache geleert (Einstellungen & Archiv bleiben erhalten)');
       setTimeout(() => window.location.reload(), 800);
     } catch {
       toast.error('Cache konnte nicht geleert werden');
+    }
+  };
+
+  // PROJ-27 ADD-ON Pillar 3: Archiv ablegen — Standard (Export + >N Monate löschen)
+  const handleArchiveDefault = async (months: number) => {
+    setArchiveBusy(true);
+    try {
+      const exportedCount = await runPersistenceService.exportToDirectory(months);
+      if (exportedCount === -1) {
+        toast.info('Export abgebrochen');
+        return;
+      }
+      const stats = { lastExportDate: new Date().toISOString(), exportedCount };
+      localStorage.setItem('falmec-archive-stats', JSON.stringify(stats));
+      toast.success(`${exportedCount} Run(s) exportiert, Runs > ${months} Monate entfernt`);
+      await refreshDiagnostics();
+    } catch (err: any) {
+      toast.error(`Archivierung fehlgeschlagen: ${err?.message || 'Unbekannter Fehler'}`);
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  // PROJ-27 ADD-ON Pillar 3: Archiv ablegen — Hard Reset (Komplettes Archiv erzwingen)
+  const handleArchiveForceAll = async () => {
+    setArchiveForceConfirmOpen(false);
+    setArchiveBusy(true);
+    try {
+      const exportedCount = await runPersistenceService.exportToDirectory();
+      if (exportedCount === -1) {
+        toast.info('Export abgebrochen');
+        return;
+      }
+      // Safety Check: Nur löschen wenn Export vollständig
+      const runList = await runPersistenceService.loadRunList();
+      const completedRuns = runList.filter(r => r.status === 'ok' || r.status === 'soft-fail');
+      if (exportedCount < runList.length) {
+        toast.error(`Export unvollständig (${exportedCount}/${runList.length}). Löschung abgebrochen.`);
+        return;
+      }
+      let deletedCount = 0;
+      for (const run of completedRuns) {
+        const ok = await runPersistenceService.deleteRun(run.id);
+        if (ok) deletedCount++;
+      }
+      const stats = { lastExportDate: new Date().toISOString(), exportedCount };
+      localStorage.setItem('falmec-archive-stats', JSON.stringify(stats));
+      toast.success(`${exportedCount} Run(s) exportiert, ${deletedCount} abgeschlossene Run(s) entfernt`);
+      await refreshDiagnostics();
+    } catch (err: any) {
+      toast.error(`Archivierung fehlgeschlagen: ${err?.message || 'Unbekannter Fehler'}`);
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  // PROJ-27 ADD-ON Pillar 4: Manueller Import (Pfad A: run-data.json / Pfad B: metadata.json)
+  const handleImportRun = async () => {
+    try {
+      if (!('showDirectoryPicker' in window)) {
+        toast.error('File System Access API nicht verfügbar');
+        return;
+      }
+      const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+
+      // Pfad A: run-data.json (voller Export)
+      let runDataFile: FileSystemFileHandle | null = null;
+      try {
+        runDataFile = await dirHandle.getFileHandle('run-data.json');
+      } catch { /* nicht gefunden, versuche Pfad B */ }
+
+      if (runDataFile) {
+        const file = await runDataFile.getFile();
+        const text = await file.text();
+        const parsed: PersistedRunData = JSON.parse(text);
+        const ok = await runPersistenceService.saveRun(parsed);
+        if (ok) {
+          toast.success(`Run importiert: Fattura ${parsed.run.invoice.fattura}`);
+        } else {
+          toast.error('Run konnte nicht gespeichert werden');
+        }
+        await refreshDiagnostics();
+        return;
+      }
+
+      // Pfad B: metadata.json + invoice-lines.json (Archiv-Paket)
+      let metadataFile: FileSystemFileHandle | null = null;
+      try {
+        metadataFile = await dirHandle.getFileHandle('metadata.json');
+      } catch {
+        toast.error('Kein run-data.json oder metadata.json im Ordner gefunden');
+        return;
+      }
+
+      const metaText = await (await metadataFile.getFile()).text();
+      const metadata: ArchiveMetadata = JSON.parse(metaText);
+
+      // Optional: invoice-lines.json
+      let invoiceLines: any[] = [];
+      try {
+        const linesFile = await dirHandle.getFileHandle('invoice-lines.json');
+        const linesText = await (await linesFile.getFile()).text();
+        invoiceLines = JSON.parse(linesText);
+      } catch { /* optional, leeres Array als Fallback */ }
+
+      // Optional: run-log.json
+      let runLog: any[] | undefined;
+      try {
+        const logFile = await dirHandle.getFileHandle('run-log.json');
+        const logText = await (await logFile.getFile()).text();
+        runLog = JSON.parse(logText);
+      } catch { /* optional */ }
+
+      // Rekonstruiere minimalen Run aus ArchiveMetadata
+      const reconstructedPayload = {
+        id: metadata.runId,
+        run: {
+          id: metadata.runId,
+          createdAt: metadata.createdAt,
+          status: metadata.status === 'completed' ? 'ok' as const : 'failed' as const,
+          config: {
+            eingangsart: metadata.config.eingangsart,
+            tolerance: metadata.config.tolerance,
+            currency: metadata.config.currency,
+            preisbasis: metadata.config.preisbasis,
+          },
+          invoice: {
+            fattura: metadata.fattura,
+            invoiceDate: metadata.invoiceDate,
+            deliveryDate: null,
+          },
+          stats: metadata.stats,
+          steps: [],
+          isExpanded: true,
+        },
+        invoiceLines,
+        issues: [],
+        auditLog: [],
+        parsedPositions: [],
+        parserWarnings: [],
+        parsedInvoiceResult: null,
+        serialDocument: null,
+        uploadMetadata: [],
+        ...(runLog ? { runLog } : {}),
+      };
+
+      const ok = await runPersistenceService.saveRun(reconstructedPayload as any);
+      if (ok) {
+        toast.success(`Run importiert (Archiv): Fattura ${metadata.fattura}`);
+      } else {
+        toast.error('Run konnte nicht gespeichert werden');
+      }
+      await refreshDiagnostics();
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      toast.error(`Import fehlgeschlagen: ${err?.message || 'Unbekannter Fehler'}`);
     }
   };
 
@@ -557,25 +763,85 @@ export function SettingsPopup({
               <TabsContent value="overview" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Speicher/Cache</div>
 
-                {/* Speicher/Cache leeren */}
+                {/* Position 1: PROJ-27 ADD-ON Pillar 3: Archiv ablegen (Select + Button) */}
                 <div className="border-t border-border pt-3 space-y-2">
-                  <Label className="text-sm font-semibold">Local-Storge / Cache leeren</Label>
+                  <Label className="text-sm font-semibold">Archiv ablegen</Label>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={archiveRetention}
+                      onValueChange={(v) => setArchiveRetention(v as '6' | '12' | 'all')}
+                    >
+                      <SelectTrigger className="flex-1 text-xs h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="6">Export + alte Runs entfernen (&gt; 6 Monate)</SelectItem>
+                        <SelectItem value="12">Export + alte Runs entfernen (&gt; 12 Monate)</SelectItem>
+                        <SelectItem value="all">Komplettes Archiv erzwingen &amp; leeren</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FooterButton
+                      disabled={archiveBusy}
+                      onClick={() => {
+                        if (archiveRetention === 'all') {
+                          setArchiveForceConfirmOpen(true);
+                        } else {
+                          handleArchiveDefault(Number(archiveRetention));
+                        }
+                      }}
+                    >
+                      <Archive className="w-4 h-4" />
+                      {archiveBusy ? 'Läuft...' : 'Archiv exportieren'}
+                    </FooterButton>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {archiveRetention === '6' && 'Exportiert Runs, älter als 6 Monate als Datensatz auf die Festplatte und bereinigt den internen Langzeitspeicher.'}
+                    {archiveRetention === '12' && 'Exportiert Runs, älter als 12 Monate als Datensatz auf die Festplatte und bereinigt den internen Langzeitspeicher.'}
+                    {archiveRetention === 'all' && 'Exportiert alle Runs auf die Festplatte und leert den internen Langzeitspeicher komplett.'}
+                  </p>
+                </div>
+
+                {/* Position 2: PROJ-27 ADD-ON Pillar 2: Diagnosefenster */}
+                <div className="rounded-md border border-border bg-white/60 p-3 space-y-1">
+                  <p className="text-xs">
+                    <span className="font-semibold">Archiv-Pfad:</span>{' '}
+                    {fileSystemService.getDataPath()
+                      ? `${fileSystemService.getDataPath()}/.Archiv`
+                      : <span className="text-muted-foreground italic">Kein Datenverzeichnis konfiguriert</span>}
+                  </p>
+                  <p className="text-xs">
+                    <span className="font-semibold">Aktuelle Runs im System:</span>{' '}
+                    {diagRunCount !== null ? diagRunCount : '...'}
+                  </p>
+                  <p className="text-xs">
+                    <span className="font-semibold">Letzter Export:</span>{' '}
+                    {diagArchiveStats
+                      ? `${new Date(diagArchiveStats.lastExportDate).toLocaleString('de-DE')} (${diagArchiveStats.exportedCount} Runs)`
+                      : <span className="text-muted-foreground italic">Noch kein Export durchgeführt</span>}
+                  </p>
+                </div>
+
+                {/* Position 3: PROJ-27 ADD-ON Pillar 4: Run importieren */}
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Run importieren</Label>
+                  <FooterButton onClick={handleImportRun}>
+                    <FolderOpen className="w-4 h-4" />
+                    Run importieren
+                  </FooterButton>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Bitte den übergeordneten Run-Ordner wählen, keine einzelnen Dateien.
+                  </p>
+                </div>
+
+                {/* Position 4: Speicher/Cache leeren (gefährlichste Aktion, ganz unten) */}
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Local-Storage / Cache leeren</Label>
                   <FooterButton onClick={() => setCacheConfirmOpen(true)} danger>
                     <Trash2 className="w-4 h-4" />
                     Speicher / Cache leeren
                   </FooterButton>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Loescht alle localStorage-Daten und laedt die Seite neu.
-                  </p>
-                </div>
-
-                <div className="border-t border-border pt-3 space-y-2">
-                  <Label className="text-sm font-semibold">Archiv leeren</Label>
-                  <FooterButton onClick={() => toast.info('Archiv-Synchronisation - kommt in PROJ-23 A2')}>
-                    Archiv synchronisieren
-                  </FooterButton>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Exportiert alle Runs als JSON in einen lokalen Ordner (PROJ-23).
+                    Loescht Cache-Daten und laedt die Seite neu. Einstellungen & Archiv bleiben erhalten.
                   </p>
                 </div>
               </TabsContent>
@@ -1062,8 +1328,7 @@ export function SettingsPopup({
           <AlertDialogHeader>
             <AlertDialogTitle>Speicher / Cache leeren?</AlertDialogTitle>
             <AlertDialogDescription>
-              Alle localStorage-Daten werden geloescht. Runs, Einstellungen und Protokolle gehen verloren.
-              Diese Aktion kann nicht rueckgaengig gemacht werden.
+              Cache-Daten (Uploads, Logs, geparste Rechnungen) werden gelöscht. Einstellungen und Archivdaten bleiben erhalten.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1073,6 +1338,26 @@ export function SettingsPopup({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Leeren
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* PROJ-27 ADD-ON Pillar 3: Force-Archivierung Bestätigung */}
+      <AlertDialog open={archiveForceConfirmOpen} onOpenChange={setArchiveForceConfirmOpen}>
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Komplettes Archiv erzwingen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sind Sie sicher das alle aktuellen Daten lokal gesichert, allerdings vollständig aus dem internen Langzeitspeicher entfernt werden sollen? Fortfahren?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleArchiveForceAll}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Archivieren &amp; löschen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
