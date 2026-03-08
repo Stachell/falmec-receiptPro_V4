@@ -4,7 +4,7 @@ import { logService } from './logService';
 import { fileSystemService } from './fileSystemService';
 import { fileStorageService } from './fileStorageService';
 import { buildLeanArchive } from './serialFinder';
-import type { Run, InvoiceLine, ArchiveMetadata, PreFilteredSerialRow, Issue } from '../types';
+import type { Run, InvoiceLine, ArchiveMetadata, PreFilteredSerialRow, Issue, RunConfig } from '../types';
 
 export interface ArchiveFile {
   id: string;
@@ -130,6 +130,233 @@ class ArchiveService {
     });
 
     return archiveRun;
+  }
+
+  // PROJ-27-ADDON-2: PDFs sichern im Fahrwasser der User Activation (Step 1)
+  async writeEarlyArchive(
+    run: Run,
+    uploadedFiles: { type: string; file: File; name: string }[],
+    config: RunConfig
+  ): Promise<{ success: boolean; folderName: string }> {
+    const runId = run.id;
+
+    const folderName = await this.generateArchiveFolderName(
+      run.invoice.fattura,
+      run.invoice.invoiceDate
+    );
+
+    logService.info(`Early Archive wird erstellt: ${folderName}`, { runId, step: 'Archiv' });
+
+    const failedFiles: string[] = [];
+
+    // Alle Upload-Dateien direkt aus in-memory File-Objekten schreiben
+    for (const uf of uploadedFiles) {
+      if (!uf.file) continue;
+      const ok = await fileSystemService.saveToArchive(folderName, uf.name, uf.file);
+      if (!ok) failedFiles.push(uf.name);
+    }
+
+    // files-Objekt entsprechend ArchiveMetadata['files'] aufbauen (kein Array!)
+    const findFile = (type: string): { name: string; size: number } | null => {
+      const uf = uploadedFiles.find(f => f.type === type);
+      return uf?.file ? { name: uf.name, size: uf.file.size } : null;
+    };
+
+    // Lokaler Hilfstyp — Status 'running' + Partial-Stats (ArchiveMetadata hat kein 'running')
+    type EarlyArchiveMetadata = Omit<ArchiveMetadata, 'status' | 'stats'> & {
+      status: 'running';
+      stats: { parsedPositions: number; expandedLines: number };
+    };
+
+    const metadata: EarlyArchiveMetadata = {
+      version: 1,
+      runId,
+      fattura: run.invoice.fattura,
+      invoiceDate: run.invoice.invoiceDate,
+      createdAt: run.createdAt,
+      archivedAt: new Date().toISOString(),
+      status: 'running',
+      config: {
+        eingangsart: config.eingangsart,
+        tolerance: config.tolerance,
+        currency: 'EUR',
+        preisbasis: config.priceBasis,
+      },
+      stats: {
+        parsedPositions: run.stats.parsedInvoiceLines,
+        expandedLines: run.stats.expandedLineCount,
+      },
+      files: {
+        invoice: findFile('invoice'),
+        warenbegleitschein: findFile('openWE'),
+        exportXml: null,
+        exportCsv: null,
+        artikelstamm: findFile('articleList'),
+        offeneBestellungen: null,
+        serialData: null,
+        runReport: null,
+      },
+    };
+
+    const metaOk = await fileSystemService.saveToArchive(
+      folderName, 'metadata.json', JSON.stringify(metadata, null, 2)
+    );
+    if (!metaOk) failedFiles.push('metadata.json');
+
+    const success = !failedFiles.includes('metadata.json');
+    logService.info(
+      `Early Archive ${success ? 'erstellt' : 'mit Fehlern'}: ${folderName}`,
+      { runId, step: 'Archiv', details: `${uploadedFiles.length} Dateien, ${failedFiles.length} Fehler` }
+    );
+
+    return { success, folderName };
+  }
+
+  // PROJ-27-ADDON-2: Finale Metadaten + Exports in bestehenden Archiv-Ordner anhängen
+  async appendToArchive(
+    folderName: string,
+    run: Run,
+    lines: InvoiceLine[],
+    options?: {
+      extraFiles?: Record<string, string>;
+      preFilteredSerials?: PreFilteredSerialRow[];
+      issues?: Issue[];
+    }
+  ): Promise<{ success: boolean; failedFiles: string[] }> {
+    const runId = run.id;
+    const failedFiles: string[] = [];
+
+    logService.info(`Archiv wird ergänzt: ${folderName}`, { runId, step: 'Archiv' });
+
+    // 0. Bestehende metadata.json lesen → existingFiles für Amnesie-Bug-Fix
+    let existingFiles: ArchiveMetadata['files'] | null = null;
+    try {
+      const archiveHandle = await fileSystemService.getArchiveFolderHandle();
+      if (archiveHandle) {
+        const subHandle = await archiveHandle.getDirectoryHandle(folderName, { create: false });
+        const fileHandle = await subHandle.getFileHandle('metadata.json', { create: false });
+        const file = await fileHandle.getFile();
+        const existing = JSON.parse(await file.text()) as Partial<ArchiveMetadata>;
+        existingFiles = existing.files ?? null;
+      }
+    } catch {
+      // Kein Early Archive vorhanden — kein Problem, fallback zu null
+    }
+
+    // 1. run-log.json
+    const logEntries = logService.getRunBuffer(runId);
+    const entries = logEntries.length > 0 ? logEntries : logService.getRunLog(runId);
+    if (entries.length > 0) {
+      const ok = await fileSystemService.saveToArchive(
+        folderName, 'run-log.json', JSON.stringify(entries, null, 2)
+      );
+      if (!ok) failedFiles.push('run-log.json');
+    }
+
+    // 2. invoice-lines.json
+    const linesOk = await fileSystemService.saveToArchive(
+      folderName, 'invoice-lines.json', JSON.stringify(lines, null, 2)
+    );
+    if (!linesOk) failedFiles.push('invoice-lines.json');
+
+    // 3. Versionierte Export-Dateien
+    const extraFileInfos: { name: string; size: number }[] = [];
+    if (options?.extraFiles) {
+      for (const [name, content] of Object.entries(options.extraFiles)) {
+        const ok = await fileSystemService.saveToArchive(folderName, name, content);
+        if (ok) extraFileInfos.push({ name, size: content.length });
+        else failedFiles.push(name);
+      }
+    }
+
+    // 4. serial-data.json
+    let serialDataInfo: { name: string; size: number } | null = null;
+    if (options?.preFilteredSerials && options.preFilteredSerials.length > 0) {
+      const leanSerials = buildLeanArchive(options.preFilteredSerials);
+      const serialJson = JSON.stringify(leanSerials, null, 2);
+      const ok = await fileSystemService.saveToArchive(folderName, 'serial-data.json', serialJson);
+      if (ok) serialDataInfo = { name: 'serial-data.json', size: serialJson.length };
+      else failedFiles.push('serial-data.json');
+    }
+
+    // 5. run-report.json
+    let runReportInfo: { name: string; size: number } | null = null;
+    if (options?.issues && options.issues.length > 0) {
+      const runIssues = options.issues.filter(i => i.runId === run.id);
+      const runReport = {
+        version: 1,
+        runId,
+        fattura: run.invoice.fattura,
+        generatedAt: new Date().toISOString(),
+        summary: {
+          totalIssues: runIssues.length,
+          openIssues: runIssues.filter(i => i.status === 'open').length,
+          resolvedIssues: runIssues.filter(i => i.status === 'resolved').length,
+          bySeverity: {
+            error: runIssues.filter(i => i.severity === 'error').length,
+            warning: runIssues.filter(i => i.severity === 'warning').length,
+            info: runIssues.filter(i => i.severity === 'info').length,
+          },
+        },
+        issues: runIssues,
+      };
+      const reportJson = JSON.stringify(runReport, null, 2);
+      const ok = await fileSystemService.saveToArchive(folderName, 'run-report.json', reportJson);
+      if (ok) runReportInfo = { name: 'run-report.json', size: reportJson.length };
+      else failedFiles.push('run-report.json');
+    }
+
+    // 6. metadata.json überschreiben — finaler Stand, existingFiles gemergt (Amnesie-Bug-Fix!)
+    const metadata: ArchiveMetadata = {
+      version: 1,
+      runId,
+      fattura: run.invoice.fattura,
+      invoiceDate: run.invoice.invoiceDate,
+      createdAt: run.createdAt,
+      archivedAt: new Date().toISOString(),
+      status: this.mapRunStatus(run.status),
+      config: {
+        eingangsart: run.config.eingangsart,
+        tolerance: run.config.tolerance,
+        currency: 'EUR',
+        preisbasis: run.config.priceBasis,
+      },
+      stats: {
+        parsedPositions: run.stats.parsedInvoiceLines,
+        expandedLines: run.stats.expandedLineCount,
+        fullMatchCount: run.stats.fullMatchCount,
+        noMatchCount: run.stats.noMatchCount,
+        exportedLines: lines.length,
+      },
+      files: {
+        // Bestehende Upload-Referenzen aus Early Archive bewahren (Amnesie-Bug-Fix!)
+        invoice: existingFiles?.invoice ?? null,
+        warenbegleitschein: existingFiles?.warenbegleitschein ?? null,
+        artikelstamm: existingFiles?.artikelstamm ?? null,
+        offeneBestellungen: existingFiles?.offeneBestellungen ?? null,
+        // Neue Export-Referenzen
+        exportXml: extraFileInfos.find(f => f.name.endsWith('.xml')) ?? null,
+        exportCsv: extraFileInfos.find(f => f.name.endsWith('.csv')) ?? null,
+        serialData: serialDataInfo,
+        runReport: runReportInfo,
+      },
+    };
+
+    const metaOk = await fileSystemService.saveToArchive(
+      folderName, 'metadata.json', JSON.stringify(metadata, null, 2)
+    );
+    if (!metaOk) failedFiles.push('metadata.json');
+
+    const success = failedFiles.filter(
+      f => f === 'invoice-lines.json' || f === 'metadata.json'
+    ).length === 0;
+
+    logService.info(
+      `Archiv-Ergänzung ${success ? 'erfolgreich' : 'mit Fehlern'}: ${folderName}`,
+      { runId, step: 'Archiv', details: `${failedFiles.length} Fehler` }
+    );
+
+    return { success, failedFiles };
   }
 
   // Add a file to a folder in the archive

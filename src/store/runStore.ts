@@ -908,6 +908,36 @@ export const useRunStore = create<RunState>((set, get) => ({
           // Rename log buffer to match new runId
           logService.renameRunBuffer(runId, newRunId);
           runId = newRunId;
+
+          // PROJ-27-ADDON-2 BUGFIX: fire-and-forget — kein await verhindert Race-Condition
+          // (await blockierte createNewRunWithParsing(), was den 500ms-Timer mit currentRun=null
+          //  erwischen lies → advanceToNextStep wurde nie aufgerufen → Steps 2-5 starteten nie)
+          const earlyRun = get().runs.find(r => r.id === runId);
+          if (earlyRun) {
+            const capturedRunId = runId; // let-Variable einfangen (hat bereits newRunId-Wert)
+            archiveService.writeEarlyArchive(earlyRun, uploadedFiles, globalConfig)
+              .then(earlyResult => {
+                if (earlyResult.success) {
+                  set((state) => ({
+                    runs: state.runs.map(r =>
+                      r.id === capturedRunId ? { ...r, archivePath: earlyResult.folderName } : r
+                    ),
+                    currentRun: state.currentRun?.id === capturedRunId
+                      ? { ...state.currentRun, archivePath: earlyResult.folderName }
+                      : state.currentRun,
+                  }));
+                  logService.info(`Early Archive erstellt: ${earlyResult.folderName}`, {
+                    runId: capturedRunId, step: 'Archiv',
+                  });
+                }
+              })
+              .catch(err => {
+                logService.warn(
+                  `Early Archive fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+                  { runId: capturedRunId, step: 'Archiv' }
+                );
+              });
+          }
         } else if (parsedInvoiceResult) {
           // Parsing had errors but we got some data - update run with partial data
           updateRunWithParsedData(runId, parsedInvoiceResult);
@@ -939,6 +969,34 @@ export const useRunStore = create<RunState>((set, get) => ({
             // Rename log buffer to match new runId
             logService.renameRunBuffer(runId, newRunId);
             runId = newRunId;
+
+            // PROJ-27-ADDON-2 BUGFIX: fire-and-forget — kein await verhindert Race-Condition
+            const earlyRun = get().runs.find(r => r.id === runId);
+            if (earlyRun) {
+              const capturedRunId = runId;
+              archiveService.writeEarlyArchive(earlyRun, uploadedFiles, globalConfig)
+                .then(earlyResult => {
+                  if (earlyResult.success) {
+                    set((state) => ({
+                      runs: state.runs.map(r =>
+                        r.id === capturedRunId ? { ...r, archivePath: earlyResult.folderName } : r
+                      ),
+                      currentRun: state.currentRun?.id === capturedRunId
+                        ? { ...state.currentRun, archivePath: earlyResult.folderName }
+                        : state.currentRun,
+                    }));
+                    logService.info(`Early Archive erstellt: ${earlyResult.folderName}`, {
+                      runId: capturedRunId, step: 'Archiv',
+                    });
+                  }
+                })
+                .catch(err => {
+                  logService.warn(
+                    `Early Archive fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+                    { runId: capturedRunId, step: 'Archiv' }
+                  );
+                });
+            }
           }
         } else {
           // Complete failure - update run with error status
@@ -999,24 +1057,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         });
       }
 
-      // Create archive entry
-      const finalRun = get().currentRun;
-      if (finalRun) {
-        try {
-          archiveService.createArchiveEntry(
-            finalRun.id,
-            finalRun.invoice.fattura,
-            globalConfig,
-            uploadedFiles
-          );
-        } catch (error) {
-          console.warn('[RunStore] Failed to create archive entry:', error);
-          logService.warn('Archiv-Eintrag konnte nicht erstellt werden', {
-            runId: finalRun.id,
-            step: 'Archiv',
-          });
-        }
-      }
     } catch (error) {
       // Catch-all: any uncaught error in the entire parsing workflow
       console.error('CRITICAL PARSER ERROR in createNewRunWithParsing:', error);
@@ -1661,13 +1701,14 @@ export const useRunStore = create<RunState>((set, get) => ({
         set({ autoAdvanceTimer: t5 });
       }
     } else {
-      // All steps completed → mark run as finished and auto-archive
+      // PROJ-27-ADDON-2: Run abgeschlossen — KEIN Disk-Write!
+      // PDFs wurden in Step 1 archiviert, finale Daten erst beim Kachel-6-Klick.
       get().updateRunStatus(runId, 'ok');
       logService.info('Run abgeschlossen – alle Schritte fertig', { runId, step: 'System' });
 
-      // Fire-and-forget archive
-      get().archiveRun(runId).catch(err =>
-        logService.error(`Auto-Archivierung fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Archiv' })
+      // Browser-Cleanup: localStorage + IndexedDB bereinigen (kein Disk-Zugriff nötig)
+      archiveService.cleanupBrowserData(runId).catch(err =>
+        logService.warn(`Browser-Cleanup fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Archiv' })
       );
     }
   },
@@ -2145,7 +2186,7 @@ export const useRunStore = create<RunState>((set, get) => ({
     // Steps 1 and 5 have no auto-execution logic to re-trigger
   },
 
-  // PROJ-12: Write archive package to disk
+  // PROJ-12 / PROJ-27-ADDON-2: Write archive package to disk
   archiveRun: async (runId) => {
     const state = get();
     const run = state.runs.find(r => r.id === runId);
@@ -2155,32 +2196,43 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
 
     const lines = state.invoiceLines.filter(l => l.lineId.startsWith(runId));
-    const result = await archiveService.writeArchivePackage(run, lines, {
-      preFilteredSerials: state.preFilteredSerials,
-      issues: state.issues,  // PROJ-21: Include issues for run-report.json
-    });
 
-    // Persist archive folder name in the run for later reference (e.g. PDF link button)
-    if (result.success && result.folderName) {
-      set((state) => ({
-        runs: state.runs.map(r =>
-          r.id === runId ? { ...r, archivePath: result.folderName } : r
-        ),
-        currentRun: state.currentRun?.id === runId
-          ? { ...state.currentRun, archivePath: result.folderName }
-          : state.currentRun,
-      }));
+    if (run.archivePath) {
+      // PROJ-27-ADDON-2: Early Archive existiert → nur finale Daten anhängen
+      const result = await archiveService.appendToArchive(run.archivePath, run, lines, {
+        preFilteredSerials: state.preFilteredSerials,
+        issues: state.issues,
+      });
+      if (result.success) {
+        logService.exportRunLog(runId).catch(() => {});
+      }
+      return { success: result.success, folderName: run.archivePath };
+    } else {
+      // Legacy-Fallback: Kein Early Archive → volles Paket schreiben
+      const result = await archiveService.writeArchivePackage(run, lines, {
+        preFilteredSerials: state.preFilteredSerials,
+        issues: state.issues,
+      });
+
+      if (result.success && result.folderName) {
+        set((s) => ({
+          runs: s.runs.map(r =>
+            r.id === runId ? { ...r, archivePath: result.folderName } : r
+          ),
+          currentRun: s.currentRun?.id === runId
+            ? { ...s.currentRun, archivePath: result.folderName }
+            : s.currentRun,
+        }));
+      }
+
+      if (result.cleanedUp) {
+        logService.exportRunLog(runId).catch(err =>
+          console.warn('[RunStore] archiveRun: exportRunLog failed', err)
+        );
+      }
+
+      return { success: result.success, folderName: result.folderName };
     }
-
-    // After a successful archive write, flush the run-log buffer to disk
-    // and clean up localStorage (prevents QuotaExceededError on next run)
-    if (result.cleanedUp) {
-      logService.exportRunLog(runId).catch(err =>
-        console.warn('[RunStore] archiveRun: exportRunLog failed', err)
-      );
-    }
-
-    return { success: result.success, folderName: result.folderName };
   },
 
   // PROJ-12: Abort run and create partial archive

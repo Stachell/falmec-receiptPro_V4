@@ -90,12 +90,20 @@ export function ExportPanel({ run }: ExportPanelProps) {
     a.click();
     URL.revokeObjectURL(url);
 
-    // 4. Archive mit versioniertem Dateinamen — kein Überschreiben!
-    archiveService.writeArchivePackage(effectiveRun, invoiceLines, {
-      extraFiles: { [fileName]: content },
-    }).catch(() => {
-      // Archive failure must not block download
-    });
+    // 4. PROJ-27-ADDON-2: Finale Daten in bestehenden Archiv-Ordner
+    const archiveFolder = effectiveRun.archivePath;
+    if (archiveFolder) {
+      archiveService.appendToArchive(archiveFolder, effectiveRun, invoiceLines, {
+        extraFiles: { [fileName]: content },
+        preFilteredSerials: useRunStore.getState().preFilteredSerials,
+        issues: useRunStore.getState().issues,
+      }).catch(() => {});
+    } else {
+      // Fallback: Kein Early Archive → volles Paket (neuer Ordner)
+      archiveService.writeArchivePackage(effectiveRun, invoiceLines, {
+        extraFiles: { [fileName]: content },
+      }).catch(() => {});
+    }
 
     // 3. Run-Log
     const delimiterLabel = isXml ? '' : `, Delimiter: ${csvDelimiter === '\t' ? 'Tab' : csvDelimiter}`;

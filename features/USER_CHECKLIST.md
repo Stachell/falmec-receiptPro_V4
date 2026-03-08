@@ -10,12 +10,14 @@ AUFLISTUNG:
 4. Ein Bufferspeicher falls Daten wie "Artikelliste" / open WE nicht neu eingelesen werden. 
 5. Die Suchfunktion in Re-Position und Artikeliste funktionieren nicht, muss noch gefixt werden.
 
-4. 
+6. 
 Die Export-Datei muss angepasst werden, es fehlen Werte wie "Lieferant", "Vorgang (Bestellung)" und Werte wie "Menge" müssen entfernt werden.
-5. Die Speicherlogik der Indexed DB muss angepasst werden, damit die "Archiv-Läufe" ordentlich angezeigt werden.
-6. Das Pop-Up Artikeldetails > Verknüpfungen müssen aktualisiert werden
-7. Im Step Artikel extrahieren muss die Deutsche Beschreibung entweder via Wahlfehld oder als festen Wert überschreiben, bei durchführung mit überschreiben müssen die ArtikelDeatils angepasst werden.
-8. Die Logik der Preis-Anpassung mit enstprechendem Impact im Worfkflow muss hinterlegt werden und in Punkt 2 integriert
+7. Die Speicherlogik der Indexed DB muss angepasst werden, damit die "Archiv-Läufe" ordentlich angezeigt werden.
+8. Das Pop-Up Artikeldetails > Verknüpfungen müssen aktualisiert werden
+9. Im Step Artikel extrahieren muss die Deutsche Beschreibung entweder via Wahlfehld oder als festen Wert überschreiben, bei durchführung mit überschreiben müssen die ArtikelDeatils angepasst werden.
+10. Die Logik der Preis-Anpassung mit enstprechendem Impact im Worfkflow muss hinterlegt werden und in Punkt 2 integriert
+11. Im der Export im Archiv bricht ab, hier müsste nachvollzogen werden warum UND das System sollte ans Fehler-Log Allgemein angeschlossen werden.
+
 
 OPTISCHE MÄNGEL:
 >> in der manuellen Preiszuweisung im Re-Position/Artikelliste muss unter den Button "Sage Preis" aber überhalb des Separators noch ein Hinweis als Text erstellt werden, in klein gedruckter Schrift: „Achtung: Der Rechnungspreis muss vor dem Import in Sage hinterlegt sein.“

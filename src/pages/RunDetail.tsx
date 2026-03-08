@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, CheckCircle2, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
@@ -23,14 +23,14 @@ import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 import { RunLogTab } from '@/components/run-detail/RunLogTab';
 
-// ─── PROJ-29 Add-On 2: Checkpoint-Meldungen ──────────────────────────────────
+// --- PROJ-29 Add-On 2: Checkpoint-Meldungen ----------------------------------
 const CHECKPOINT_MESSAGES: { id: number; label: string; description: string }[] = [
   { id: 1, label: 'PDF-Parsing', description: 'Rechnungspositionen und Rechnungssumme erfolgreich geparst.' },
-  { id: 2, label: 'Positionen extrahiert', description: 'Artikelmenge, Artikelzuordnung erfolgreich durchgeführt.' },
-  { id: 3, label: 'Preise geprüft', description: 'Alle Einzel- und Gesamtpreise erfolgreich zugeordnet.' },
+  { id: 2, label: 'Positionen extrahiert', description: 'Artikelmenge, Artikelzuordnung erfolgreich durchgef�hrt.' },
+  { id: 3, label: 'Preise gepr�ft', description: 'Alle Einzel- und Gesamtpreise erfolgreich zugeordnet.' },
   { id: 4, label: 'Serials geparst', description: 'Alle seriennummernpflichtigen Artikel erfolgreich zugeordnet.' },
   { id: 5, label: 'Beleg zugeteilt', description: 'Alle Artikel konnten offene Bestellungen erfolgreich zugeteilt werden.' },
-  { id: 6, label: 'Export', description: 'Alle Daten erfolgreich zusammen gestellt, der Download ist verfügbar.' },
+  { id: 6, label: 'Export', description: 'Alle Daten erfolgreich zusammen gestellt, der Download ist verf�gbar.' },
 ];
 
 export default function RunDetail() {
@@ -46,7 +46,7 @@ export default function RunDetail() {
   const {
     runs,
     currentRun,
-    invoiceLines,           // PROJ-29: für Double-Check-Berechnungen
+    invoiceLines,           // PROJ-29: f�r Double-Check-Berechnungen
     issues,
     setCurrentRun,
     activeTab,
@@ -73,8 +73,8 @@ export default function RunDetail() {
   const { wrap, isLocked } = useClickLock();
   const { columnOrder, csvDelimiter, csvIncludeHeader, setLastDiagnostics } = useExportConfigStore();
 
-  // ─── PROJ-29: Double-Check-Logik ─────────────────────────────────────────────
-  // Alle useMemo-Hooks müssen VOR dem ersten useEffect stehen (React Hook-Regeln)
+  // --- PROJ-29: Double-Check-Logik ---------------------------------------------
+  // Alle useMemo-Hooks m�ssen VOR dem ersten useEffect stehen (React Hook-Regeln)
 
   // 1. InvoiceLines des aktuellen Runs (gefiltert nach Run-ID)
   const currentRunLines = useMemo(
@@ -82,8 +82,8 @@ export default function RunDetail() {
     [invoiceLines, currentRun?.id]
   );
 
-  // 2. Qty-Summen für Kachel 4 (qty-basiert, nicht line-count-basiert!)
-  //    Hinweis: RunStats.serialRequiredCount zählt ZEILEN — für den Check brauchen wir Qty-Summen
+  // 2. Qty-Summen f�r Kachel 4 (qty-basiert, nicht line-count-basiert!)
+  //    Hinweis: RunStats.serialRequiredCount z�hlt ZEILEN � f�r den Check brauchen wir Qty-Summen
   const serialRequiredQtySum = useMemo(
     () => currentRunLines.filter(l => l.serialRequired === true).reduce((s, l) => s + l.qty, 0),
     [currentRunLines]
@@ -93,7 +93,7 @@ export default function RunDetail() {
     [currentRunLines]
   );
 
-  // 3. Eindeutige Bestellnummern-Anzahl für Kachel 5
+  // 3. Eindeutige Bestellnummern-Anzahl f�r Kachel 5
   const allocatedOrderCount = useMemo(() => {
     const seen = new Set<string>();
     for (const line of currentRunLines) {
@@ -104,8 +104,8 @@ export default function RunDetail() {
     return seen.size;
   }, [currentRunLines]);
 
-  // PROJ-29 Korrektur Rev. 2: qty-basierte Zähler für Kacheln 3, 4, 5
-  // runStore.stats.*Count-Felder zählen Invoice-Lines (Zeilen), nicht qty — daher eigene Memos.
+  // PROJ-29 Korrektur Rev. 2: qty-basierte Z�hler f�r Kacheln 3, 4, 5
+  // runStore.stats.*Count-Felder z�hlen Invoice-Lines (Zeilen), nicht qty � daher eigene Memos.
   const priceOkQtySum = useMemo(
     () => currentRunLines
       .filter(l => l.priceCheckStatus === 'ok' || l.priceCheckStatus === 'custom')
@@ -126,7 +126,7 @@ export default function RunDetail() {
     [currentRunLines]
   );
 
-  // ─── PROJ-29 Add-On 1: First-Check (Single Source of Truth für variant-Prop + Double-Check-Guard) ───
+  // --- PROJ-29 Add-On 1: First-Check (Single Source of Truth f�r variant-Prop + Double-Check-Guard) ---
   // Exakte Kopie der bisherigen Inline-variant-Expressions. Werden im JSX als variant={kachelXVariant} verwendet.
   const kachel1Variant = (
     currentRun?.invoice.invoiceTotal != null
@@ -170,7 +170,7 @@ export default function RunDetail() {
   );
   const isKachel5FirstCheck = kachel5Variant === 'success';
 
-  // 4. isKachel1Verified — First-Check + Σ(qty*unitPriceInvoice) vs. invoiceTotal (Toleranz < 0,10 €)
+  // 4. isKachel1Verified � First-Check + S(qty*unitPriceInvoice) vs. invoiceTotal (Toleranz < 0,10 �)
   const isKachel1Verified = useMemo(() => {
     if (!isKachel1FirstCheck) return false;
     const invoiceTotal = currentRun?.invoice.invoiceTotal;
@@ -179,7 +179,7 @@ export default function RunDetail() {
     return Math.abs(lineSum - invoiceTotal) < 0.10;
   }, [isKachel1FirstCheck, currentRunLines, currentRun?.invoice.invoiceTotal]);
 
-  // 5. isKachel2Verified — First-Check + Qty-Summe == packagesCount + alle Zeilen full-match
+  // 5. isKachel2Verified � First-Check + Qty-Summe == packagesCount + alle Zeilen full-match
   const isKachel2Verified = useMemo(() => {
     if (!isKachel2FirstCheck) return false;
     const pkg = currentRun?.invoice.packagesCount;
@@ -189,14 +189,14 @@ export default function RunDetail() {
     return qtyMatch && allFullMatch;
   }, [isKachel2FirstCheck, currentRunLines, currentRun?.invoice.packagesCount]);
 
-  // 6. isKachel3Verified — First-Check + 0 Preisabweichungen UND mind. 1 OK-Preis
+  // 6. isKachel3Verified � First-Check + 0 Preisabweichungen UND mind. 1 OK-Preis
   const isKachel3Verified = useMemo(() => {
     if (!isKachel3FirstCheck) return false;
     if (!currentRun) return false;
     return currentRun.stats.priceMismatchCount === 0 && currentRun.stats.priceOkCount > 0;
   }, [isKachel3FirstCheck, currentRun?.stats.priceMismatchCount, currentRun?.stats.priceOkCount]);
 
-  // 7. isKachel4Verified — First-Check + serialNotRequired + serialRequired == totalQty
+  // 7. isKachel4Verified � First-Check + serialNotRequired + serialRequired == totalQty
   const isKachel4Verified = useMemo(() => {
     if (!isKachel4FirstCheck) return false;
     if (currentRunLines.length === 0) return false;
@@ -204,7 +204,7 @@ export default function RunDetail() {
     return (serialNotRequiredArticleCount + serialRequiredQtySum) === totalQty;
   }, [isKachel4FirstCheck, currentRunLines, serialNotRequiredArticleCount, serialRequiredQtySum]);
 
-  // 8. isKachel5Verified — First-Check + alle zugeteilt + Format YYYY-XXXXX (auf einzigartigen Nummern)
+  // 8. isKachel5Verified � First-Check + alle zugeteilt + Format YYYY-XXXXX (auf einzigartigen Nummern)
   const isKachel5Verified = useMemo(() => {
     if (!isKachel5FirstCheck) return false;
     if (!currentRun) return false;
@@ -212,7 +212,7 @@ export default function RunDetail() {
     if (currentRun.stats.matchedOrders !== totalLines) return false;
     if (allocatedOrderCount === 0) return false;
 
-    // Einzigartige Bestellnummern sammeln (eine Nr. darf mehrere Artikel abdecken — kein Fehler)
+    // Einzigartige Bestellnummern sammeln (eine Nr. darf mehrere Artikel abdecken � kein Fehler)
     const uniqueOrderNumbers = new Set<string>();
     for (const line of currentRunLines) {
       for (const ao of line.allocatedOrders) {
@@ -220,7 +220,7 @@ export default function RunDetail() {
       }
     }
 
-    // Format-Prüfung NUR auf einzigartigen Nummern
+    // Format-Pr�fung NUR auf einzigartigen Nummern
     const currentYear = new Date().getFullYear();
     const validPrefixes = ['10', '11', '12', '20', '97', '98', '99'];
     for (const on of uniqueOrderNumbers) {
@@ -235,11 +235,11 @@ export default function RunDetail() {
     return true;
   }, [isKachel5FirstCheck, currentRun, currentRunLines, allocatedOrderCount]);
 
-  // PROJ-29 Add-On 2: allTilesVerified — Checkpoint 6 (Export-Meldung) feuert wenn alle 5 bestanden
+  // PROJ-29 Add-On 2: allTilesVerified � Checkpoint 6 (Export-Meldung) feuert wenn alle 5 bestanden
   const allTilesVerified = isKachel1Verified && isKachel2Verified && isKachel3Verified
                           && isKachel4Verified && isKachel5Verified;
 
-  // PROJ-42: isExportReady — Toolbar-Button-Bedingung
+  // PROJ-42: isExportReady � Toolbar-Button-Bedingung
   const isExportReady = useMemo(() => {
     if (!currentRun) return false;
     const runIssues = issues.filter(i => !i.runId || i.runId === currentRun.id);
@@ -248,11 +248,11 @@ export default function RunDetail() {
     return blocking.length === 0 && missingLoc.length === 0 && currentRunLines.length > 0;
   }, [currentRun, issues, currentRunLines]);
 
-  // 9. SubValue-Strings (Zeile 3) für Kacheln 1, 2, 4, 5
+  // 9. SubValue-Strings (Zeile 3) f�r Kacheln 1, 2, 4, 5
   const kachel1SubValue = useMemo(() => {
     const invoiceTotal = currentRun?.invoice.invoiceTotal;
     if (invoiceTotal != null) {
-      return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Rechnungssumme`;
+      return `${invoiceTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} � Rechnungssumme`;
     }
     return currentRun?.invoice.qtyValidationStatus === 'mismatch'
       ? 'Fehler: Anzahl stimmt nicht'
@@ -296,7 +296,7 @@ export default function RunDetail() {
     if (currentRun && currentRun.stats.notOrderedCount > 0) return `${currentRun.stats.notOrderedCount} nicht bestellt`;
     return undefined;
   }, [allocatedOrderCount, currentRun?.stats.notOrderedCount]);
-  // ─── Ende PROJ-29 ─────────────────────────────────────────────────────────────
+  // --- Ende PROJ-29 -------------------------------------------------------------
 
   // PROJ-42-ADD-ON: Kachel-Export-Handler (CSV, Race-Condition-sicher)
   const handleTileExport = () => {
@@ -306,7 +306,7 @@ export default function RunDetail() {
     const freshRun = setBookingDate(currentRun.id, new Date().toLocaleDateString('de-DE'));
     if (!freshRun) return;
 
-    // 2. PROJ-42-ADD-ON-V: Version hochzählen → frisches Run-Objekt (enthält bookingDate via get())
+    // 2. PROJ-42-ADD-ON-V: Version hochz�hlen ? frisches Run-Objekt (enth�lt bookingDate via get())
     const latestRun = incrementExportVersion(currentRun.id);
     const effectiveRun = latestRun ?? freshRun;
 
@@ -332,10 +332,20 @@ export default function RunDetail() {
     a.click();
     URL.revokeObjectURL(url);
 
-    // 5. Archive mit versioniertem Dateinamen — kein Überschreiben!
-    archiveService.writeArchivePackage(effectiveRun, currentRunLines, {
-      extraFiles: { [csvFileName]: csvContent },
-    }).catch(() => {});
+    // 5. PROJ-27-ADDON-2: Finale Daten in bestehenden Archiv-Ordner
+    const archiveFolder = effectiveRun.archivePath;
+    if (archiveFolder) {
+      archiveService.appendToArchive(archiveFolder, effectiveRun, currentRunLines, {
+        extraFiles: { [csvFileName]: csvContent },
+        preFilteredSerials: useRunStore.getState().preFilteredSerials,
+        issues: useRunStore.getState().issues,
+      }).catch(() => {});
+    } else {
+      // Fallback: Kein Early Archive ? volles Paket (neuer Ordner)
+      archiveService.writeArchivePackage(effectiveRun, currentRunLines, {
+        extraFiles: { [csvFileName]: csvContent },
+      }).catch(() => {});
+    }
 
     // 6. Log + Audit + Diagnostics
     logService.info(`Export durchgefuehrt: ${csvFileName}`, {
@@ -356,7 +366,7 @@ export default function RunDetail() {
     return () => setCurrentRun(null);
   }, [decodedRunId, runs, setCurrentRun]);
 
-  // ─── PROJ-40 6B: URL-Fallback — IndexedDB-Nachladen wenn Run nicht im Memory ─
+  // --- PROJ-40 6B: URL-Fallback � IndexedDB-Nachladen wenn Run nicht im Memory -
   const [loadingPersisted, setLoadingPersisted] = useState(false);
   useEffect(() => {
     if (!decodedRunId) return;
@@ -371,7 +381,7 @@ export default function RunDetail() {
       .finally(() => setLoadingPersisted(false));
   }, [decodedRunId, runs]);
 
-  // ─── PROJ-29 Add-On 2: Parse-Error Toast (nur noch für Fehlerfälle) ─────────
+  // --- PROJ-29 Add-On 2: Parse-Error Toast (nur noch f�r Fehlerf�lle) ---------
   const [showParseError, setShowParseError] = useState(false);
   const mountedAtRef = useRef(Date.now());
   useEffect(() => {
@@ -386,7 +396,7 @@ export default function RunDetail() {
     return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
   }, [parsedInvoiceResult]);
 
-  // ─── PROJ-29 Add-On 2: Checkpoint-Meldungs-Queue ──────────────────────────
+  // --- PROJ-29 Add-On 2: Checkpoint-Meldungs-Queue --------------------------
   const [checkpointQueue, setCheckpointQueue] = useState<number[]>([]);
   const [activeCheckpoint, setActiveCheckpoint] = useState<number | null>(null);
   const [checkpointFade, setCheckpointFade] = useState<'in' | 'out' | 'hidden'>('hidden');
@@ -443,7 +453,7 @@ export default function RunDetail() {
     }
   }, [allTilesVerified]);
 
-  // Effect A — Dequeuer: dequeued nächste Nachricht wenn kein aktiver Checkpoint
+  // Effect A � Dequeuer: dequeued n�chste Nachricht wenn kein aktiver Checkpoint
   useEffect(() => {
     if (activeCheckpoint !== null || checkpointQueue.length === 0) return;
     const nextId = checkpointQueue[0];
@@ -452,7 +462,7 @@ export default function RunDetail() {
     setCheckpointFade('in');
   }, [checkpointQueue, activeCheckpoint]);
 
-  // Effect B — Timer: startet Fade-Out + Clear, reagiert NUR auf activeCheckpoint
+  // Effect B � Timer: startet Fade-Out + Clear, reagiert NUR auf activeCheckpoint
   useEffect(() => {
     if (activeCheckpoint === null) return;
     const fadeOutTimer = setTimeout(() => setCheckpointFade('out'), 2000);
@@ -498,11 +508,11 @@ export default function RunDetail() {
       <AppLayout>
         <div className="py-8 flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <FileWarning className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+            <FileWarning className="w-12 h-12 text-white mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-foreground">
               Lauf nicht gefunden
             </h2>
-            <p className="text-muted-foreground mt-1 mb-4">
+            <p className="text-white mt-1 mb-4">
               Der angeforderte Verarbeitungslauf existiert nicht.
             </p>
             <Link to="/">
@@ -600,7 +610,7 @@ export default function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* PROJ-25: Pause/Fortfahren-Button — immer sichtbar, disabled wenn Run nicht läuft */}
+            {/* PROJ-25: Pause/Fortfahren-Button � immer sichtbar, disabled wenn Run nicht l�uft */}
             <Button
               variant="outline"
               size="sm"
@@ -653,7 +663,7 @@ export default function RunDetail() {
 
         {/* KPI Tiles */}
         <KPIGrid className="mb-6">
-          {/* Kachel 1: Positionen erhalten — PROJ-20 / PROJ-29 */}
+          {/* Kachel 1: Positionen erhalten � PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.parsedInvoiceLines} / ${currentRun.invoice.targetPositionsCount ?? '?'}`}
             label="Positionen eingelesen"
@@ -661,7 +671,7 @@ export default function RunDetail() {
             variant={kachel1Variant}
             isVerified={isKachel1Verified}
           />
-          {/* Kachel 2: Artikel extrahiert — PROJ-20 / PROJ-29 */}
+          {/* Kachel 2: Artikel extrahiert � PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${currentRun.stats.articleMatchedCount}/${currentRun.invoice.targetPositionsCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
             label="Positionen extrahiert"
@@ -673,15 +683,15 @@ export default function RunDetail() {
             } : undefined}
             isVerified={isKachel2Verified}
           />
-          {/* Kachel 3: Preise checken — PROJ-29 */}
+          {/* Kachel 3: Preise checken � PROJ-29 */}
           <KPITile
             value={`${priceOkQtySum}/${currentRun.invoice.targetArticleCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
-            label="Preise geprüft"
+            label="Preise gepr�ft"
             subValue={kachel3SubValue}
             variant={kachel3Variant}
             isVerified={isKachel3Verified}
           />
-          {/* Kachel 4: Serials geparst — PROJ-20 / PROJ-29 */}
+          {/* Kachel 4: Serials geparst � PROJ-20 / PROJ-29 */}
           <KPITile
             value={`${serialMatchedQtySum}/${serialRequiredQtySum || '?'}`}
             label="Serials geparst"
@@ -694,7 +704,7 @@ export default function RunDetail() {
             } : undefined}
             isVerified={isKachel4Verified}
           />
-          {/* Kachel 5: Bestellungen mappen — PROJ-29 */}
+          {/* Kachel 5: Bestellungen mappen � PROJ-29 */}
           <KPITile
             value={`${matchedOrdersQtySum}/${currentRun.invoice.targetArticleCount ?? (currentRun.stats.expandedLineCount || currentRun.stats.parsedInvoiceLines)}`}
             label="Beleg zugeteilt"
@@ -702,7 +712,7 @@ export default function RunDetail() {
             variant={kachel5Variant}
             isVerified={isKachel5Verified}
           />
-          {/* Dynamic Next Step Button — PROJ-25: hover unified + pause badge */}
+          {/* Dynamic Next Step Button � PROJ-25: hover unified + pause badge */}
           {/* PROJ-42-ADD-ON: teal + CSV-Download wenn allStepsComplete && isExportReady */}
           <div
             className={
@@ -837,7 +847,7 @@ export default function RunDetail() {
               </TabsTrigger>
             </TabsList>
 
-            {/* PROJ-29 Add-On 2: Ereignisfeld — Parse-Error-Toast (nur bei Fehler) */}
+            {/* PROJ-29 Add-On 2: Ereignisfeld � Parse-Error-Toast (nur bei Fehler) */}
             {parsedInvoiceResult && showParseError && (
               <div className="flex-none w-1/3 ml-auto">
                 <Alert
@@ -918,15 +928,15 @@ export default function RunDetail() {
           </TabsContent>
 
           <TabsContent value="issues">
-            {/* PROJ-29 ADD-ON 13: Soft-Fail Warnung — Derived State, kein useEffect/Store-Write */}
+            {/* PROJ-29 ADD-ON 13: Soft-Fail Warnung � Derived State, kein useEffect/Store-Write */}
             {isKachel1FirstCheck && !isKachel1Verified && (
               <div className="flex items-start gap-3 rounded-md border border-amber-400/50 bg-amber-50/10 px-4 py-3 text-sm mb-4">
                 <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" />
                 <div>
                   <span className="font-semibold text-amber-300">Rechnungssummen-Konflikt (Soft-Fail):</span>{' '}
                   <span className="text-muted-foreground">
-                    Zeilensumme stimmt nicht mit Rechnungsbetrag überein — mögliche Rundungsdifferenz
-                    oder versteckter Rabatt im Fremd-ERP. Bitte Positionen und Gesamtsumme manuell prüfen.
+                    Zeilensumme stimmt nicht mit Rechnungsbetrag �berein � m�gliche Rundungsdifferenz
+                    oder versteckter Rabatt im Fremd-ERP. Bitte Positionen und Gesamtsumme manuell pr�fen.
                   </span>
                 </div>
               </div>
@@ -950,5 +960,8 @@ export default function RunDetail() {
     </AppLayout>
   );
 }
+
+
+
 
 
