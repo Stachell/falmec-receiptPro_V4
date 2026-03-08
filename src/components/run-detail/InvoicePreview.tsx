@@ -521,23 +521,23 @@ export function InvoicePreview({
                           {/* Col 7: Bezeichnung — dynamic width, DE/IT toggle */}
                           <TableCell className="min-w-0">
                             {showDE ? (
+                              <div className="text-xs truncate w-full"
+                                   title={posStatus?.representativeLine?.descriptionDE ?? undefined}>
+                                {posStatus?.representativeLine?.descriptionDE}
+                              </div>
+                            ) : (
                               <>
                                 <div className="text-xs truncate w-full"
-                                     title={posStatus?.representativeLine?.descriptionDE ?? position.descriptionIT ?? undefined}>
-                                  {posStatus?.representativeLine?.descriptionDE ?? position.descriptionIT ?? ''}
+                                     title={position.descriptionIT ?? undefined}>
+                                  {position.descriptionIT}
                                 </div>
-                                {posStatus?.representativeLine?.descriptionDE && position.descriptionIT && (
+                                {posStatus?.representativeLine?.descriptionDE && (
                                   <div className="text-[11px] text-muted-foreground truncate w-full"
-                                       title={position.descriptionIT ?? undefined}>
-                                    {position.descriptionIT}
+                                       title={posStatus?.representativeLine?.descriptionDE ?? undefined}>
+                                    {posStatus?.representativeLine?.descriptionDE}
                                   </div>
                                 )}
                               </>
-                            ) : (
-                              <div className="text-xs truncate w-full"
-                                   title={position.descriptionIT ?? position.manufacturerArticleNo}>
-                                {position.descriptionIT || position.manufacturerArticleNo || ''}
-                              </div>
                             )}
                           </TableCell>
 

@@ -388,29 +388,29 @@ export function ItemsTable() {
 
                       <TableCell className="min-w-0">
                         {showDE ? (
+                          <div
+                            className="text-xs truncate w-full"
+                            title={line.descriptionDE ?? undefined}
+                          >
+                            {line.descriptionDE}
+                          </div>
+                        ) : (
                           <>
                             <div
                               className="text-xs truncate w-full"
-                              title={line.descriptionDE ?? line.descriptionIT ?? undefined}
+                              title={line.descriptionIT ?? undefined}
                             >
-                              {line.descriptionDE ?? line.descriptionIT}
+                              {line.descriptionIT}
                             </div>
                             {line.descriptionDE && (
                               <div
                                 className="text-[11px] text-muted-foreground truncate w-full"
-                                title={line.descriptionIT ?? undefined}
+                                title={line.descriptionDE ?? undefined}
                               >
-                                {line.descriptionIT}
+                                {line.descriptionDE}
                               </div>
                             )}
                           </>
-                        ) : (
-                          <div
-                            className="text-xs truncate w-full"
-                            title={line.descriptionIT ?? undefined}
-                          >
-                            {line.descriptionIT}
-                          </div>
                         )}
                       </TableCell>
 
