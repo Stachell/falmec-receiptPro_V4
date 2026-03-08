@@ -19,6 +19,7 @@ import type {
   AuditLogEntry,
   ParsedInvoiceLineExtended,
   InvoiceParserWarning,
+  PreFilteredSerialRow,
 } from '@/types';
 import type { ParsedInvoiceResult } from '@/services/parsers';
 import type { SerialDocument } from '@/services/matchers/types';
@@ -44,6 +45,7 @@ export interface PersistedRunData {
   serialDocument: SerialDocument | null;             // S/N-Excel für Neu-Verarbeiten
   uploadMetadata: PersistedUploadMeta[];             // Dateinamen + Typen der Uploads
   runLog?: LogEntry[];                           // PROJ-41: Run-Log für IndexedDB-Persistenz
+  preFilteredSerials?: PreFilteredSerialRow[];   // PROJ-40: S/N-Rehydrierung
   savedAt: string;                               // ISO timestamp
   sizeEstimateBytes: number;                     // JSON.stringify(data).length * 2
 }

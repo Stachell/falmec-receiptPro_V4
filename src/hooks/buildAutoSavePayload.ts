@@ -43,6 +43,8 @@ export function buildAutoSavePayload(runId: string) {
     parserWarnings: current.currentParsedRunId === runId ? current.parserWarnings : [],
     parsedInvoiceResult: current.parsedInvoiceResult ?? null,
     serialDocument: current.serialDocument ?? null,
+    preFilteredSerials: current.preFilteredSerials.length > 0
+      ? current.preFilteredSerials : undefined,
     uploadMetadata: current.uploadedFiles.map(f => ({
       type: f.type, name: f.name, size: f.size, uploadedAt: f.uploadedAt,
     })),

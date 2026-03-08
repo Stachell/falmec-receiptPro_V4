@@ -107,7 +107,7 @@ function persistedToTableRow(s: PersistedRunSummary): TableRow_ {
 type StatusFilterValue = 'all' | Run['status'];
 
 const Index = () => {
-  const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines } = useRunStore();
+  const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines, setBookingDate, incrementExportVersion } = useRunStore();
   const { columnOrder, csvDelimiter, csvIncludeHeader } = useExportConfigStore();
   const navigate = useNavigate();
 
@@ -152,19 +152,25 @@ const Index = () => {
       toast.info('Bitte laden Sie diesen Run zuerst, um den Export zu starten.');
       return;
     }
+    // PROJ-42-ADD-ON-V: Buchungsdatum setzen + Version hochzählen
+    const freshRun = setBookingDate(run.id, new Date().toLocaleDateString('de-DE'));
+    const latestRun = incrementExportVersion(run.id);
+    const effectiveRun = latestRun ?? freshRun ?? run;
+
     const meta: RunExportMeta = {
-      fattura: run.invoice.fattura,
-      invoiceDate: run.invoice.invoiceDate,
-      deliveryDate: run.invoice.deliveryDate ?? null,
-      eingangsart: run.config.eingangsart,
-      runId: run.id,
-      bookingDate: run.stats.bookingDate ?? '',
+      fattura: effectiveRun.invoice.fattura,
+      invoiceDate: effectiveRun.invoice.invoiceDate,
+      deliveryDate: effectiveRun.invoice.deliveryDate ?? null,
+      eingangsart: effectiveRun.config.eingangsart,
+      runId: effectiveRun.id,
+      bookingDate: effectiveRun.stats.bookingDate ?? '',
     };
     const content = type === 'xml'
       ? generateXML(runLines, columnOrder, meta)
       : generateCSV(runLines, columnOrder, meta, csvDelimiter, csvIncludeHeader);
     const mimeType = type === 'xml' ? 'application/xml' : 'text/csv';
-    const fileName = buildExportFileName(run.id, type);
+    const version = effectiveRun.stats.exportVersion ?? 0;
+    const fileName = buildExportFileName(effectiveRun.id, type, version);
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

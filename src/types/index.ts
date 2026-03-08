@@ -195,6 +195,9 @@ export interface RunStats {
 
   /** PROJ-42-ADD-ON: Buchungsdatum DD.MM.YYYY, einmalig beim ersten Export gesetzt. */
   bookingDate?: string;
+
+  /** PROJ-42-ADD-ON-V: Export-Version Counter (1=erster Export kein Suffix, 2=_v1, 3=_v2, etc.) */
+  exportVersion?: number;
 }
 
 export interface WorkflowStep {

@@ -65,6 +65,7 @@ export default function RunDetail() {
     resumeRun,
     addAuditEntry,
     setBookingDate,
+    incrementExportVersion,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
   const getStoreState = useRunStore.getState;
@@ -153,8 +154,8 @@ export default function RunDetail() {
   const isKachel3FirstCheck = kachel3Variant === 'success';
 
   const kachel4Variant = (
-    currentRun && currentRun.stats.serialMatchedCount >= currentRun.stats.serialRequiredCount
-      && currentRun.stats.serialRequiredCount > 0
+    serialMatchedQtySum >= serialRequiredQtySum
+      && serialRequiredQtySum > 0
       ? 'success' as const
       : 'default' as const
   );
@@ -305,19 +306,24 @@ export default function RunDetail() {
     const freshRun = setBookingDate(currentRun.id, new Date().toLocaleDateString('de-DE'));
     if (!freshRun) return;
 
-    // 2. RunMeta mit frischem bookingDate aufbauen
+    // 2. PROJ-42-ADD-ON-V: Version hochzählen → frisches Run-Objekt (enthält bookingDate via get())
+    const latestRun = incrementExportVersion(currentRun.id);
+    const effectiveRun = latestRun ?? freshRun;
+
+    // 3. RunMeta mit frischem bookingDate + exportVersion aufbauen
     const runMeta: RunExportMeta = {
-      fattura: freshRun.invoice.fattura,
-      invoiceDate: freshRun.invoice.invoiceDate,
-      deliveryDate: freshRun.invoice.deliveryDate ?? null,
-      eingangsart: freshRun.config.eingangsart,
-      runId: freshRun.id,
-      bookingDate: freshRun.stats.bookingDate ?? new Date().toLocaleDateString('de-DE'),
+      fattura: effectiveRun.invoice.fattura,
+      invoiceDate: effectiveRun.invoice.invoiceDate,
+      deliveryDate: effectiveRun.invoice.deliveryDate ?? null,
+      eingangsart: effectiveRun.config.eingangsart,
+      runId: effectiveRun.id,
+      bookingDate: effectiveRun.stats.bookingDate ?? new Date().toLocaleDateString('de-DE'),
     };
 
-    // 3. CSV generieren + Download
+    // 4. CSV generieren + Download (versionierter Dateiname)
     const csvContent = generateCSV(currentRunLines, columnOrder, runMeta, csvDelimiter, csvIncludeHeader);
-    const csvFileName = buildExportFileName(freshRun.id, 'csv');
+    const version = effectiveRun.stats.exportVersion ?? 0;
+    const csvFileName = buildExportFileName(effectiveRun.id, 'csv', version);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -326,16 +332,18 @@ export default function RunDetail() {
     a.click();
     URL.revokeObjectURL(url);
 
-    // 4. Archive mit frischem Run
-    archiveService.writeArchivePackage(freshRun, currentRunLines, { exportCsv: csvContent }).catch(() => {});
+    // 5. Archive mit versioniertem Dateinamen — kein Überschreiben!
+    archiveService.writeArchivePackage(effectiveRun, currentRunLines, {
+      extraFiles: { [csvFileName]: csvContent },
+    }).catch(() => {});
 
-    // 5. Log + Audit + Diagnostics
+    // 6. Log + Audit + Diagnostics
     logService.info(`Export durchgefuehrt: ${csvFileName}`, {
-      runId: freshRun.id,
+      runId: effectiveRun.id,
       step: 'Export',
       details: `Format: CSV, Positionen: ${currentRunLines.length}, Spalten: ${columnOrder.length}`,
     });
-    addAuditEntry({ runId: freshRun.id, action: 'export-download', details: `CSV: ${csvFileName}`, userId: 'system' });
+    addAuditEntry({ runId: effectiveRun.id, action: 'export-download', details: `CSV: ${csvFileName}`, userId: 'system' });
     setLastDiagnostics({ timestamp: new Date().toISOString(), fileName: csvFileName, lineCount: currentRunLines.length, status: 'success' });
   };
 

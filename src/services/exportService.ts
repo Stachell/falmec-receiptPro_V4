@@ -108,7 +108,11 @@ export function generateCSV(
   return bom + parts.join('\r\n');
 }
 
-/** Build the export file name: "{runId}-Wareneingang.{ext}" */
-export function buildExportFileName(runId: string, ext: string): string {
-  return `${runId}-Wareneingang.${ext}`;
+/** Build the export file name: "{runId}-Wareneingang[_vN].{ext}"
+ * version 0/undefined/1 = erster Export → kein Suffix
+ * version 2 = _v1, version 3 = _v2, etc.
+ */
+export function buildExportFileName(runId: string, ext: string, version?: number): string {
+  const suffix = version && version > 1 ? `_v${version - 1}` : '';
+  return `${runId}-Wareneingang${suffix}.${ext}`;
 }

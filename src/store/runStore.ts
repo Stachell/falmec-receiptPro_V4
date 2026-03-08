@@ -382,7 +382,7 @@ interface RunState {
   // Serial document (from Step 3, PROJ-16)
   serialDocument: SerialDocument | null;
 
-  // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
+  // PROJ-20: Pre-filtered serial rows — persisted to IndexedDB since PROJ-40
   preFilteredSerials: PreFilteredSerialRow[];
 
   // PROJ-23: OrderPool for manual resolution (Phase A3)
@@ -469,6 +469,8 @@ interface RunState {
   setManualPrice: (lineId: string, price: number) => void;
   /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
   setBookingDate: (runId: string, date: string) => Run | null;
+  /** PROJ-42-ADD-ON-V: Export-Version inkrementieren. Returns updated Run or null. */
+  incrementExportVersion: (runId: string) => Run | null;
 
   // PROJ-16/19: Matcher-based actions (replace executeArticleMatching)
   // Articles are now sourced from masterDataStore — no parameter needed
@@ -512,7 +514,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   // Serial document (PROJ-16)
   serialDocument: null,
 
-  // PROJ-20: Pre-filtered serial rows — MEMORY ONLY, never persisted to localStorage
+  // PROJ-20: Pre-filtered serial rows — persisted to IndexedDB since PROJ-40
   preFilteredSerials: [],
 
   // PROJ-23: OrderPool for manual resolution (Phase A3)
@@ -1643,6 +1645,21 @@ export const useRunStore = create<RunState>((set, get) => ({
         }, 100);
         set({ autoAdvanceTimer: t4 });
       }
+
+      // PROJ-42-ADD-ON-12: Auto-complete Step 5 (Export) — Export wird via UI ausgeloest, Step auto-abschliessen
+      if (nextStep.stepNo === 5) {
+        const t5 = setTimeout(() => {
+          if (get().isPaused) return; // PROJ-25: Guard
+          const afterStep4 = get();
+          const updatedRun = afterStep4.runs.find(r => r.id === runId);
+          const step5 = updatedRun?.steps.find(s => s.stepNo === 5);
+          if (step5 && step5.status === 'running') {
+            logService.info('Auto-Complete: Step 5 (Export bereit)', { runId, step: 'Export' });
+            afterStep4.advanceToNextStep(runId);
+          }
+        }, 100);
+        set({ autoAdvanceTimer: t5 });
+      }
     } else {
       // All steps completed → mark run as finished and auto-archive
       get().updateRunStatus(runId, 'ok');
@@ -2344,6 +2361,27 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (targetRun.stats.bookingDate) return targetRun;
 
     const updatedStats = { ...targetRun.stats, bookingDate: date };
+    const updatedRun = { ...targetRun, stats: updatedStats };
+
+    set({
+      runs: runs.map(r => r.id === runId ? updatedRun : r),
+      currentRun: currentRun?.id === runId
+        ? { ...currentRun, stats: updatedStats }
+        : currentRun,
+    });
+
+    return updatedRun;
+  },
+
+  // ─── PROJ-42-ADD-ON-V: Export-Versionierung ───
+
+  incrementExportVersion: (runId) => {
+    const { runs, currentRun } = get();
+    const targetRun = runs.find(r => r.id === runId);
+    if (!targetRun) return null;
+
+    const newVersion = (targetRun.stats.exportVersion ?? 0) + 1;
+    const updatedStats = { ...targetRun.stats, exportVersion: newVersion };
     const updatedRun = { ...targetRun, stats: updatedStats };
 
     set({
@@ -3279,6 +3317,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           parserWarnings: data.parserWarnings,
           parsedInvoiceResult: data.parsedInvoiceResult ?? null,   // PROJ-40 5C: PDF-Preview
           serialDocument: data.serialDocument ?? null,              // PROJ-40 5C: S/N-Excel
+          preFilteredSerials: data.preFilteredSerials ?? [],        // PROJ-40: S/N-Rehydrierung
           currentParsedRunId: runId,                                // PROJ-40 5C: Run-Isolierung
         };
       });

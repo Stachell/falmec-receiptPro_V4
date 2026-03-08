@@ -14,7 +14,7 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ run }: ExportPanelProps) {
-  const { invoiceLines: allInvoiceLines, issues, addAuditEntry, setBookingDate } = useRunStore();
+  const { invoiceLines: allInvoiceLines, issues, addAuditEntry, setBookingDate, incrementExportVersion } = useRunStore();
   // Filter lines to current run only
   const invoiceLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
   const [copied, setCopied] = useState(false);
@@ -59,9 +59,11 @@ export function ExportPanel({ run }: ExportPanelProps) {
   const handleDownload = (format: 'xml' | 'csv') => {
     const isXml = format === 'xml';
 
-    // Buchungsdatum: einmalig setzen, frischen Run zurueck bekommen
+    // 1. Buchungsdatum: einmalig setzen, frischen Run zurueck bekommen
     const freshRun = setBookingDate(run.id, new Date().toLocaleDateString('de-DE'));
-    const effectiveRun = freshRun ?? run;
+    // 2. PROJ-42-ADD-ON-V: Version hochzählen → frisches Run-Objekt (enthält bookingDate via get())
+    const latestRun = incrementExportVersion(run.id);
+    const effectiveRun = latestRun ?? freshRun ?? run;
 
     const effectiveMeta: RunExportMeta = {
       fattura: effectiveRun.invoice.fattura,
@@ -75,10 +77,11 @@ export function ExportPanel({ run }: ExportPanelProps) {
     const content = isXml
       ? generateXML(invoiceLines, columnOrder, effectiveMeta)
       : generateCSV(invoiceLines, columnOrder, effectiveMeta, csvDelimiter, csvIncludeHeader);
-    const fileName = buildExportFileName(effectiveRun.id, format);
+    const version = effectiveRun.stats.exportVersion ?? 0;
+    const fileName = buildExportFileName(effectiveRun.id, format, version);
     const mimeType = isXml ? 'application/xml' : 'text/csv';
 
-    // 1. Blob + anchor download (always first, universell)
+    // 3. Blob + anchor download (always first, universell)
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -87,11 +90,10 @@ export function ExportPanel({ run }: ExportPanelProps) {
     a.click();
     URL.revokeObjectURL(url);
 
-    // 2. Archive — fire-and-forget
-    const archiveOptions = isXml
-      ? { exportXml: content }
-      : { exportCsv: content };
-    archiveService.writeArchivePackage(effectiveRun, invoiceLines, archiveOptions).catch(() => {
+    // 4. Archive mit versioniertem Dateinamen — kein Überschreiben!
+    archiveService.writeArchivePackage(effectiveRun, invoiceLines, {
+      extraFiles: { [fileName]: content },
+    }).catch(() => {
       // Archive failure must not block download
     });
 

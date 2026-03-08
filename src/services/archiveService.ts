@@ -351,7 +351,7 @@ class ArchiveService {
   async writeArchivePackage(
     run: Run,
     lines: InvoiceLine[],
-    options?: { exportXml?: string; exportCsv?: string; preFilteredSerials?: PreFilteredSerialRow[]; issues?: Issue[] }
+    options?: { exportXml?: string; exportCsv?: string; extraFiles?: Record<string, string>; preFilteredSerials?: PreFilteredSerialRow[]; issues?: Issue[] }
   ): Promise<{ success: boolean; cleanedUp: boolean; folderName: string; failedFiles: string[] }> {
     const runId = run.id;
     const failedFiles: string[] = [];
@@ -396,9 +396,9 @@ class ArchiveService {
       logService.warn('Invoice-PDF konnte nicht aus IndexedDB geladen werden', { runId, step: 'Archiv' });
     }
 
-    // 5. Write export.xml if provided
+    // 5. Write export.xml if provided (Legacy — nur aktiv wenn kein extraFiles)
     let exportXmlInfo: { name: string; size: number } | null = null;
-    if (options?.exportXml) {
+    if (options?.exportXml && !options?.extraFiles) {
       const ok = await fileSystemService.saveToArchive(folderName, 'export.xml', options.exportXml);
       if (ok) {
         exportXmlInfo = { name: 'export.xml', size: options.exportXml.length };
@@ -407,14 +407,27 @@ class ArchiveService {
       }
     }
 
-    // 6. Write export.csv if provided
+    // 6. Write export.csv if provided (Legacy — nur aktiv wenn kein extraFiles)
     let exportCsvInfo: { name: string; size: number } | null = null;
-    if (options?.exportCsv) {
+    if (options?.exportCsv && !options?.extraFiles) {
       const ok = await fileSystemService.saveToArchive(folderName, 'export.csv', options.exportCsv);
       if (ok) {
         exportCsvInfo = { name: 'export.csv', size: options.exportCsv.length };
       } else {
         failedFiles.push('export.csv');
+      }
+    }
+
+    // 6.5 PROJ-42-ADD-ON-V: Write versionierte Export-Dateien (revisionssicher, kein Überschreiben)
+    const extraFileInfos: { name: string; size: number }[] = [];
+    if (options?.extraFiles) {
+      for (const [name, content] of Object.entries(options.extraFiles)) {
+        const ok = await fileSystemService.saveToArchive(folderName, name, content);
+        if (ok) {
+          extraFileInfos.push({ name, size: content.length });
+        } else {
+          failedFiles.push(name);
+        }
       }
     }
 
@@ -486,8 +499,8 @@ class ArchiveService {
       files: {
         invoice: invoiceFileInfo,
         warenbegleitschein: null,
-        exportXml: exportXmlInfo,
-        exportCsv: exportCsvInfo,
+        exportXml: exportXmlInfo ?? extraFileInfos.find(f => f.name.endsWith('.xml')) ?? null,
+        exportCsv: exportCsvInfo ?? extraFileInfos.find(f => f.name.endsWith('.csv')) ?? null,
         artikelstamm: null,
         offeneBestellungen: null,
         serialData: serialDataInfo,
@@ -501,14 +514,17 @@ class ArchiveService {
     if (!metaOk) failedFiles.push('metadata.json');
 
     // 8. Cleanup ONLY if required files succeeded
-    const requiredOk = !failedFiles.includes('invoice-lines.json') && !failedFiles.includes('metadata.json');
+    const criticalFailures = failedFiles.filter(
+      f => f === 'invoice-lines.json' || f === 'metadata.json'
+    );
+    const requiredOk = criticalFailures.length === 0;
 
     let cleanedUp = false;
     if (requiredOk) {
       await this.cleanupBrowserData(runId);
       cleanedUp = true;
     } else {
-      logService.warn(`Archiv-Paket unvollständig: ${failedFiles.join(', ')}`, { runId, step: 'Archiv' });
+      logService.warn(`Archiv-Paket unvollständig: ${criticalFailures.join(', ')}`, { runId, step: 'Archiv' });
     }
 
     logService.info(
