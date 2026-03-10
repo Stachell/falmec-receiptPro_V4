@@ -58,7 +58,12 @@ import {
   resolveOrderParserProfile,
 } from '@/services/matching/orderParserProfiles';
 import { OverrideEditorModal } from '@/components/OverrideEditorModal';
-import { getStoredEmailAddresses, saveEmailAddresses, isValidEmail } from '@/lib/errorHandlingConfig';
+import {
+  ERROR_HANDLING_EMAIL_SLOT_COUNT,
+  getStoredEmailSlots,
+  saveEmailAddresses,
+  isValidEmail,
+} from '@/lib/errorHandlingConfig';
 
 interface SettingsPopupProps {
   open: boolean;
@@ -78,7 +83,7 @@ interface SettingsPopupProps {
   };
 }
 
-type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview';
+type SettingsTabKey = 'general' | 'errorhandling' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview';
 
 /** Hover-style helper button (matching app design) */
 function FooterButton({
@@ -306,8 +311,25 @@ export function SettingsPopup({
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // PROJ-39: Fehlerhandling email addresses (5 slots)
-  const [emailAddresses, setEmailAddresses] = useState<string[]>(['', '', '', '', '']);
+  // PROJ-39-ADDON: Fehlerhandling email addresses (10 fixed slots)
+  const [emailAddresses, setEmailAddresses] = useState<string[]>(
+    Array.from({ length: ERROR_HANDLING_EMAIL_SLOT_COUNT }, () => ''),
+  );
+  const duplicateEmailIndices = useMemo(() => {
+    const duplicateMap = new Map<string, number[]>();
+    emailAddresses.forEach((entry, index) => {
+      const value = entry.trim().toLowerCase();
+      if (!value) return;
+      const list = duplicateMap.get(value) ?? [];
+      list.push(index);
+      duplicateMap.set(value, list);
+    });
+    return new Set(
+      [...duplicateMap.values()]
+        .filter((indices) => indices.length > 1)
+        .flat(),
+    );
+  }, [emailAddresses]);
   const handleUpdateAddress = (index: number, value: string) => {
     setEmailAddresses(prev => {
       const next = [...prev];
@@ -316,7 +338,12 @@ export function SettingsPopup({
     });
   };
   const handleSaveEmails = () => {
-    saveEmailAddresses(emailAddresses);
+    const result = saveEmailAddresses(emailAddresses);
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+    setEmailAddresses(result.addresses);
     toast.success('E-Mail-Adressen gespeichert');
   };
 
@@ -326,13 +353,10 @@ export function SettingsPopup({
     }
   }, [open, initialTab]);
 
-  // PROJ-39: Load stored emails when popup opens
+  // PROJ-39-ADDON: Load stored emails (fixed slots) when popup opens
   useEffect(() => {
     if (open) {
-      const stored = getStoredEmailAddresses();
-      const slots: string[] = ['', '', '', '', ''];
-      stored.forEach((addr, i) => { if (i < 5) slots[i] = addr; });
-      setEmailAddresses(slots);
+      setEmailAddresses(getStoredEmailSlots());
     }
   }, [open]);
 
@@ -761,6 +785,7 @@ export function SettingsPopup({
               style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
             >
               <TabsTrigger value="general"     className="w-full justify-start text-left text-sm px-3 py-2">Allgemein</TabsTrigger>
+              <TabsTrigger value="errorhandling" className="w-full justify-start text-left text-sm px-3 py-2">Fehlerhandling</TabsTrigger>
               <TabsTrigger value="parser"      className="w-full justify-start text-left text-sm px-3 py-2">PDF-Parser</TabsTrigger>
               <TabsTrigger value="matcher"     className="w-full justify-start text-left text-sm px-3 py-2">Artikel extrahieren</TabsTrigger>
               <TabsTrigger value="serial"      className="w-full justify-start text-left text-sm px-3 py-2">Serial parsen</TabsTrigger>
@@ -938,14 +963,18 @@ export function SettingsPopup({
                   </div>
                 </div>
 
-                {/* PROJ-39: Separator 3 — Fehlerhandling */}
+              </TabsContent>
+
+              {/* Tab 3: Fehlerhandling */}
+              <TabsContent value="errorhandling" className="mt-0 space-y-3">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Fehlerhandling</div>
                 <div className="border-t border-border pt-3 space-y-3">
                   <Label className="text-sm font-semibold">Fehlerhandling</Label>
                   <p className="text-xs text-muted-foreground">
                     E-Mail-Adressen fuer Fehlerweiterleitung
                   </p>
 
-                  {[0, 1, 2, 3, 4].map((i) => (
+                  {Array.from({ length: ERROR_HANDLING_EMAIL_SLOT_COUNT }, (_, i) => (
                     <div key={i} className="flex items-center justify-between gap-4">
                       <Label className="text-sm whitespace-nowrap">Adresse {i + 1}</Label>
                       <Input
@@ -954,7 +983,7 @@ export function SettingsPopup({
                         onChange={(e) => handleUpdateAddress(i, e.target.value)}
                         placeholder="name@firma.de"
                         className={`h-8 flex-1 max-w-[280px] text-sm bg-white ${
-                          emailAddresses[i] && !isValidEmail(emailAddresses[i])
+                          (emailAddresses[i] && !isValidEmail(emailAddresses[i])) || duplicateEmailIndices.has(i)
                             ? 'border-amber-400'
                             : ''
                         }`}
@@ -971,7 +1000,7 @@ export function SettingsPopup({
                 </div>
               </TabsContent>
 
-              {/* Tab 3: PDF-Parser */}
+              {/* Tab 4: PDF-Parser */}
               <TabsContent value="parser" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">PDF-Parser</div>
 
@@ -1376,3 +1405,4 @@ export function SettingsPopup({
     </>
   );
 }
+

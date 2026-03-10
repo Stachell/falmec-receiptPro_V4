@@ -816,7 +816,7 @@ export function IssuesCenter() {
                     className="h-8 w-full text-sm bg-white border border-border rounded-md px-3 text-foreground"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Keine gespeicherten Adressen. Adresse manuell eingeben oder in Einstellungen &gt; Allgemein &gt; Fehlerhandling hinterlegen.
+                    Keine gespeicherten Adressen. Adresse manuell eingeben oder in Einstellungen &gt; Fehlerhandling hinterlegen.
                   </p>
                 </div>
               )}

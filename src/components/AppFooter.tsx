@@ -20,7 +20,7 @@ const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 const HOVER_BORDER = '#D8E6E7';
-type SettingsTabKey = 'general' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview' | 'misc';
+type SettingsTabKey = 'general' | 'errorhandling' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview' | 'misc';
 
 export function AppFooter() {
   const [isOpen, setIsOpen] = useState(false);
@@ -453,4 +453,3 @@ export function AppFooter() {
     </>
   );
 }
-
