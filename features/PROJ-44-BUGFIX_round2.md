@@ -321,3 +321,67 @@ Fallback auf `descriptionIT` wenn `descriptionDE` null ist.
 - `emailSaved`-State und "Gespeichert!"-Feedback sind bereits implementiert → keine Änderung nötig
 - `useEffect([open])` zum Laden der E-Mails funktioniert korrekt → BEHALTEN, nicht entfernen
 - Die Export-Spalten in `exportService.ts` referenzieren `falmecArticleNo`, `manufacturerArticleNo`, `descriptionDE`, `descriptionIT` direkt als InvoiceLine-Felder → diese Felder werden NICHT umbenannt, nur die UI-Spaltenüberschriften in WarehouseLocations
+
+---
+
+## QA Test Results
+
+**QA-Datum:** 2026-03-14
+**Tester:** QA Engineer (Claude)
+**TypeScript-Check:** `npx tsc --noEmit` → **0 Errors** ✓
+
+---
+
+### Bug-Fix Verifikation
+
+| Bug | Kriterium | Status | Fundstelle |
+|-----|-----------|--------|-----------|
+| #2a | `useState<string[]>(getStoredEmailSlots)` — Lazy-Initializer ohne `()` | PASS | `SettingsPopup.tsx` Z.317 |
+| #2b | `isInitialMountRef = useRef(true)` vorhanden | PASS | Z.316 |
+| #2c | Debounced Auto-Save `useEffect([emailAddresses])` mit `isInitialMountRef`-Guard | PASS | Z.365-375 |
+| #2c | Debounce 500ms + Cleanup `clearTimeout` | PASS | Z.371-374 |
+| #2 | `useEffect([open])` zum Nachladen bleibt erhalten | PASS | Z.358-363 |
+| #3a | `DialogContent`: `max-w-[810px] w-full max-h-[85vh] flex flex-col` | PASS | `IssueDialog.tsx` Z.190 |
+| #3b | Tabs-Container: `flex gap-4 mt-2 flex-1 overflow-hidden` | PASS | Z.205 |
+| #3c | Tab 3: `flex-1 flex flex-col overflow-hidden mt-0` | PASS | Z.324 |
+| #3c | Tab 3 Content-Bereich: `<div className="flex-1 overflow-y-auto space-y-3">` | PASS | Z.325 |
+| #3c | Tab 3 Button in `<div className="pt-2 shrink-0">` | PASS | Z.387 |
+| #4a | Tab 3 Button: `bg-white text-orange-600 border border-orange-600 shadow-sm hover:bg-green-600 hover:text-white` | PASS | Z.391 |
+| #4 | Tab 1 Shortcut-Button (Z.291): UNVERAENDERT | PASS | Verifiziert — identisches Styling bereits vorhanden |
+| #6a | SortKey-Typ: `'positionIndex' \| 'falmecArticleNo' \| 'storageLocation'` | PASS | `WarehouseLocations.tsx` Z.21 |
+| #6b | `sortLines` als einzige DRY-Sortierfunktion fuer alle 3 Keys | PASS | Z.62-78 — kein duplizierter Code |
+| #6b | Numerische Sortierung fuer `falmecArticleNo`: `localeCompare(..., { numeric: true })` | PASS | Z.70 |
+| #6c | Neue "Artikelnr."-Spalte im Header + Body (sortierbar) | PASS | Z.205-210, Z.238-240 |
+| #6d | "Artikelnummer" umbenannt zu "Herstellerartikelnr." | PASS | Z.211 |
+| #6f | Beschreibung: `descriptionDE ?? descriptionIT` | PASS | Z.246 |
+
+---
+
+### Gefundene Bugs
+
+#### Bug — LOW: Debounced Auto-Save triggert beim Oeffnen des Popups (2. Mal und danach)
+
+**Datei:** `src/components/SettingsPopup.tsx` Z.358-375
+**Problem:** `isInitialMountRef` wird auf `true` initialisiert und beim ersten Render auf `false` gesetzt. Es wird NICHT zurueckgesetzt wenn das Popup schliesst. Wenn das Popup zum 2. Mal geoeffnet wird, laedt der `useEffect([open])`-Hook die E-Mails via `setEmailAddresses(getStoredEmailSlots())` neu — das aendert `emailAddresses`, was den Debounce-useEffect triggert. `isInitialMountRef.current` ist jetzt `false` → `saveEmailAddresses` wird nach 500ms aufgerufen, obwohl kein User-Edit stattfand.
+**Impact:** Stilles Save derselben Daten — keine Datenkorrution, keine Sichtbarkeit. Technisch unerwuenscht aber funktional harmlos.
+**Reproduktion:** Settings oeffnen → schliessen → erneut oeffnen → 500ms warten → Auto-Save wird getriggert (debugbar per `console.log` in `saveEmailAddresses`).
+**Schweregrad:** LOW — kein Datenverlust, kein visueller Effekt, nur unnoetige Schreiboperation.
+
+---
+
+### Regressionstest
+
+| Pruefpunkt | Status | Anmerkung |
+|------------|--------|-----------|
+| Tab 1 und Tab 5 in IssueDialog unveraendert | PASS | Nur Tab 3 Layout geaendert |
+| Tab 4 E-Mail-Flow (Overflow-Bug aus R1): `flex-1 flex flex-col overflow-y-auto h-full` | PASS | Z.400 — von R1 stammend, unveraendert |
+| Export-Spalten in `exportService.ts` unveraendert | PASS | Nur UI-Bezeichnungen geaendert |
+| WarehouseLocations: `handleGlobalWEChange` + `handleGlobalKDDChange` unveraendert | PASS | Schreiben nur `storageLocation`, Gruppe bleibt durch `logicalStorageGroup` korrekt |
+
+---
+
+### Entscheidung
+
+**PRODUCTION READY: JA**
+
+Begruendung: Alle 4 Bugs (2, 3, 4, 6) korrekt behoben. 1 Low-Bug gefunden (Debounced-Auto-Save triggert beim Popup-Reopening ohne User-Edit — harmlos, kein Datenverlust). TypeScript: 0 Errors.

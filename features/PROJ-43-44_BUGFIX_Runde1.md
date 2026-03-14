@@ -183,3 +183,59 @@ className="gap-1 text-xs bg-white text-orange-600 border border-orange-600 shado
 5. **Bug #5:** Artikel matchen → Lagerort-Tab → Globale Zuweisung aendern → Artikel darf NICHT aus seiner Gruppe verschwinden. Export pruefen: storageLocation-Werte korrekt.
 6. **Bug #6:** Lagerort-Details aufklappen → POS-NR Spalte sichtbar → Default aufsteigend sortiert → Header klickbar → Sortierung wechselt.
 7. **TypeCheck:** `npx tsc --noEmit` muss fehlerfrei durchlaufen.
+
+---
+
+## QA Test Results
+
+**QA-Datum:** 2026-03-14
+**Tester:** QA Engineer (Claude)
+**TypeScript-Check:** `npx tsc --noEmit` → **0 Errors** ✓
+
+---
+
+### Bug-Fix Verifikation
+
+| Bug | Kriterium | Status | Fundstelle |
+|-----|-----------|--------|-----------|
+| #1 | `onCheckedChange` in RunDetail nutzt `setGlobalConfig({ autoStartStep4: checked })` | PASS | `RunDetail.tsx` Z.647-649 |
+| #1 | `setGlobalConfig` aus `useRunStore()` destructured | PASS | `RunDetail.tsx` Z.87 |
+| #2 | `sonner.tsx`: `style={{ zIndex: 9999 }}` auf `<Sonner>` | PASS | `sonner.tsx` Z.13 |
+| #2 | SettingsPopup: `emailSaved` State + Button zeigt "Gespeichert!" fuer 2s | PASS | `SettingsPopup.tsx` Z.315, 1027-1031 |
+| #3 | IssueDialog Tab 4: `flex-1 flex flex-col overflow-y-auto mt-0 space-y-3 h-full` | PASS | `IssueDialog.tsx` Z.400 |
+| #3 | IssueDialog Tab 4: Button-Wrapper mit `mt-auto pt-2` | PASS | `IssueDialog.tsx` Z.450-451 |
+| #4 | IssueDialog Tab 1: Button `bg-white text-orange-600 border border-orange-600 hover:bg-green-600 hover:text-white` | PASS | `IssueDialog.tsx` Z.291-292 |
+| #5a | `logicalStorageGroup: 'WE' \| 'KDD' \| null` in `InvoiceLine` types | PASS | `types/index.ts` Z.293 |
+| #5b | FalmecMatcher: `logicalStorageGroup` aus `matchedArticle.storageLocation` abgeleitet | PASS | `FalmecMatcher_Master.ts` Z.486-488 |
+| #5b | FalmecMatcher: Fehler-Pfade setzen `logicalStorageGroup: null` | PASS | Z.350, Z.461 |
+| #5b | ArticleMatcher: identische Logik | PASS | `ArticleMatcher.ts` Z.127-129 |
+| #5b | invoiceParserService: Initial-Parse setzt `logicalStorageGroup: null` | PASS | Z.171, Z.268 |
+| #5c | WarehouseLocations: Gruppierung nach `line.logicalStorageGroup` statt storageLocation-Text | PASS | `WarehouseLocations.tsx` Z.39-42 |
+| #6a | Neue "Pos"-Spalte (positionIndex + 1) in Detailtabelle | PASS | Z.199-203, Z.235-237 |
+| #6b | Sortierung nach positionIndex, falmecArticleNo, storageLocation | PASS | SortKey-Typ Z.21, sortLines-Funktion Z.62-78 |
+| #6c | "Pos" und "Aktueller Lagerort" Header klickbar mit ChevronUp/Down-Icons | PASS | Z.199-219, SortIcon-Komponente Z.89-94 |
+
+---
+
+### Gefundene Bugs
+
+Keine Bugs gefunden.
+
+---
+
+### Regressionstest
+
+| Pruefpunkt | Status | Anmerkung |
+|------------|--------|-----------|
+| Export-Logik bleibt auf `storageLocation` (nicht `logicalStorageGroup`) | PASS | exportService.ts unveraendert |
+| Matching-Logik (FalmecMatcher, ArticleMatcher) funktional unveraendert | PASS | Nur `logicalStorageGroup` hinzugefuegt, keine bestehende Logik geaendert |
+| IssueDialog Tab 3 und 5 durch Layout-Aenderung nicht beeintraechtigt | PASS | Tab 3 korrekt mit `flex-1 flex flex-col overflow-hidden` + `shrink-0`-Button |
+| `setGlobalConfig` synct autoStartStep4 auf aktiven Run (Z.607-620) | PASS | PROJ-44-Sync-Mechanismus intakt |
+
+---
+
+### Entscheidung
+
+**PRODUCTION READY: JA**
+
+Begruendung: Alle 6 Bugs korrekt behoben, alle 16 Verifikationspunkte bestehen. Keine neuen Bugs eingebracht. TypeScript: 0 Errors.

@@ -65,11 +65,18 @@ export default function NewRun() {
     if (!isDirectoryConfigured) setIsDirectoryConfigured(true);
 
     // Ensure folder structure (fire-and-forget, non-blocking)
-    fileSystemService.ensureFolderStructure().then(structureReady => {
-      if (!structureReady) {
-        logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
-      }
-    });
+    fileSystemService.ensureFolderStructure()
+      .then(structureReady => {
+        if (!structureReady) {
+          logService.warn('Ordnerstruktur konnte nicht verifiziert werden', { step: 'System' });
+        }
+      })
+      .catch(err => {
+        logService.info(
+          `Ordnerstruktur-Prüfung übersprungen: ${err instanceof Error ? err.message : 'Keine Berechtigung'}`,
+          { step: 'System' }
+        );
+      });
 
     // Start parsing – navigate immediately, parsing continues in background
     const parsingPromise = createNewRunWithParsing();
