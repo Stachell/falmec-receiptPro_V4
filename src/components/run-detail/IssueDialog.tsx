@@ -1,8 +1,8 @@
 /**
- * PROJ-43: IssueDialog — Tabbed Dialog for Issue Management
+ * PROJ-43 / PROJ-44-ADD-ON: IssueDialog — Tabbed Dialog for Issue Management
  *
  * Architecture:
- * - 5 vertical tabs (SettingsPopup-Pattern: 600px, bg=#D8E6E7, TabsList bg=#c9c3b6)
+ * - 5 horizontal top tabs (800px fixed height 600px, bg=#D8E6E7, border-b tab bar)
  * - Tab 1: Uebersicht — summary, affected lines, action shortcuts
  * - Tab 2: Fehlerbericht — copyable full error text
  * - Tab 3: Loesung erzwingen — checkbox line-picker + dynamic resolve actions
@@ -194,7 +194,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
 
   return (
     <Dialog open={!!issue} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[810px] w-full max-h-[85vh] flex flex-col" style={{ backgroundColor: '#D8E6E7' }}>
+      <DialogContent className="max-w-[800px] w-full h-[600px] flex flex-col" style={{ backgroundColor: '#D8E6E7' }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <SeverityBadge severity={issue.severity} />
@@ -208,29 +208,27 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          orientation="vertical"
-          className="flex gap-4 mt-2 flex-1 overflow-hidden"
+          className="flex flex-col flex-1 overflow-hidden w-full"
         >
           <TabsList
-            className="flex flex-col h-fit self-start items-start justify-start gap-0.5 p-1 w-44 shrink-0"
-            style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
+            className="flex flex-row h-10 items-center justify-start bg-[#c9c3b6] border border-border tab-bar-raised w-full p-1 gap-1 mb-4 rounded-md"
           >
-            <TabsTrigger value="overview" className="w-full text-left justify-start text-xs px-3 py-1.5">
+            <TabsTrigger value="overview" className="text-xs px-3 py-1.5 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
               Uebersicht
             </TabsTrigger>
-            <TabsTrigger value="report" className="w-full text-left justify-start text-xs px-3 py-1.5">
+            <TabsTrigger value="report" className="text-xs px-3 py-1.5 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
               Fehlerbericht
             </TabsTrigger>
-            <TabsTrigger value="resolve" className="w-full text-left justify-start text-xs px-3 py-1.5 gap-1">
+            <TabsTrigger value="resolve" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
               <AlertTriangle className="w-3 h-3" />
               Loesung erzwingen
             </TabsTrigger>
-            <TabsTrigger value="email" className="w-full text-left justify-start text-xs px-3 py-1.5 gap-1">
+            <TabsTrigger value="email" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
               <Mail className="w-3 h-3" />
               E-Mail erzeugen
             </TabsTrigger>
             {pendingIssues.length > 0 && (
-              <TabsTrigger value="pending" className="w-full text-left justify-start text-xs px-3 py-1.5 gap-1">
+              <TabsTrigger value="pending" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
                 <Clock className="w-3 h-3" />
                 Anfragen ({pendingIssues.length})
               </TabsTrigger>
@@ -238,7 +236,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           </TabsList>
 
           {/* ── Tab 1: Uebersicht ──────────────────────────────────────── */}
-          <TabsContent value="overview" className="flex-1 overflow-y-auto mt-0 space-y-3">
+          <TabsContent value="overview" className="flex-1 min-h-0 w-full overflow-y-auto outline-none mt-0 space-y-3">
             {/* Context: expectedValue vs actualValue */}
             {issue.context && (issue.context.expectedValue || issue.context.actualValue) && (
               <div className="rounded border border-border bg-white/30 p-2 text-xs space-y-0.5">
@@ -305,7 +303,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           </TabsContent>
 
           {/* ── Tab 2: Fehlerbericht ───────────────────────────────────── */}
-          <TabsContent value="report" className="flex-1 overflow-y-auto mt-0 space-y-3">
+          <TabsContent value="report" className="flex-1 min-h-0 w-full overflow-y-auto outline-none mt-0 space-y-3">
             <Label className="text-sm font-semibold">Vollstaendiger Fehlerbericht</Label>
             <pre className="text-xs font-mono bg-white/30 rounded border border-border p-2 whitespace-pre-wrap leading-relaxed max-h-[45vh] overflow-y-auto">
               {buildIssueClipboardText(issue, invoiceLines)}
@@ -328,7 +326,8 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           </TabsContent>
 
           {/* ── Tab 3: Loesung erzwingen ──────────────────────────────── */}
-          <TabsContent value="resolve" className="flex-1 flex flex-col overflow-hidden mt-0">
+          <TabsContent value="resolve" className="flex-1 min-h-0 w-full outline-none mt-0">
+            <div className="flex flex-col h-full overflow-hidden">
             <div className="flex-1 overflow-y-auto space-y-3">
               <div className="rounded border border-orange-300/60 bg-orange-50/10 p-2 text-xs text-orange-700">
                 <span className="font-semibold">Achtung:</span> Manuelle Loesungen koennen die Sage-ERP-Integritaet beeintraechtigen.
@@ -401,60 +400,66 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 Loesung anwenden
               </Button>
             </div>
+            </div>
           </TabsContent>
 
           {/* ── Tab 4: E-Mail erzeugen ────────────────────────────────── */}
-          <TabsContent value="email" className="flex-1 flex flex-col overflow-y-auto mt-0 space-y-3 h-full">
-            <Label className="text-sm font-semibold">E-Mail erzeugen</Label>
+          <TabsContent value="email" className="flex-1 min-h-0 w-full outline-none mt-0">
+            <div className="flex flex-col h-full overflow-hidden">
+            <div className="flex-1 overflow-y-auto space-y-3">
+              <Label className="text-sm font-semibold">E-Mail erzeugen</Label>
 
-            {/* Email recipient selection */}
-            {storedEmails.length > 0 && (
-              <div className="space-y-1">
-                <Label className="text-xs">Gespeicherte Adressen:</Label>
-                <Select value={selectedEmail} onValueChange={setSelectedEmail}>
-                  <SelectTrigger className="bg-white/40 text-sm h-8">
-                    <SelectValue placeholder="Empfaenger auswaehlen..." />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    {storedEmails.map(addr => (
-                      <SelectItem key={addr} value={addr}>{addr}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Email recipient selection — side by side */}
+              <div className="flex gap-3 items-end">
+                {storedEmails.length > 0 && (
+                  <div className="space-y-1 flex-1">
+                    <Label className="text-xs">Gespeicherte Adressen:</Label>
+                    <Select value={selectedEmail} onValueChange={setSelectedEmail}>
+                      <SelectTrigger className="bg-white/40 text-sm h-8">
+                        <SelectValue placeholder="Empfaenger auswaehlen..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        {storedEmails.map(addr => (
+                          <SelectItem key={addr} value={addr}>{addr}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-1 flex-1">
+                  <Label className="text-xs">
+                    {storedEmails.length > 0 ? 'Manuelle Eingabe:' : 'E-Mail-Adresse:'}
+                  </Label>
+                  <input
+                    type="email"
+                    className="w-full h-8 rounded border border-border bg-white/40 px-2 text-sm"
+                    placeholder="empfaenger@beispiel.de"
+                    value={manualEmail}
+                    onChange={e => setManualEmail(e.target.value)}
+                  />
+                </div>
               </div>
-            )}
 
-            <div className="space-y-1">
-              <Label className="text-xs">
-                {storedEmails.length > 0 ? 'Oder manuelle Eingabe:' : 'E-Mail-Adresse:'}
-              </Label>
-              <input
-                type="email"
-                className="w-full h-8 rounded border border-border bg-white/40 px-2 text-sm"
-                placeholder="empfaenger@beispiel.de"
-                value={manualEmail}
-                onChange={e => setManualEmail(e.target.value)}
-              />
-            </div>
+              <div className="rounded border border-border bg-white/20 p-2 text-xs space-y-1">
+                <p className="font-semibold text-muted-foreground">Vorschau:</p>
+                <p className="font-mono truncate">
+                  Betreff: [FALMEC-ReceiptPro] {issue.severity === 'error' ? 'Fehler' : issue.severity === 'warning' ? 'Warnung' : 'Info'}: {issue.message}
+                </p>
+                <p className="text-muted-foreground">Body: Fehlertyp, Details, betroffene Positionen (max. 10) ...</p>
+              </div>
 
-            <div className="rounded border border-border bg-white/20 p-2 text-xs space-y-1">
-              <p className="font-semibold text-muted-foreground">Vorschau:</p>
-              <p className="font-mono truncate">
-                Betreff: [FALMEC-ReceiptPro] {issue.severity === 'error' ? 'Fehler' : issue.severity === 'warning' ? 'Warnung' : 'Info'}: {issue.message}
+              <p className="text-xs text-muted-foreground">
+                Die E-Mail wird in Ihrem Standard-Mail-Programm geoeffnet. Der vollstaendige Text
+                wird zusaetzlich in die Zwischenablage kopiert. Der Issue-Status wechselt zu &bdquo;In Klaerung&ldquo;.
               </p>
-              <p className="text-muted-foreground">Body: Fehlertyp, Details, betroffene Positionen (max. 10) ...</p>
+
+              {isCopied && (
+                <p className="text-xs text-green-600">Text in Zwischenablage kopiert.</p>
+              )}
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              Die E-Mail wird in Ihrem Standard-Mail-Programm geoeffnet. Der vollstaendige Text
-              wird zusaetzlich in die Zwischenablage kopiert. Der Issue-Status wechselt zu &bdquo;In Klaerung&ldquo;.
-            </p>
-
-            {isCopied && (
-              <p className="text-xs text-green-600">Text in Zwischenablage kopiert.</p>
-            )}
-
-            <div className="mt-auto pt-2">
+            <div className="shrink-0 pt-2">
               <Button
                 onClick={handleSendMail}
                 disabled={!canSendMail}
@@ -464,11 +469,12 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 E-Mail erzeugen
               </Button>
             </div>
+            </div>
           </TabsContent>
 
           {/* ── Tab 5: Anfragen bearbeiten (nur wenn pending issues) ─── */}
           {pendingIssues.length > 0 && (
-            <TabsContent value="pending" className="flex-1 overflow-y-auto mt-0 space-y-3">
+            <TabsContent value="pending" className="flex-1 min-h-0 w-full overflow-y-auto outline-none mt-0 space-y-3">
               <Label className="text-sm font-semibold">Ausstehende Anfragen</Label>
               <div className="space-y-3">
                 {pendingIssues.map(pi => (

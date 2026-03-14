@@ -316,6 +316,7 @@ export function SettingsPopup({
   const [emailAddresses, setEmailAddresses] = useState<string[]>(getStoredEmailSlots);
   // PROJ-44-BUGFIX-R3b: Event-driven debounce (no useEffect, no stale-closure risk)
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emailSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emailAddressesRef = useRef<string[]>(emailAddresses);
   emailAddressesRef.current = emailAddresses; // kept current on every render
   const duplicateEmailIndices = useMemo(() => {
@@ -347,14 +348,26 @@ export function SettingsPopup({
     }, 500);
   };
   const handleSaveEmails = () => {
+    // Cancel any pending auto-save before manual save
+    if (autoSaveTimerRef.current !== null) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     const result = saveEmailAddresses(emailAddresses);
     if (!result.ok) {
       toast.error(result.message);
       return;
     }
+    // Sync state with normalized (trimmed) values — safe because no useEffect watches emailAddresses
+    if (result.ok) setEmailAddresses(result.addresses);
     toast.success('E-Mail-Adressen gespeichert');
     setEmailSaved(true);
-    setTimeout(() => setEmailSaved(false), 2000);
+    // Track timer in ref so it can be cancelled on dialog close
+    if (emailSavedTimerRef.current !== null) clearTimeout(emailSavedTimerRef.current);
+    emailSavedTimerRef.current = setTimeout(() => {
+      emailSavedTimerRef.current = null;
+      setEmailSaved(false);
+    }, 2000);
   };
 
   useEffect(() => {
@@ -366,10 +379,15 @@ export function SettingsPopup({
   // PROJ-39-ADDON: Load stored emails (fixed slots) when popup opens
   useEffect(() => {
     if (open) {
-      // Cancel any pending auto-save from previous session before reloading
+      // Cancel any pending timers from previous session
       if (autoSaveTimerRef.current !== null) {
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
+      }
+      if (emailSavedTimerRef.current !== null) {
+        clearTimeout(emailSavedTimerRef.current);
+        emailSavedTimerRef.current = null;
+        setEmailSaved(false);
       }
       setEmailAddresses(getStoredEmailSlots());
     }
