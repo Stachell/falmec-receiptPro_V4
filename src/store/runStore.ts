@@ -413,6 +413,12 @@ interface RunState {
   isPaused: boolean;
   /** PROJ-25: Handle for the active auto-advance timer — cleared on pause to prevent deadlock */
   autoAdvanceTimer: ReturnType<typeof setTimeout> | null;
+  /** PROJ-44: Step 4 Waiting Point — true solange Workflow vor Step 4 auf User wartet */
+  isWaitingBeforeStep4: boolean;
+  /** PROJ-44: Step 4 Waiting Point — RunId des wartenden Runs */
+  waitingStep4RunId: string | null;
+  /** PROJ-44: Step 4 Waiting Point — Steuert AlertDialog-Sichtbarkeit */
+  showStep4WaitingDialog: boolean;
 
   // Actions
   setCurrentRun: (run: Run | null) => void;
@@ -438,7 +444,7 @@ interface RunState {
   /** PROJ-20: Update ALL lines with a given positionIndex (cascading from aggregated view) */
   updatePositionLines: (positionIndex: number, updates: Partial<InvoiceLine>) => void;
   resolveIssue: (issueId: string, resolutionNote: string) => void;
-  /** PROJ-39: Mark issue as escalated (status stays 'open') */
+  /** PROJ-39/43: Mark issue as escalated (status transitions to 'pending') */
   escalateIssue: (issueId: string, recipientEmail: string) => void;
   addAuditEntry: (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) => void;
 
@@ -456,6 +462,18 @@ interface RunState {
   pauseRun: (runId: string) => void;
   /** PROJ-25: Resume a paused run — resets isPaused and re-triggers advanceToNextStep */
   resumeRun: (runId: string) => void;
+  /** PROJ-44: Step 4 Waiting Point — User waehlt STOP */
+  dismissStep4WaitingDialog: () => void;
+  /** PROJ-44: Step 4 Waiting Point — User waehlt DURCHFUEHREN */
+  proceedStep4FromWaiting: () => void;
+  /** PROJ-43: Generate / auto-resolve Step-5 issues (missing storage locations + no lines) */
+  generateStep5Issues: (runId: string) => void;
+  /** PROJ-43: Re-evaluate all open issues and generate fresh Step-5 issues */
+  refreshIssues: (runId: string) => void;
+  /** PROJ-43: Split an issue — resolve a subset of affected lines, keep rest open */
+  splitIssue: (issueId: string, resolvedLineIds: string[], resolutionNote: string) => void;
+  /** PROJ-43: Reopen a pending issue (pending → open) */
+  reopenIssue: (issueId: string) => void;
 
   // PROJ-12: Archive & abort actions
   archiveRun: (runId: string) => Promise<{ success: boolean; folderName: string }>;
@@ -542,6 +560,8 @@ export const useRunStore = create<RunState>((set, get) => ({
     blockStep2OnPriceMismatch: false,
     blockStep4OnMissingOrder: false,
     matcherProfileOverrides: undefined,
+    // PROJ-44: Step 4 Waiting Point (default: auto-start)
+    autoStartStep4: true,
   },
 
   // UI State
@@ -554,6 +574,10 @@ export const useRunStore = create<RunState>((set, get) => ({
   scrollToLineId: null,
   isPaused: false,
   autoAdvanceTimer: null,
+  // PROJ-44: Step 4 Waiting Point transient UI state
+  isWaitingBeforeStep4: false,
+  waitingStep4RunId: null,
+  showStep4WaitingDialog: false,
 
   // Actions
   setCurrentRun: (run) => set({ currentRun: run }),
@@ -580,9 +604,20 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   clearHighlightedLines: () => set({ highlightedLineIds: [], scrollToLineId: null }),
 
-  setGlobalConfig: (config) => set((state) => ({
-    globalConfig: { ...state.globalConfig, ...config }
-  })),
+  setGlobalConfig: (config) => set((state) => {
+    const newGlobalConfig = { ...state.globalConfig, ...config };
+    // PROJ-44: Sync autoStartStep4 to the currently active run so Settings changes take effect immediately
+    let newCurrentRun = state.currentRun;
+    let newRuns = state.runs;
+    if ('autoStartStep4' in config && state.currentRun) {
+      const updatedRunConfig = { ...state.currentRun.config, autoStartStep4: config.autoStartStep4 };
+      newCurrentRun = { ...state.currentRun, config: updatedRunConfig };
+      newRuns = state.runs.map(r =>
+        r.id === state.currentRun!.id ? { ...r, config: updatedRunConfig } : r
+      );
+    }
+    return { globalConfig: newGlobalConfig, currentRun: newCurrentRun, runs: newRuns };
+  }),
 
   setStepDiagnostics: (stepNo, diag) => set((state) => ({
     latestDiagnostics: { ...state.latestDiagnostics, [stepNo]: diag },
@@ -868,6 +903,25 @@ export const useRunStore = create<RunState>((set, get) => ({
 
     // ── try/finally guarantees isProcessing is ALWAYS reset ──
     try {
+      // ── Fix A: Lazy Hydration Guard — rehydrate masterDataStore when starting from memory ──
+      const articleListFile = uploadedFiles.find(f => f.type === 'articleList');
+      if (articleListFile?.file && useMasterDataStore.getState().articles.length === 0) {
+        try {
+          set({ parsingProgress: 'Stammdaten laden...' });
+          const result = await parseMasterDataFile(articleListFile.file);
+          await useMasterDataStore.getState().save(result.articles, articleListFile.name);
+          logService.info(
+            `Stammdaten rehydriert: ${result.rowCount} Artikel aus '${articleListFile.name}'`,
+            { step: 'Stammdaten' }
+          );
+        } catch (err) {
+          logService.error(
+            `Stammdaten-Rehydrierung fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+            { step: 'Stammdaten' }
+          );
+        }
+      }
+
       // Parse invoice if file is available
       if (invoiceFile?.file) {
         set({ parsingProgress: 'Lese PDF...' });
@@ -1438,9 +1492,11 @@ export const useRunStore = create<RunState>((set, get) => ({
       const { globalConfig, issues } = get();
 
       // Block leaving Step 2 when price-mismatch errors are unresolved
+      // PROJ-43: severity check removed — blockStep2OnPriceMismatch flag already expresses blocking intent.
+      // 'pending' must also block (escalated price-mismatch still needs resolution).
       if (runningStep.stepNo === 2 && globalConfig.blockStep2OnPriceMismatch) {
         const openPriceErrors = issues.filter(
-          i => i.type === 'price-mismatch' && i.status === 'open' && i.severity === 'error' && i.runId === runId,
+          i => i.type === 'price-mismatch' && (i.status === 'open' || i.status === 'pending') && i.runId === runId,
         );
         if (openPriceErrors.length > 0) {
           logService.warn(
@@ -1501,6 +1557,17 @@ export const useRunStore = create<RunState>((set, get) => ({
               const updatedRun = afterSerial.runs.find(r => r.id === runId);
               const step3 = updatedRun?.steps.find(s => s.stepNo === 3);
               if (step3 && (step3.status === 'ok' || step3.status === 'soft-fail')) {
+                // PROJ-44: Step 4 Waiting Point Guard
+                const effectiveConfig = updatedRun?.config ?? afterSerial.globalConfig;
+                if (!((effectiveConfig as typeof afterSerial.globalConfig).autoStartStep4 ?? true)) {
+                  logService.info('Step 4 Waiting Point: Workflow angehalten', { runId, step: 'System' });
+                  set({
+                    isWaitingBeforeStep4: true,
+                    waitingStep4RunId: runId,
+                    showStep4WaitingDialog: true,
+                  });
+                  return; // NICHT advanceToNextStep aufrufen
+                }
                 logService.info('Auto-Advance: Step 3 → Step 4', { runId, step: 'System' });
                 afterSerial.advanceToNextStep(runId);
               }
@@ -1688,6 +1755,8 @@ export const useRunStore = create<RunState>((set, get) => ({
 
       // PROJ-42-ADD-ON-12: Auto-complete Step 5 (Export) — Export wird via UI ausgeloest, Step auto-abschliessen
       if (nextStep.stepNo === 5) {
+        // PROJ-43: Generate Step-5 issues BEFORE auto-complete so they exist while step is still 'running'
+        get().generateStep5Issues(runId);
         const t5 = setTimeout(() => {
           if (get().isPaused) return; // PROJ-25: Guard
           const afterStep4 = get();
@@ -1931,12 +2000,17 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
-  // PROJ-39: Escalate issue — status stays 'open', only sets escalatedAt + escalatedTo
+  // PROJ-39/43: Escalate issue — status transitions to 'pending', sets escalatedAt + escalatedTo
   escalateIssue: (issueId, recipientEmail) => {
     set((state) => ({
       issues: state.issues.map(issue =>
         issue.id === issueId
-          ? { ...issue, escalatedAt: new Date().toISOString(), escalatedTo: recipientEmail }
+          ? {
+              ...issue,
+              status: 'pending' as const,
+              escalatedAt: new Date().toISOString(),
+              escalatedTo: recipientEmail,
+            }
           : issue
       ),
     }));
@@ -1964,6 +2038,10 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (autoAdvanceTimer !== null) {
       clearTimeout(autoAdvanceTimer);
       set({ autoAdvanceTimer: null });
+    }
+    // PROJ-44: Close waiting dialog if open when user pauses
+    if (get().isWaitingBeforeStep4) {
+      set({ isWaitingBeforeStep4: false, waitingStep4RunId: null, showStep4WaitingDialog: false });
     }
     set({ isPaused: true });
     get().updateRunStatus(runId, 'paused');
@@ -2184,6 +2262,203 @@ export const useRunStore = create<RunState>((set, get) => ({
       set({ autoAdvanceTimer: t4 });
     }
     // Steps 1 and 5 have no auto-execution logic to re-trigger
+  },
+
+  // PROJ-44: Dismiss Step 4 waiting dialog — user chose STOP
+  dismissStep4WaitingDialog: () => {
+    const runId = get().waitingStep4RunId;
+    set({ isWaitingBeforeStep4: false, waitingStep4RunId: null, showStep4WaitingDialog: false });
+    if (runId) {
+      logService.info('Step 4 Waiting Point: STOP', { runId, step: 'System' });
+    }
+  },
+
+  // PROJ-44: Proceed from Step 4 waiting dialog — user chose DURCHFUEHREN
+  proceedStep4FromWaiting: () => {
+    // CRITICAL: read runId BEFORE resetting state
+    const runId = get().waitingStep4RunId;
+    set({ isWaitingBeforeStep4: false, waitingStep4RunId: null, showStep4WaitingDialog: false });
+    if (runId) {
+      logService.info('Step 4 Waiting Point: DURCHFUEHREN', { runId, step: 'System' });
+      get().advanceToNextStep(runId);
+    }
+  },
+
+  // PROJ-43: Generate / auto-resolve Step-5 issues
+  generateStep5Issues: (runId) => {
+    const state = get();
+    const lines = state.invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const now = new Date().toISOString();
+
+    // Auto-resolve existing Step-5 issues first
+    let updatedIssues = state.issues.map(issue => {
+      if (issue.runId !== runId || issue.stepNo !== 5 || issue.status === 'resolved') return issue;
+
+      if (issue.type === 'missing-storage-location') {
+        const allResolved = (issue.affectedLineIds ?? []).every(id => {
+          const line = lines.find(l => l.lineId === id);
+          return line ? !!line.storageLocation : true;
+        });
+        if (allResolved) {
+          return {
+            ...issue,
+            status: 'resolved' as const,
+            resolvedAt: now,
+            resolutionNote: 'Automatisch gelöst: Lagerorte nachgetragen',
+          };
+        }
+      }
+
+      if (issue.type === 'export-no-lines' && lines.length > 0) {
+        return {
+          ...issue,
+          status: 'resolved' as const,
+          resolvedAt: now,
+          resolutionNote: 'Automatisch gelöst: Zeilen vorhanden',
+        };
+      }
+
+      return issue;
+    });
+
+    // Generate new issues for still-failing conditions (no duplicates)
+    const newIssues: Issue[] = [];
+
+    // missing-storage-location
+    const missingLocLines = lines.filter(l => !l.storageLocation);
+    if (missingLocLines.length > 0) {
+      const existingOpen = updatedIssues.find(
+        i => i.runId === runId && i.stepNo === 5 && i.type === 'missing-storage-location'
+          && (i.status === 'open' || i.status === 'pending'),
+      );
+      if (!existingOpen) {
+        newIssues.push({
+          id: `issue-${runId}-step5-missing-loc-${Date.now()}`,
+          runId,
+          severity: 'error',
+          stepNo: 5,
+          type: 'missing-storage-location',
+          message: `${missingLocLines.length} Zeile(n) ohne Lagerort`,
+          details: missingLocLines.slice(0, 15).map(l =>
+            `Pos ${l.positionIndex}: ${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`
+          ).join(', ') + (missingLocLines.length > 15 ? ` ... (+${missingLocLines.length - 15} weitere)` : ''),
+          relatedLineIds: missingLocLines.map(l => l.lineId),
+          affectedLineIds: missingLocLines.map(l => l.lineId),
+          status: 'open',
+          createdAt: now,
+          resolvedAt: null,
+          resolutionNote: null,
+        });
+      }
+    }
+
+    // export-no-lines
+    if (lines.length === 0) {
+      const existingOpen = updatedIssues.find(
+        i => i.runId === runId && i.stepNo === 5 && i.type === 'export-no-lines'
+          && (i.status === 'open' || i.status === 'pending'),
+      );
+      if (!existingOpen) {
+        newIssues.push({
+          id: `issue-${runId}-step5-no-lines-${Date.now()}`,
+          runId,
+          severity: 'error',
+          stepNo: 5,
+          type: 'export-no-lines',
+          message: 'Keine Rechnungszeilen vorhanden',
+          details: 'Der Export kann nicht durchgeführt werden, da keine Zeilen vorhanden sind.',
+          relatedLineIds: [],
+          affectedLineIds: [],
+          status: 'open',
+          createdAt: now,
+          resolvedAt: null,
+          resolutionNote: null,
+        });
+      }
+    }
+
+    if (newIssues.length > 0 || updatedIssues !== state.issues) {
+      set({ issues: [...updatedIssues, ...newIssues] });
+    }
+  },
+
+  // PROJ-43: Refresh issues — auto-resolve and re-generate Step-5 issues
+  refreshIssues: (runId) => {
+    const { invoiceLines, issues } = get();
+    const lines = invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const resolved = autoResolveIssues(issues, lines, runId);
+    if (resolved !== issues) set({ issues: resolved });
+    get().generateStep5Issues(runId);
+    logService.info('Issues aktualisiert', { runId, step: 'Issues' });
+  },
+
+  // PROJ-43: Split an issue — resolve subset of affected lines, keep rest open
+  splitIssue: (issueId, resolvedLineIds, resolutionNote) => {
+    const state = get();
+    const original = state.issues.find(i => i.id === issueId);
+    if (!original) return;
+
+    const resolvedSet = new Set(resolvedLineIds);
+    const remainingLineIds = (original.affectedLineIds ?? []).filter(id => !resolvedSet.has(id));
+    const now = new Date().toISOString();
+    const runId = original.runId ?? get().currentRun?.id ?? '';
+
+    if (remainingLineIds.length === 0) {
+      // All lines resolved — delegate to resolveIssue
+      get().resolveIssue(issueId, resolutionNote);
+      return;
+    }
+
+    // Build split-resolved clone
+    const resolvedClone: Issue = {
+      ...original,
+      id: `${issueId}-split-${Date.now()}`,
+      affectedLineIds: [...resolvedLineIds],          // COPY — only UI-display
+      relatedLineIds: [...original.relatedLineIds],   // FULL COPY from original — DO NOT CHANGE
+      status: 'resolved',
+      resolvedAt: now,
+      resolutionNote: `Teilaufloesung: ${resolutionNote}`,
+      message: `${original.message} (${resolvedLineIds.length} Positionen gelöst)`,
+    };
+
+    // Update original issue immutably
+    const updatedOriginal: Issue = {
+      ...original,
+      affectedLineIds: [...remainingLineIds],          // COPY — only UI-display
+      relatedLineIds: [...original.relatedLineIds],    // UNCHANGED — DO NOT CHANGE
+      message: `${original.message} (${remainingLineIds.length} Positionen verbleibend)`,
+    };
+
+    set((s) => ({
+      issues: s.issues.map(i => i.id === issueId ? updatedOriginal : i).concat([resolvedClone]),
+    }));
+
+    logService.info(
+      `Issue gesplittet: ${resolvedLineIds.length} Zeilen gelöst, ${remainingLineIds.length} verbleibend`,
+      { runId, step: 'Issues', details: `issueId=${issueId}` },
+    );
+    get().addAuditEntry({
+      runId,
+      action: 'splitIssue',
+      details: `issueId=${issueId}, resolved=${resolvedLineIds.length}, remaining=${remainingLineIds.length}, note=${resolutionNote}`,
+      userId: 'system',
+    });
+  },
+
+  // PROJ-43: Reopen a pending issue (pending → open)
+  reopenIssue: (issueId) => {
+    set((state) => ({
+      issues: state.issues.map(issue =>
+        issue.id === issueId
+          ? { ...issue, status: 'open' as const }
+          : issue
+      ),
+    }));
+    const runId = get().issues.find(i => i.id === issueId)?.runId ?? get().currentRun?.id;
+    if (runId) {
+      logService.info(`Issue reaktiviert: ${issueId}`, { runId, step: 'Issues' });
+      get().addAuditEntry({ runId, action: 'reopenIssue', details: `issueId=${issueId}`, userId: 'system' });
+    }
   },
 
   // PROJ-12 / PROJ-27-ADDON-2: Write archive package to disk
@@ -2921,6 +3196,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           serialRequired: matched.serialRequired,
           activeFlag: matched.activeFlag,
           storageLocation: matched.storageLocation,
+          logicalStorageGroup: matched.logicalStorageGroup,
           priceCheckStatus: matched.priceCheckStatus,
           unitPriceFinal: matched.unitPriceFinal,
         };
@@ -2964,6 +3240,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             `Pos ${l.positionIndex}: ${l.unitPriceInvoice.toFixed(2)}€ vs ${(l.unitPriceSage ?? 0).toFixed(2)}€`
           ).join(', ') + (uniquePriceMismatch.length > 15 ? ` ... (+${uniquePriceMismatch.length - 15} weitere)` : ''),
           relatedLineIds: priceMismatchLines.map(l => l.lineId),
+          // PROJ-43 Bug-Fix: affectedLineIds was missing
+          affectedLineIds: priceMismatchLines.map(l => l.lineId),
           status: 'open',
           createdAt: now21,
           resolvedAt: null,
@@ -2992,6 +3270,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             `Pos ${l.positionIndex}: ${l.falmecArticleNo ?? l.manufacturerArticleNo}`
           ).join(', ') + (uniqueInactive.length > 15 ? ` ... (+${uniqueInactive.length - 15} weitere)` : ''),
           relatedLineIds: inactiveLines.map(l => l.lineId),
+          // PROJ-43 Bug-Fix: affectedLineIds was missing
+          affectedLineIds: inactiveLines.map(l => l.lineId),
           status: 'open',
           createdAt: now21,
           resolvedAt: null,

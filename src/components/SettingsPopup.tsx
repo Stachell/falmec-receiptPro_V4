@@ -312,9 +312,9 @@ export function SettingsPopup({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // PROJ-39-ADDON: Fehlerhandling email addresses (10 fixed slots)
-  const [emailAddresses, setEmailAddresses] = useState<string[]>(
-    Array.from({ length: ERROR_HANDLING_EMAIL_SLOT_COUNT }, () => ''),
-  );
+  const [emailSaved, setEmailSaved] = useState(false);
+  const isInitialMountRef = useRef(true);
+  const [emailAddresses, setEmailAddresses] = useState<string[]>(getStoredEmailSlots);
   const duplicateEmailIndices = useMemo(() => {
     const duplicateMap = new Map<string, number[]>();
     emailAddresses.forEach((entry, index) => {
@@ -345,6 +345,8 @@ export function SettingsPopup({
     }
     setEmailAddresses(result.addresses);
     toast.success('E-Mail-Adressen gespeichert');
+    setEmailSaved(true);
+    setTimeout(() => setEmailSaved(false), 2000);
   };
 
   useEffect(() => {
@@ -359,6 +361,18 @@ export function SettingsPopup({
       setEmailAddresses(getStoredEmailSlots());
     }
   }, [open]);
+
+  // PROJ-44-BUGFIX-R2: Debounced auto-save (500ms, skips initial mount)
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      saveEmailAddresses(emailAddresses);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [emailAddresses]);
 
   // PROJ-27 ADD-ON: Diagnostics laden wenn Dialog öffnet
   useEffect(() => {
@@ -963,6 +977,23 @@ export function SettingsPopup({
                   </div>
                 </div>
 
+                {/* PROJ-44: Step 4 Waiting Point */}
+                <div className="border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                      <img src="/icons/Lock_CLOSE_STEP4.ico" alt="Lock" className="w-5 h-5" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <Label className="text-sm whitespace-nowrap">Artikelliste mit Step 4 ausrollen?</Label>
+                    </div>
+                    <Switch
+                      checked={globalConfig.autoStartStep4 ?? true}
+                      onCheckedChange={(checked) => setGlobalConfig({ autoStartStep4: checked })}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Aus: Workflow haelt vor Step 4 an — Bestaetigungsdialog erscheint
+                  </p>
+                </div>
+
               </TabsContent>
 
               {/* Tab 3: Fehlerhandling */}
@@ -992,7 +1023,16 @@ export function SettingsPopup({
                   ))}
 
                   <div className="flex items-center gap-3">
-                    <Button size="sm" onClick={handleSaveEmails}>Speichern</Button>
+                    <Button size="sm" onClick={handleSaveEmails} className="gap-1.5 min-w-[110px]">
+                      {emailSaved ? (
+                        <>
+                          <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                          Gespeichert!
+                        </>
+                      ) : (
+                        'Speichern'
+                      )}
+                    </Button>
                     <p className="text-xs text-muted-foreground">
                       Gespeicherte Adressen erscheinen im Fehler-Popup als Empfaenger.
                     </p>

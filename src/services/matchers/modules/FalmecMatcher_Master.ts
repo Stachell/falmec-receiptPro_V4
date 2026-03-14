@@ -347,6 +347,7 @@ export class FalmecMatcher_Master implements MatcherModule {
           serialRequired: false,
           activeFlag: true,
           storageLocation: null,
+          logicalStorageGroup: null,
           supplierId: null,
           priceCheckStatus: 'missing',
           unitPriceFinal: null,
@@ -457,6 +458,7 @@ export class FalmecMatcher_Master implements MatcherModule {
           serialRequired: false,
           activeFlag: true,
           storageLocation: null,
+          logicalStorageGroup: null,
           supplierId: null,
           priceCheckStatus: 'missing',
           unitPriceFinal: null,
@@ -481,6 +483,9 @@ export class FalmecMatcher_Master implements MatcherModule {
         serialRequired: matchedArticle.serialRequirement ?? false,
         activeFlag: matchedArticle.activeFlag ?? true,
         storageLocation: matchedArticle.storageLocation ?? null,
+        logicalStorageGroup: matchedArticle.storageLocation
+          ? (matchedArticle.storageLocation.includes('KDD') ? 'KDD' : 'WE')
+          : null,
         supplierId: matchedArticle.supplierId ?? null,
         priceCheckStatus,
         unitPriceFinal: priceCheckStatus === 'ok' ? invoicePrice : null,

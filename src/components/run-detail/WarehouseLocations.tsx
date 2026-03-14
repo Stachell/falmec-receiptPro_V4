@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Warehouse, Edit2, Save, X, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { Warehouse, Edit2, Save, ChevronsDown, ChevronsUp, ChevronUp, ChevronDown } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
-import { STORAGE_LOCATIONS, StorageLocation } from '@/types';
+import { STORAGE_LOCATIONS, StorageLocation, InvoiceLine } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -18,6 +18,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
+type SortKey = 'positionIndex' | 'falmecArticleNo' | 'storageLocation';
+type SortDir = 'asc' | 'desc';
+
 export function WarehouseLocations() {
   const { invoiceLines: allInvoiceLines, updateInvoiceLine, currentRun } = useRunStore();
   // HOTFIX-1: Filter lines to current run only
@@ -28,19 +31,14 @@ export function WarehouseLocations() {
   const [globalWE, setGlobalWE] = useState<StorageLocation>('WE Lager;0;0;0');
   const [globalKDD, setGlobalKDD] = useState<StorageLocation>('WE KDD;0;0;0');
   const [expandedDetails, setExpandedDetails] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('positionIndex');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
-  // Group items by storage location category
+  // Bug #5: Group by logicalStorageGroup (immutable, set at match time) instead of storageLocation text
   const { weLagerItems, kddItems, otherItems } = useMemo(() => {
-    const weLager = invoiceLines.filter(line => 
-      line.storageLocation?.startsWith('WE Lager') || 
-      (!line.storageLocation?.includes('KDD') && line.storageLocation?.startsWith('WE'))
-    );
-    const kdd = invoiceLines.filter(line => 
-      line.storageLocation?.includes('KDD')
-    );
-    const other = invoiceLines.filter(line => 
-      !line.storageLocation?.startsWith('WE') || line.storageLocation?.startsWith('LKW')
-    );
+    const weLager = invoiceLines.filter(line => line.logicalStorageGroup === 'WE');
+    const kdd = invoiceLines.filter(line => line.logicalStorageGroup === 'KDD');
+    const other = invoiceLines.filter(line => !line.logicalStorageGroup);
     return { weLagerItems: weLager, kddItems: kdd, otherItems: other };
   }, [invoiceLines]);
 
@@ -59,6 +57,44 @@ export function WarehouseLocations() {
   };
 
   const missingLocationItems = invoiceLines.filter(line => !line.storageLocation);
+
+  // Bug #6: Sorting helper — DRY: one function used for all 3 groups
+  const sortLines = (lines: InvoiceLine[]): InvoiceLine[] => {
+    return [...lines].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'positionIndex') {
+        cmp = (a.positionIndex ?? 0) - (b.positionIndex ?? 0);
+      } else if (sortKey === 'falmecArticleNo') {
+        const aVal = a.falmecArticleNo ?? '';
+        const bVal = b.falmecArticleNo ?? '';
+        cmp = aVal.localeCompare(bVal, 'de', { numeric: true });
+      } else {
+        const aVal = a.storageLocation ?? '';
+        const bVal = b.storageLocation ?? '';
+        cmp = aVal.localeCompare(bVal, 'de');
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  };
+
+  const handleSortClick = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return null;
+    return sortDir === 'asc'
+      ? <ChevronUp className="inline w-3 h-3 ml-0.5" />
+      : <ChevronDown className="inline w-3 h-3 ml-0.5" />;
+  };
+
+  // Sorted detail table — all lines sorted together
+  const sortedAll = sortLines(invoiceLines);
 
   return (
     <div className="space-y-6">
@@ -129,9 +165,9 @@ export function WarehouseLocations() {
       <div className="enterprise-card">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h3 className="font-semibold text-foreground">Lagerort-Details</h3>
-          <Button 
-            variant={editMode ? "default" : "outline"} 
-            size="sm" 
+          <Button
+            variant={editMode ? "default" : "outline"}
+            size="sm"
             className="gap-2"
             onClick={() => setEditMode(!editMode)}
           >
@@ -159,10 +195,29 @@ export function WarehouseLocations() {
           <table className="w-full caption-bottom text-sm">
             <TableHeader className="bg-[hsl(var(--surface-sunken))]">
               <TableRow className="data-table-header">
-                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Artikelnummer</TableHead>
+                {/* Bug #6: POS-NR column — clickable for sorting */}
+                <TableHead
+                  className={`cursor-pointer select-none ${expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}
+                  onClick={() => handleSortClick('positionIndex')}
+                >
+                  Pos <SortIcon col="positionIndex" />
+                </TableHead>
+                <TableHead
+                  className={`cursor-pointer select-none ${expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}
+                  onClick={() => handleSortClick('falmecArticleNo')}
+                >
+                  Artikelnr. <SortIcon col="falmecArticleNo" />
+                </TableHead>
+                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Herstellerartikelnr.</TableHead>
                 <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Beschreibung</TableHead>
                 <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Menge</TableHead>
-                <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>Aktueller Lagerort</TableHead>
+                {/* Bug #6: Lagerort header — clickable for sorting */}
+                <TableHead
+                  className={`cursor-pointer select-none ${expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}`}
+                  onClick={() => handleSortClick('storageLocation')}
+                >
+                  Aktueller Lagerort <SortIcon col="storageLocation" />
+                </TableHead>
                 {editMode && (
                   <TableHead className={expandedDetails ? 'bg-[hsl(var(--surface-sunken))]' : 'sticky top-0 z-20 bg-[hsl(var(--surface-sunken))]'}>
                     Neuer Lagerort
@@ -171,17 +226,24 @@ export function WarehouseLocations() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invoiceLines.map((line) => (
+              {sortedAll.map((line) => (
                 <TableRow
                   key={line.lineId}
                   className={`hover:bg-muted/30 ${!line.storageLocation ? 'bg-status-failed/5' : ''}`}
                 >
+                  {/* Bug #6: POS-NR cell */}
+                  <TableCell>
+                    <span className="font-mono text-xs text-muted-foreground">{line.positionIndex + 1}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-mono text-sm">{line.falmecArticleNo ?? '—'}</span>
+                  </TableCell>
                   <TableCell>
                     <span className="font-mono text-sm">{line.manufacturerArticleNo}</span>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm truncate max-w-[200px] block">
-                      {line.descriptionIT}
+                      {line.descriptionDE ?? line.descriptionIT}
                     </span>
                   </TableCell>
                   <TableCell>

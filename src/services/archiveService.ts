@@ -137,7 +137,16 @@ class ArchiveService {
     run: Run,
     uploadedFiles: { type: string; file: File; name: string }[],
     config: RunConfig
-  ): Promise<{ success: boolean; folderName: string }> {
+  ): Promise<{ success: boolean; folderName: string; reason?: string }> {
+    // PRE-FLIGHT: Dateisystem-Handle vorhanden? (nach Reload: null)
+    if (!fileSystemService.hasWriteAccess()) {
+      logService.info(
+        'Early Archive übersprungen: Keine Dateisystem-Rechte (Seite wurde neu geladen)',
+        { runId: run.id, step: 'Archiv' }
+      );
+      return { success: false, folderName: '', reason: 'no_permission' };
+    }
+
     const runId = run.id;
 
     const folderName = await this.generateArchiveFolderName(
@@ -291,6 +300,8 @@ class ArchiveService {
         summary: {
           totalIssues: runIssues.length,
           openIssues: runIssues.filter(i => i.status === 'open').length,
+          // PROJ-43: pendingIssues — escalated, awaiting external response
+          pendingIssues: runIssues.filter(i => i.status === 'pending').length,
           resolvedIssues: runIssues.filter(i => i.status === 'resolved').length,
           bySeverity: {
             error: runIssues.filter(i => i.severity === 'error').length,
@@ -683,6 +694,8 @@ class ArchiveService {
         summary: {
           totalIssues: runIssues.length,
           openIssues: runIssues.filter(i => i.status === 'open').length,
+          // PROJ-43: pendingIssues — escalated, awaiting external response
+          pendingIssues: runIssues.filter(i => i.status === 'pending').length,
           resolvedIssues: runIssues.filter(i => i.status === 'resolved').length,
           bySeverity: {
             error: runIssues.filter(i => i.severity === 'error').length,

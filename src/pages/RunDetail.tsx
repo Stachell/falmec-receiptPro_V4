@@ -2,6 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, Download, FileWarning, RefreshCw, Play, Pause, CheckCircle, CheckCircle2, AlertCircle, Loader2, Fingerprint } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import lockClosedIcon from '@/assets/icons/Lock_CLOSE_STEP4.ico';
+import lockOpenIcon from '@/assets/icons/Lock_OPEN_STEP4.ico';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AppLayout } from '@/components/AppLayout';
 import { WorkflowStepper } from '@/components/WorkflowStepper';
@@ -66,6 +79,12 @@ export default function RunDetail() {
     addAuditEntry,
     setBookingDate,
     incrementExportVersion,
+    // PROJ-44: Step 4 Waiting Point
+    showStep4WaitingDialog,
+    dismissStep4WaitingDialog,
+    proceedStep4FromWaiting,
+    globalConfig,
+    setGlobalConfig,
   } = useRunStore();
   // Make getState available for fire-and-forget pattern
   const getStoreState = useRunStore.getState;
@@ -239,11 +258,17 @@ export default function RunDetail() {
   const allTilesVerified = isKachel1Verified && isKachel2Verified && isKachel3Verified
                           && isKachel4Verified && isKachel5Verified;
 
+  // PROJ-44: Step 4 Waiting Point derived values
+  const step4Status = currentRun?.steps.find(s => s.stepNo === 4)?.status;
+  const isStep4Complete = step4Status === 'ok' || step4Status === 'soft-fail';
+  const autoStartStep4 = currentRun?.config?.autoStartStep4 ?? globalConfig.autoStartStep4 ?? true;
+
   // PROJ-42: isExportReady — Toolbar-Button-Bedingung
   const isExportReady = useMemo(() => {
     if (!currentRun) return false;
     const runIssues = issues.filter(i => !i.runId || i.runId === currentRun.id);
-    const blocking = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
+    // PROJ-43: 'pending' issues (escalated) also block export — they are still unresolved
+    const blocking = runIssues.filter(i => (i.status === 'open' || i.status === 'pending') && i.severity === 'error');
     const missingLoc = currentRunLines.filter(l => !l.storageLocation);
     return blocking.length === 0 && missingLoc.length === 0 && currentRunLines.length > 0;
   }, [currentRun, issues, currentRunLines]);
@@ -610,6 +635,22 @@ export default function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* PROJ-44: Step 4 Waiting Point — Lock Icon + Switch */}
+            <div className="flex items-center gap-1.5 mr-2">
+              <img
+                src={isStep4Complete ? lockOpenIcon : lockClosedIcon}
+                alt={isStep4Complete ? 'Artikelliste freigegeben' : 'Artikelliste gesperrt'}
+                className="w-5 h-5"
+              />
+              <Switch
+                checked={autoStartStep4}
+                onCheckedChange={(checked) => {
+                  setGlobalConfig({ autoStartStep4: checked });
+                }}
+                className="scale-75"
+              />
+            </div>
+
             {/* PROJ-25: Pause/Fortfahren-Button — immer sichtbar, disabled wenn Run nicht läuft */}
             <Button
               variant="outline"
@@ -957,6 +998,26 @@ export default function RunDetail() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* PROJ-44: Step 4 Waiting Point — AlertDialog */}
+      <AlertDialog
+        open={showStep4WaitingDialog}
+        onOpenChange={(open) => { if (!open) dismissStep4WaitingDialog(); }}
+      >
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Beleg zuordnen</AlertDialogTitle>
+            <AlertDialogDescription>
+              Moechten Sie den Schritt Beleg zuordnen ausfuehren oder moechten Sie den
+              Workflow anhalten um Aenderungen z.B. in den Rechnungspositionen durchzufuehren?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => dismissStep4WaitingDialog()}>STOP</AlertDialogCancel>
+            <AlertDialogAction onClick={() => proceedStep4FromWaiting()}>DURCHFUEHREN</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

@@ -30,6 +30,7 @@ export interface ArticleMatchResult {
   serialRequired: boolean;
   activeFlag: boolean;
   storageLocation: string | null;
+  logicalStorageGroup: 'WE' | 'KDD' | null;
   supplierId: string | null;
   priceCheckStatus: PriceCheckStatus;
   unitPriceFinal: number | null;
@@ -44,6 +45,7 @@ const NO_MATCH_RESULT: ArticleMatchResult = {
   serialRequired: false,
   activeFlag: true,
   storageLocation: null,
+  logicalStorageGroup: null,
   supplierId: null,
   priceCheckStatus: 'missing',
   unitPriceFinal: null,
@@ -122,6 +124,9 @@ export function matchArticle(
     serialRequired: matchedArticle?.serialRequirement ?? false,
     activeFlag: matchedArticle?.activeFlag ?? true,
     storageLocation: matchedArticle?.storageLocation ?? null,
+    logicalStorageGroup: matchedArticle?.storageLocation
+      ? (matchedArticle.storageLocation.includes('KDD') ? 'KDD' : 'WE')
+      : null,
     supplierId: null, // comes from OpenWE, not ArticleMaster
     priceCheckStatus,
     unitPriceFinal: priceCheckStatus === 'ok' ? invoicePrice : null,

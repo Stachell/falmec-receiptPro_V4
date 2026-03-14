@@ -34,7 +34,8 @@ export function ExportPanel({ run }: ExportPanelProps) {
   }, [expandedXml]);
 
   const runIssues = issues.filter(i => !i.runId || i.runId === run.id);
-  const openBlockingIssues = runIssues.filter(i => i.status === 'open' && i.severity === 'error');
+  // PROJ-43: 'pending' issues (escalated) also block export — they are still unresolved
+  const openBlockingIssues = runIssues.filter(i => (i.status === 'open' || i.status === 'pending') && i.severity === 'error');
   const missingLocations = invoiceLines.filter(line => !line.storageLocation);
   const isExportReady = openBlockingIssues.length === 0 && missingLocations.length === 0 && invoiceLines.length > 0;
 

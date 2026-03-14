@@ -30,7 +30,9 @@ export type IssueType =
   // PROJ-23 ADDON: Pool-empty guard
   | 'pool-empty-mismatch'
   // PROJ-40 ADD-ON: Per-line supplier validation
-  | 'supplier-missing';
+  | 'supplier-missing'
+  // PROJ-43: Step 5 export issues
+  | 'export-no-lines';
 
 export type MatchStatus =
   | 'pending'
@@ -162,6 +164,8 @@ export interface RunConfig {
   blockStep4OnMissingOrder: boolean;  // Default: false
   // PROJ-28: Matcher override config (Step 2)
   matcherProfileOverrides?: MatcherProfileOverrides;
+  // PROJ-44: Step 4 Waiting Point — true = Auto-Start (Default), false = Stopp vor Step 4
+  autoStartStep4: boolean;
 }
 
 export interface RunStats {
@@ -285,6 +289,8 @@ export interface InvoiceLine {
   falmecArticleNo: string | null;
   descriptionDE: string | null;
   storageLocation: string | null;
+  /** Unveraenderliche Lagerort-Gruppe, gesetzt beim Matching. Nur fuer UI-Filtering. */
+  logicalStorageGroup: 'WE' | 'KDD' | null;
   unitPriceSage: number | null;
   activeFlag: boolean;
   priceCheckStatus: PriceCheckStatus;
@@ -365,7 +371,8 @@ export interface Issue {
   details: string;
   relatedLineIds: string[];          // PROJ-21: for jump-link navigation + auto-resolve — DO NOT CHANGE
   affectedLineIds: string[];         // PROJ-37: descriptive list for UI rendering only
-  status: 'open' | 'resolved';
+  // PROJ-43: 'pending' added — escalated issues awaiting external response
+  status: 'open' | 'pending' | 'resolved';
   createdAt: string;
   resolvedAt: string | null;
   resolutionNote: string | null;
@@ -376,7 +383,7 @@ export interface Issue {
     expectedValue?: string;        // Expected value (for auto-resolve check)
     actualValue?: string;          // Current value
   };
-  // PROJ-39: Escalation fields — KISS: status stays 'open' | 'resolved', no new enum value
+  // PROJ-39: Escalation fields (PROJ-43: escalateIssue now sets status to 'pending')
   escalatedAt?: string;            // ISO timestamp when issue was escalated (optional)
   escalatedTo?: string;            // Recipient email address (optional)
 }
