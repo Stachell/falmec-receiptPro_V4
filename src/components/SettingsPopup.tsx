@@ -313,8 +313,11 @@ export function SettingsPopup({
 
   // PROJ-39-ADDON: Fehlerhandling email addresses (10 fixed slots)
   const [emailSaved, setEmailSaved] = useState(false);
-  const isInitialMountRef = useRef(true);
   const [emailAddresses, setEmailAddresses] = useState<string[]>(getStoredEmailSlots);
+  // PROJ-44-BUGFIX-R3b: Event-driven debounce (no useEffect, no stale-closure risk)
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emailAddressesRef = useRef<string[]>(emailAddresses);
+  emailAddressesRef.current = emailAddresses; // kept current on every render
   const duplicateEmailIndices = useMemo(() => {
     const duplicateMap = new Map<string, number[]>();
     emailAddresses.forEach((entry, index) => {
@@ -336,6 +339,12 @@ export function SettingsPopup({
       next[index] = value;
       return next;
     });
+    // Debounced auto-save — only fired by user input, never by state reloads
+    if (autoSaveTimerRef.current !== null) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      saveEmailAddresses(emailAddressesRef.current);
+    }, 500);
   };
   const handleSaveEmails = () => {
     const result = saveEmailAddresses(emailAddresses);
@@ -343,7 +352,6 @@ export function SettingsPopup({
       toast.error(result.message);
       return;
     }
-    setEmailAddresses(result.addresses);
     toast.success('E-Mail-Adressen gespeichert');
     setEmailSaved(true);
     setTimeout(() => setEmailSaved(false), 2000);
@@ -358,21 +366,14 @@ export function SettingsPopup({
   // PROJ-39-ADDON: Load stored emails (fixed slots) when popup opens
   useEffect(() => {
     if (open) {
+      // Cancel any pending auto-save from previous session before reloading
+      if (autoSaveTimerRef.current !== null) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
       setEmailAddresses(getStoredEmailSlots());
     }
   }, [open]);
-
-  // PROJ-44-BUGFIX-R2: Debounced auto-save (500ms, skips initial mount)
-  useEffect(() => {
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      return;
-    }
-    const timer = setTimeout(() => {
-      saveEmailAddresses(emailAddresses);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [emailAddresses]);
 
   // PROJ-27 ADD-ON: Diagnostics laden wenn Dialog öffnet
   useEffect(() => {
@@ -795,7 +796,7 @@ export function SettingsPopup({
             className="flex gap-4 mt-2 h-[65vh] max-h-[800px]"
           >
             <TabsList
-              className="flex flex-col h-auto items-start justify-start gap-0.5 p-1 w-44 shrink-0"
+              className="flex flex-col h-fit self-start items-start justify-start gap-0.5 p-1 w-44 shrink-0"
               style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
             >
               <TabsTrigger value="general"     className="w-full justify-start text-left text-sm px-3 py-2">Allgemein</TabsTrigger>

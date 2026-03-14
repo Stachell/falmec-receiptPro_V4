@@ -10,7 +10,7 @@
  * - Tab 5: Anfragen — only visible when pending issues exist
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -129,7 +129,14 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
     : allInvoiceLines;
 
-  const storedEmails = useMemo(() => getStoredEmailAddresses(), []);
+  const [storedEmails, setStoredEmails] = useState<string[]>([]);
+
+  // PROJ-44-BUGFIX-R3: Load stored emails when dialog opens (useMemo with [] never updated after mount)
+  useEffect(() => {
+    if (issue) {
+      setStoredEmails(getStoredEmailAddresses());
+    }
+  }, [issue]);
 
   // PROJ-43: Pending issues for Tab 5
   const pendingIssues = useMemo(
@@ -205,7 +212,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           className="flex gap-4 mt-2 flex-1 overflow-hidden"
         >
           <TabsList
-            className="flex flex-col h-auto items-start justify-start gap-0.5 p-1 w-44 shrink-0"
+            className="flex flex-col h-fit self-start items-start justify-start gap-0.5 p-1 w-44 shrink-0"
             style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
           >
             <TabsTrigger value="overview" className="w-full text-left justify-start text-xs px-3 py-1.5">

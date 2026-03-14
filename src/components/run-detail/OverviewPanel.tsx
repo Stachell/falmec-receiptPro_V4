@@ -1,7 +1,7 @@
 import { Run } from '@/types';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { FileText, Calendar, Settings2, Package, Layers, FolderOpen } from 'lucide-react';
+import { Calendar, Eye, FileText, FolderOpen, Layers, Package, Settings2 } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
 
@@ -10,8 +10,16 @@ interface OverviewPanelProps {
 }
 
 export function OverviewPanel({ run }: OverviewPanelProps) {
-  const { parsedInvoiceResult } = useRunStore();
+  const { parsedInvoiceResult, uploadedFiles } = useRunStore();
   const invoiceTotal = run.invoice.invoiceTotal ?? parsedInvoiceResult?.header.invoiceTotal ?? null;
+
+  const invoiceFile = uploadedFiles.find(f => f.type === 'invoice');
+  const openWEFile  = uploadedFiles.find(f => f.type === 'openWE');
+  const openFileInNewTab = (file: File) => {
+    const url = URL.createObjectURL(file);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -127,27 +135,63 @@ export function OverviewPanel({ run }: OverviewPanelProps) {
         </dl>
       </div>
 
-      {/* LINK — Archiv-Ordner öffnen */}
+      {/* LINK — Dokumente & Archiv */}
       <div className="enterprise-card p-6 lg:col-span-3">
         <h3 className="font-semibold text-foreground mb-3">LINK</h3>
-        <Button
-          variant="outline"
-          style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
-          onClick={() => {
-            const subfolder = run.archivePath;
-            const url = subfolder
-              ? `/api/dev/open-folder?subfolder=${encodeURIComponent(subfolder)}`
-              : '/api/dev/open-folder';
-            fetch(url);
-          }}
-        >
-          <FolderOpen className="w-4 h-4 mr-2" />
-          Öffnet die Original-Rechnung
-        </Button>
-        <p className="text-xs text-muted-foreground mt-2">
-          Öffnet den Archiv-Ordner im Windows Explorer
-          {run.archivePath ? ` (${run.archivePath})` : ''}
-        </p>
+
+        {/* --- Button 1: Original-Rechnung --- */}
+        <div>
+          <Button
+            variant="outline"
+            style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+            disabled={!invoiceFile}
+            onClick={() => invoiceFile && openFileInNewTab(invoiceFile.file)}
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            Original-Rechnung öffnen
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Öffnet die Original-Rechnung im Browser
+          </p>
+        </div>
+
+        {/* --- Button 2: Warenbegleitschein --- */}
+        <div className="mt-3">
+          <Button
+            variant="outline"
+            style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+            disabled={!openWEFile}
+            onClick={() => openWEFile && openFileInNewTab(openWEFile.file)}
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            Warenbegleitschein öffnen
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Öffnet den Lieferschein im Browser
+          </p>
+        </div>
+
+        {/* --- Button 3: Archiv im Explorer --- */}
+        <div className="mt-3">
+          <Button
+            variant="outline"
+            style={{ backgroundColor: '#c9c3b6', borderColor: '#666666', color: '#666666' }}
+            onClick={() => {
+              const subfolder = run.archivePath;
+              const url = subfolder
+                ? `/api/dev/open-folder?subfolder=${encodeURIComponent(subfolder)}`
+                : '/api/dev/open-folder';
+              fetch(url);
+            }}
+          >
+            <FolderOpen className="w-4 h-4 mr-2" />
+            Archiv im Explorer öffnen
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Öffnet den Archiv-Ordner im Windows Explorer
+            {run.archivePath ? ` (${run.archivePath})` : ''}
+          </p>
+        </div>
       </div>
     </div>
   );

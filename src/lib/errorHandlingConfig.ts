@@ -19,7 +19,7 @@ export type SaveEmailAddressesResult =
     }
   | {
       ok: false;
-      code: 'invalid_email' | 'duplicate_email';
+      code: 'invalid_email' | 'duplicate_email' | 'storage_error';
       message: string;
       indices: number[];
     };
@@ -110,7 +110,16 @@ export function saveEmailAddresses(addresses: string[]): SaveEmailAddressesResul
     addresses: slots,
     savedAt: new Date().toISOString(),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    return {
+      ok: false,
+      code: 'storage_error',
+      message: 'Speichern fehlgeschlagen — localStorage nicht verfuegbar oder voll.',
+      indices: [],
+    };
+  }
   return { ok: true, addresses: slots };
 }
 
