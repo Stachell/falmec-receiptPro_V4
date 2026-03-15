@@ -15,7 +15,7 @@ import {
   RefreshCw,
   Send,
 } from 'lucide-react';
-import { useRunStore } from '@/store/runStore';
+import { useRunStore, resolveIssueLines } from '@/store/runStore';
 import { SeverityBadge } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { IssueDialog } from './IssueDialog';
+import { PriceCell } from './PriceCell';
 import type { Issue, IssueType, InvoiceLine } from '@/types';
 import {
   formatLineForDisplay,
@@ -127,23 +128,23 @@ interface IssueCardProps {
   onSend: (issue: Issue) => void;
   onIsolate: (ids: string[]) => void;
   onEdit?: (issue: Issue) => void;
+  // PROJ-45:
+  isExpanded?: boolean;
+  onBulkSetPrice?: (positionIndex: number, price: number) => void;
 }
 
-function IssueCard({ issue, invoiceLines, onSend, onIsolate, onEdit }: IssueCardProps) {
+function IssueCard({ issue, invoiceLines, onSend, onIsolate, onEdit, isExpanded, onBulkSetPrice }: IssueCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { isCopied, copy } = useCopyToClipboard(1500);
 
   const isEscalated = !!issue.escalatedAt;
   const isPending = issue.status === 'pending';
 
-  // On-the-fly rendering: look up InvoiceLines for affectedLineIds
-  const affectedLines = useMemo(() => {
-    if (!issue.affectedLineIds || issue.affectedLineIds.length === 0) return [];
-    const lineMap = new Map(invoiceLines.map(l => [l.lineId, l]));
-    return issue.affectedLineIds
-      .map(id => lineMap.get(id))
-      .filter((l): l is InvoiceLine => l != null);
-  }, [issue.affectedLineIds, invoiceLines]);
+  // PROJ-45: Zentraler Resolver — dedupliziert für UI-Anzeige
+  const affectedLines = useMemo(
+    () => resolveIssueLines(issue.affectedLineIds ?? [], invoiceLines, true),
+    [issue.affectedLineIds, invoiceLines],
+  );
 
   const displayLines = affectedLines.slice(0, BODY_LINE_LIMIT);
   const overflow = affectedLines.length - BODY_LINE_LIMIT;
@@ -199,6 +200,19 @@ function IssueCard({ issue, invoiceLines, onSend, onIsolate, onEdit }: IssueCard
 
         {/* Right: action buttons */}
         <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
+          {/* PROJ-45: PriceCell nur für nächste unfixierte Mismatch-Position */}
+          {issue.type === 'price-mismatch' && isExpanded && (() => {
+            const mismatchLine = affectedLines.find(l => l.priceCheckStatus === 'mismatch');
+            if (!mismatchLine) return null;
+            return (
+              <PriceCell
+                line={mismatchLine}
+                onSetPrice={(_lineId, price) => {
+                  onBulkSetPrice?.(mismatchLine.positionIndex, price);
+                }}
+              />
+            );
+          })()}
           {/* Betroffene Zeilen isolieren */}
           {issue.affectedLineIds && issue.affectedLineIds.length > 0 && (
             <Button
@@ -317,6 +331,7 @@ export function IssuesCenter() {
     invoiceLines: allInvoiceLines,
     setActiveIssueFilterIds,
     setActiveTab,
+    setManualPriceByPosition,
   } = useRunStore();
 
   // Sync store-driven filter (from KPI-click navigation) into local state
@@ -405,7 +420,10 @@ export function IssuesCenter() {
 
   // "Betroffene Zeilen isolieren" — sets filter + switches to items tab
   const handleIsolate = (ids: string[]) => {
-    setActiveIssueFilterIds(ids);
+    // PROJ-45: IDs via Resolver auflösen (ohne Dedup — alle expandierten Zeilen für Filter)
+    const resolved = resolveIssueLines(ids, invoiceLines, false);
+    const filterIds = resolved.length > 0 ? resolved.map(l => l.lineId) : ids;
+    setActiveIssueFilterIds(filterIds);
     setActiveTab('items');
   };
 
@@ -576,6 +594,10 @@ export function IssuesCenter() {
                       onSend={setSelectedIssue}
                       onIsolate={handleIsolate}
                       onEdit={setSelectedIssue}
+                      isExpanded={currentRun?.isExpanded ?? false}
+                      onBulkSetPrice={(positionIndex, price) => {
+                        if (currentRun) setManualPriceByPosition(positionIndex, price, currentRun.id);
+                      }}
                     />
                   ))}
                 </div>
@@ -599,6 +621,10 @@ export function IssuesCenter() {
                     onSend={setSelectedIssue}
                     onIsolate={handleIsolate}
                     onEdit={setSelectedIssue}
+                    isExpanded={currentRun?.isExpanded ?? false}
+                    onBulkSetPrice={(positionIndex, price) => {
+                      if (currentRun) setManualPriceByPosition(positionIndex, price, currentRun.id);
+                    }}
                   />
                 ))}
               </div>

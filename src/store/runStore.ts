@@ -192,6 +192,52 @@ function buildStep1ParserIssues(runId: string, warnings: ParserWarning[]): Issue
   return [...blockingIssues, ...softFailIssues];
 }
 
+// ── PROJ-45: Zentraler ID-Resolver ───────────────────────────────────────
+/**
+ * PROJ-45: Zentraler Resolver — mappt alte Pre-Expansion-IDs auf aktuelle Zeilen.
+ * Arbeitet in 2 Stufen:
+ *   1. Direkte lineId-Matches (vor Expansion / IDs stimmen noch)
+ *   2. Position-basierter Fallback per positionIndex (nach Expansion)
+ *
+ * @param ids         - relatedLineIds ODER affectedLineIds aus einem Issue
+ * @param lines       - aktuelle InvoiceLine[] (evtl. bereits expandiert)
+ * @param deduplicate - true: nur 1 Repräsentant pro positionIndex (UI-Anzeige)
+ *                      false: alle expandierten Zeilen (Auto-Resolve, Isolier-Filter)
+ */
+export function resolveIssueLines(
+  ids: string[],
+  lines: InvoiceLine[],
+  deduplicate: boolean = true,
+): InvoiceLine[] {
+  if (!ids || ids.length === 0) return [];
+
+  // Stufe 1: Direkte ID-Matches (vor Expansion — IDs stimmen noch)
+  const lineMap = new Map(lines.map(l => [l.lineId, l]));
+  const direct = ids.map(id => lineMap.get(id)).filter((l): l is InvoiceLine => l != null);
+  if (direct.length > 0) return direct;
+
+  // Stufe 2: Position-basierter Fallback (nach Expansion)
+  const positionSet = new Set<number>();
+  for (const id of ids) {
+    const m = id.match(/^.+-line-(\d+)$/);  // matcht NUR aggregierte IDs, NICHT expandierte
+    if (m) positionSet.add(parseInt(m[1], 10));
+  }
+  if (positionSet.size === 0) return [];
+
+  if (!deduplicate) {
+    return lines.filter(l => positionSet.has(l.positionIndex));
+  }
+
+  // Deduplizierung: 1 Repräsentant pro positionIndex
+  const seen = new Set<number>();
+  return lines.filter(l => {
+    if (!positionSet.has(l.positionIndex)) return false;
+    if (seen.has(l.positionIndex)) return false;
+    seen.add(l.positionIndex);
+    return true;
+  });
+}
+
 // ── PROJ-21 Phase 4: Auto-Resolve ────────────────────────────────────
 /**
  * Check if an issue's error condition is still active based on current line data.
@@ -201,7 +247,8 @@ function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
   // Only auto-resolve issues that reference specific lines
   if (issue.relatedLineIds.length === 0) return true;
 
-  const related = lines.filter(l => issue.relatedLineIds.includes(l.lineId));
+  // PROJ-45: Zentraler Resolver — mappt alte Pre-Expansion-IDs auf aktuelle Zeilen
+  const related = resolveIssueLines(issue.relatedLineIds, lines, false);
   // If none of the referenced lines exist (deleted?), keep open
   if (related.length === 0) return true;
 
@@ -485,6 +532,8 @@ interface RunState {
   // PROJ-11 Phase B: Article matching (Step 2) — legacy, kept for backwards compat
   executeArticleMatching: (articles: ArticleMaster[]) => void;
   setManualPrice: (lineId: string, price: number) => void;
+  /** PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position setzen */
+  setManualPriceByPosition: (positionIndex: number, price: number, runId: string) => void;
   /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
   setBookingDate: (runId: string, date: string) => Run | null;
   /** PROJ-42-ADD-ON-V: Export-Version inkrementieren. Returns updated Run or null. */
@@ -2676,6 +2725,55 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
         : state.currentRun,
     }));
+  },
+
+  // ─── PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position ──
+  setManualPriceByPosition: (positionIndex, price, runId) => {
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.positionIndex === positionIndex && line.lineId.startsWith(runId + '-line-')
+          ? {
+              ...line,
+              unitPriceFinal: price,
+              priceCheckStatus: 'custom' as const,
+            }
+          : line
+      ),
+    }));
+
+    logService.info(
+      `Manueller Bulk-Preis: ${price} für Position ${positionIndex}`,
+      { runId, step: 'Artikel extrahieren', details: `positionIndex=${positionIndex}` },
+    );
+    get().addAuditEntry({
+      runId,
+      action: 'setManualPrice',
+      details: `positionIndex=${positionIndex}, price=${price} (bulk)`,
+      userId: 'system',
+    });
+
+    // Update price stats for the run
+    const { invoiceLines, currentRun, runs } = get();
+    const targetRun = runs.find(r => r.id === runId) ?? currentRun;
+    if (!targetRun) return;
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const priceStats = {
+      priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
+      priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
+      priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
+      priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
+    };
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === runId ? { ...r, stats: { ...r.stats, ...priceStats } } : r
+      ),
+      currentRun: state.currentRun?.id === runId
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
+        : state.currentRun,
+    }));
+
+    // Auto-Resolve feuern
+    get().refreshIssues(runId);
   },
 
   // ─── PROJ-42-ADD-ON: Buchungsdatum (einmalig beim ersten Export) ───

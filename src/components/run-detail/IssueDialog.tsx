@@ -21,7 +21,7 @@ import {
   Mail,
   RefreshCw,
 } from 'lucide-react';
-import { useRunStore } from '@/store/runStore';
+import { useRunStore, resolveIssueLines } from '@/store/runStore';
 import { SeverityBadge } from '@/components/StatusChip';
 import { Button } from '@/components/ui/button';
 import {
@@ -148,14 +148,11 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
     [issues, currentRun],
   );
 
-  // Affected lines with readable labels
-  const affectedLines = useMemo(() => {
-    if (!issue) return [];
-    const lineMap = new Map(invoiceLines.map(l => [l.lineId, l]));
-    return (issue.affectedLineIds ?? [])
-      .map(id => lineMap.get(id))
-      .filter((l): l is InvoiceLine => l != null);
-  }, [issue, invoiceLines]);
+  // PROJ-45: Zentraler Resolver — dedupliziert für UI-Anzeige
+  const affectedLines = useMemo(
+    () => issue ? resolveIssueLines(issue.affectedLineIds ?? [], invoiceLines, true) : [],
+    [issue, invoiceLines],
+  );
 
   if (!issue) return null;
 
