@@ -39,7 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive, Settings, AlertTriangle, FileText, Search, Fingerprint, PackageOpen, Download } from 'lucide-react';
 import { runPersistenceService } from '@/services/runPersistenceService';
 import type { PersistedRunData } from '@/services/runPersistenceService';
 import { fileSystemService } from '@/services/fileSystemService';
@@ -798,36 +798,34 @@ export function SettingsPopup({
       <Dialog open={open} onOpenChange={onOpenChange}>
         {/* PROJ-22 B4: Dynamische Breite max-w-[600px] */}
         <DialogContent
-          className="max-w-[600px] w-full"
+          className="max-w-[800px] w-full"
           style={{ backgroundColor: '#D8E6E7' }}
         >
           <DialogHeader>
             <DialogTitle>Einstellungen</DialogTitle>
           </DialogHeader>
 
-          {/* PROJ-22 B4: Vertikales Tab-Menu */}
+          {/* PROJ-27-ADDON-3: Horizontale Tab-Leiste (3D-Relief) */}
           {/* PROJ-35: feste Hoehe gegen Layout-Shift beim Tab-Wechsel */}
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as SettingsTabKey)}
-            orientation="vertical"
-            className="flex gap-4 mt-2 h-[65vh] max-h-[800px]"
+            className="flex flex-col mt-2 h-[65vh] max-h-[800px]"
           >
             <TabsList
-              className="flex flex-col h-fit self-start items-start justify-start gap-0.5 p-1 w-44 shrink-0"
-              style={{ backgroundColor: '#c9c3b6', borderRadius: '0.5rem' }}
+              className="flex flex-row h-fit bg-[#c9c3b6] border border-border tab-bar-raised p-1 gap-1 rounded-md mb-3 shrink-0"
             >
-              <TabsTrigger value="general"     className="w-full justify-start text-left text-sm px-3 py-2">Allgemein</TabsTrigger>
-              <TabsTrigger value="errorhandling" className="w-full justify-start text-left text-sm px-3 py-2">Fehlerhandling</TabsTrigger>
-              <TabsTrigger value="parser"      className="w-full justify-start text-left text-sm px-3 py-2">PDF-Parser</TabsTrigger>
-              <TabsTrigger value="matcher"     className="w-full justify-start text-left text-sm px-3 py-2">Artikel extrahieren</TabsTrigger>
-              <TabsTrigger value="serial"      className="w-full justify-start text-left text-sm px-3 py-2">Serial parsen</TabsTrigger>
-              <TabsTrigger value="ordermapper" className="w-full justify-start text-left text-sm px-3 py-2">Bestellung mappen</TabsTrigger>
-              <TabsTrigger value="export"      className="w-full justify-start text-left text-sm px-3 py-2">Export</TabsTrigger>
-              <TabsTrigger value="overview"    className="w-full justify-start text-left text-sm px-3 py-2">Speicher/Cache</TabsTrigger>
+              <TabsTrigger value="general"       className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Settings className="w-3 h-3" />Allgemein</TabsTrigger>
+              <TabsTrigger value="errorhandling" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><AlertTriangle className="w-3 h-3" />Fehler</TabsTrigger>
+              <TabsTrigger value="parser"        className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><FileText className="w-3 h-3" />Parser</TabsTrigger>
+              <TabsTrigger value="matcher"       className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Search className="w-3 h-3" />Matcher</TabsTrigger>
+              <TabsTrigger value="serial"        className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Fingerprint className="w-3 h-3" />Serial</TabsTrigger>
+              <TabsTrigger value="ordermapper"   className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><PackageOpen className="w-3 h-3" />Bestellung</TabsTrigger>
+              <TabsTrigger value="export"        className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Download className="w-3 h-3" />Export</TabsTrigger>
+              <TabsTrigger value="overview"      className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Archive className="w-3 h-3" />Speicher</TabsTrigger>
             </TabsList>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0">
               {/* Tab 1: Speicher/Cache */}
               <TabsContent value="overview" className="mt-0 space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Speicher/Cache</div>
@@ -1024,22 +1022,24 @@ export function SettingsPopup({
                     E-Mail-Adressen fuer Fehlerweiterleitung
                   </p>
 
-                  {Array.from({ length: ERROR_HANDLING_EMAIL_SLOT_COUNT }, (_, i) => (
-                    <div key={i} className="flex items-center justify-between gap-4">
-                      <Label className="text-sm whitespace-nowrap">Adresse {i + 1}</Label>
-                      <Input
-                        type="email"
-                        value={emailAddresses[i] ?? ''}
-                        onChange={(e) => handleUpdateAddress(i, e.target.value)}
-                        placeholder="name@firma.de"
-                        className={`h-8 flex-1 max-w-[280px] text-sm bg-white ${
-                          (emailAddresses[i] && !isValidEmail(emailAddresses[i])) || duplicateEmailIndices.has(i)
-                            ? 'border-amber-400'
-                            : ''
-                        }`}
-                      />
-                    </div>
-                  ))}
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                    {Array.from({ length: ERROR_HANDLING_EMAIL_SLOT_COUNT }, (_, i) => (
+                      <div key={i} className="flex items-center justify-between gap-4">
+                        <Label className="text-sm whitespace-nowrap">Adresse {i + 1}</Label>
+                        <Input
+                          type="email"
+                          value={emailAddresses[i] ?? ''}
+                          onChange={(e) => handleUpdateAddress(i, e.target.value)}
+                          placeholder="name@firma.de"
+                          className={`h-8 flex-1 max-w-[280px] text-sm bg-white ${
+                            (emailAddresses[i] && !isValidEmail(emailAddresses[i])) || duplicateEmailIndices.has(i)
+                              ? 'border-amber-400'
+                              : ''
+                          }`}
+                        />
+                      </div>
+                    ))}
+                  </div>
 
                   <div className="flex items-center gap-3">
                     <Button size="sm" onClick={handleSaveEmails} className="gap-1.5 min-w-[110px]">
