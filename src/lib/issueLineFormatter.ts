@@ -161,21 +161,31 @@ export function buildIssueClipboardText(issue: Issue, allLines: InvoiceLine[]): 
     issue.severity === 'warning' ? 'Warnung' : 'Info';
 
   const header = `[${severityLabel}] ${issue.message}`;
-  const summary = issue.details ? `${issue.details}` : '';
+  const parts: string[] = [header];
 
-  if (issue.affectedLineIds.length === 0) {
-    return summary ? `${header}\n${summary}` : header;
+  // Details IMMER einfuegen (nicht nur wenn affectedLineIds leer)
+  if (issue.details) {
+    parts.push(issue.details);
   }
 
-  const lineMap = new Map(allLines.map(l => [l.lineId, l]));
-  const affectedLines = issue.affectedLineIds
-    .map(id => lineMap.get(id))
-    .filter((l): l is InvoiceLine => l != null);
+  // Betroffene Positionen aufloesen
+  if (issue.affectedLineIds.length > 0) {
+    const lineMap = new Map(allLines.map(l => [l.lineId, l]));
+    const affectedLines = issue.affectedLineIds
+      .map(id => lineMap.get(id))
+      .filter((l): l is InvoiceLine => l != null);
 
-  const displayLines = affectedLines.slice(0, LINE_LIMIT).map(formatLineForDisplay);
-  const overflow = affectedLines.length - LINE_LIMIT;
+    if (affectedLines.length > 0) {
+      const displayLines = affectedLines.slice(0, LINE_LIMIT).map(formatLineForDisplay);
+      const overflow = affectedLines.length - LINE_LIMIT;
 
-  const body = displayLines.join('\n') + (overflow > 0 ? `\n... (+${overflow} weitere Positionen)` : '');
+      parts.push('---');
+      parts.push(displayLines.join('\n'));
+      if (overflow > 0) {
+        parts.push(`... (+${overflow} weitere Positionen)`);
+      }
+    }
+  }
 
-  return [header, '---', body].filter(Boolean).join('\n');
+  return parts.join('\n');
 }

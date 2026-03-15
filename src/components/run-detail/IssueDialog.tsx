@@ -16,6 +16,8 @@ import {
   Check,
   Clock,
   Copy,
+  Eye,
+  FileText,
   Mail,
   RefreshCw,
 } from 'lucide-react';
@@ -213,10 +215,12 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           <TabsList
             className="flex flex-row h-10 items-center justify-start bg-[#c9c3b6] border border-border tab-bar-raised w-full p-1 gap-1 mb-4 rounded-md"
           >
-            <TabsTrigger value="overview" className="text-xs px-3 py-1.5 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
+            <TabsTrigger value="overview" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
+              <Eye className="w-3 h-3" />
               Uebersicht
             </TabsTrigger>
-            <TabsTrigger value="report" className="text-xs px-3 py-1.5 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
+            <TabsTrigger value="report" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
+              <FileText className="w-3 h-3" />
               Fehlerbericht
             </TabsTrigger>
             <TabsTrigger value="resolve" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors">
@@ -305,7 +309,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
           {/* ── Tab 2: Fehlerbericht ───────────────────────────────────── */}
           <TabsContent value="report" className="flex-1 min-h-0 w-full overflow-y-auto outline-none mt-0 space-y-3">
             <Label className="text-sm font-semibold">Vollstaendiger Fehlerbericht</Label>
-            <pre className="text-xs font-mono bg-white/30 rounded border border-border p-2 whitespace-pre-wrap leading-relaxed max-h-[45vh] overflow-y-auto">
+            <pre className="text-xs font-mono bg-white/30 rounded border border-border p-2 whitespace-pre-wrap leading-relaxed">
               {buildIssueClipboardText(issue, invoiceLines)}
             </pre>
             {issue.escalatedAt && (
@@ -446,7 +450,9 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 <p className="font-mono truncate">
                   Betreff: [FALMEC-ReceiptPro] {issue.severity === 'error' ? 'Fehler' : issue.severity === 'warning' ? 'Warnung' : 'Info'}: {issue.message}
                 </p>
-                <p className="text-muted-foreground">Body: Fehlertyp, Details, betroffene Positionen (max. 10) ...</p>
+                <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed mt-1">
+                  {buildIssueClipboardText(issue, invoiceLines)}
+                </pre>
               </div>
 
               <p className="text-xs text-muted-foreground">

@@ -50,9 +50,50 @@ Neu:  TabsContent className="flex-1 min-h-0 w-full outline-none mt-0"
 ### B3. Tab 4 (email) — innerer Wrapper
 Identisches Pattern wie B2.
 
+## Phase C: Icons + Vorschau-Optimierung (erledigt)
+
+### C1. Icons fuer Tabs "Uebersicht" und "Fehlerbericht"
+- `Eye` und `FileText` zu lucide-react Imports hinzugefuegt
+- Tab "Uebersicht": `<Eye className="w-3 h-3" />` + `gap-1` im TabsTrigger
+- Tab "Fehlerbericht": `<FileText className="w-3 h-3" />` + `gap-1` im TabsTrigger
+- Alle 4 sichtbaren Tabs haben jetzt Icons (Eye, FileText, AlertTriangle, Mail) + ggf. Tab 5 (Clock)
+
+### C2. Fehlerbericht pre-Block — max-h entfernt
+```
+Alt:  "text-xs font-mono bg-white/30 ... max-h-[45vh] overflow-y-auto"
+Neu:  "text-xs font-mono bg-white/30 ... whitespace-pre-wrap leading-relaxed"
+```
+`max-h-[45vh]` und `overflow-y-auto` entfernt — pre-Block waechst natuerlich, Scrollen uebernimmt TabsContent. Keine verschachtelten Scrollbalken.
+
+### C3. E-Mail Vorschau — echten E-Mail-Body anzeigen
+```
+Alt:  <p className="text-muted-foreground">Body: Fehlertyp, Details, betroffene Positionen (max. 10) ...</p>
+Neu:  <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed mt-1">
+        {buildIssueClipboardText(issue, invoiceLines)}
+      </pre>
+```
+Platzhalter-Text durch echten `buildIssueClipboardText`-Output ersetzt — zeigt bis zu 30 formatierte Positionen mit Artikel-Nr, EAN, Preis. `buildIssueClipboardText` war bereits importiert.
+
+## Phase D: Fehlerbericht-Inhalt-Bug (erledigt)
+
+### D1. `buildIssueClipboardText` — details verschluckt + dangling "---"
+**Root Cause:** `issue.details` wurde nur im `affectedLineIds.length === 0`-Pfad eingefuegt. Wenn `affectedLineIds` IDs enthielt, aber keine in `invoiceLines` aufloesbar waren, entstand `[Fehler] message\n---` ohne Inhalt.
+
+**3 Bugs in einer Funktion (issueLineFormatter.ts Z.158-181):**
+1. `issue.details` nur im Frueh-Return-Pfad genutzt — bei vorhandenen affectedLineIds ging details verloren
+2. `'---'` Separator immer truthy — erschien auch bei leerem Body
+3. Leere Line-Aufloesung erzeugte nacktes `---` statt graceful Fallback
+
+**Fix:** `parts`-Array statt verschachteltem `filter(Boolean).join`:
+- `issue.details` wird IMMER nach dem Header eingefuegt
+- `'---'` Separator NUR wenn tatsaechlich aufgeloeste Lines vorhanden
+- Kein nacktes `---` mehr bei leerer Line-Aufloesung
+
+**Auswirkung:** Fehlerbericht-Tab (Tab 2), E-Mail-Vorschau (Tab 4), Clipboard-Copy und Mailto-Body zeigen jetzt immer die vollen Issue-Details.
+
 ## Verifikation
 ```bash
 npx tsc --noEmit
-# Erwartet: 0 Errors — bestaetigt
+# Phase A+B+C+D: 0 Errors — bestaetigt
 ```
-Visuell: IssueDialog oeffnen — Tab-Reiter als 3D-Relief-Balken, alle Tabs mit sichtbarem Content (volle Hoehe), Tab 3+4 Buttons am Boden fixiert, Tab 4 Dropdown+Input nebeneinander.
+Visuell: IssueDialog oeffnen — Tab-Reiter als 3D-Relief-Balken mit Icons, alle Tabs mit sichtbarem Content (volle Hoehe), Tab 2 Fehlerbericht zeigt Header + Details + Positionen (kein nacktes "---"), Tab 3+4 Buttons am Boden fixiert, Tab 4 Dropdown+Input nebeneinander mit echtem E-Mail-Body in der Vorschau.
