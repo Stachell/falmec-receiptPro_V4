@@ -26,3 +26,7 @@ dist-ssr
 # Claude Code
 .claude/
 .mcp.json
+
+# Playwright
+/playwright-report/
+/test-results/

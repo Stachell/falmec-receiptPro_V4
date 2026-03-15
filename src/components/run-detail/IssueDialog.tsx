@@ -51,10 +51,10 @@ import type { Issue, InvoiceLine } from '@/types';
 import {
   formatLineForDisplay,
   buildIssueClipboardText,
-  generateMailtoLink,
 } from '@/lib/issueLineFormatter';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getStoredEmailAddresses } from '@/lib/errorHandlingConfig';
+import { PriceCell } from './PriceCell';
 
 // ── Type label map (shared with IssuesCenter) ─────────────────────────────
 const issueTypeLabels: Record<string, string> = {
@@ -118,6 +118,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
     escalateIssue,
     splitIssue,
     reopenIssue,
+    setManualPriceByPosition,
   } = useRunStore();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -125,6 +126,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [selectedEmail, setSelectedEmail] = useState('');
   const [manualEmail, setManualEmail] = useState('');
+  const [emailBody, setEmailBody] = useState('');
   const { isCopied, copy } = useCopyToClipboard(2000);
 
   const invoiceLines = currentRun
@@ -134,10 +136,14 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
   const [storedEmails, setStoredEmails] = useState<string[]>([]);
 
   // PROJ-44-BUGFIX-R3: Load stored emails when dialog opens (useMemo with [] never updated after mount)
+  // PROJ-45-ADD-ON: Initialize emailBody — only on issue change, NOT on invoiceLines change
+  // (prevents overwriting user edits when a price correction triggers a store mutation)
   useEffect(() => {
     if (issue) {
       setStoredEmails(getStoredEmailAddresses());
+      setEmailBody(buildIssueClipboardText(issue, invoiceLines));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issue]);
 
   // PROJ-43: Pending issues for Tab 5
@@ -172,10 +178,12 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
 
   const handleSendMail = () => {
     if (!effectiveRecipient.trim()) return;
-    const link = generateMailtoLink(issue, effectiveRecipient, invoiceLines);
+    const severityLabel = issue.severity === 'error' ? 'Fehler' : issue.severity === 'warning' ? 'Warnung' : 'Info';
+    const subject = encodeURIComponent(`[FALMEC-ReceiptPro] ${severityLabel}: ${issue.message}`);
+    const body = encodeURIComponent(emailBody);
+    const link = `mailto:${encodeURIComponent(effectiveRecipient)}?subject=${subject}&body=${body}`;
     window.location.href = link;
-    const fullText = buildIssueClipboardText(issue, invoiceLines);
-    copy(fullText);
+    copy(emailBody);
     escalateIssue(issue.id, effectiveRecipient);
     onClose();
   };
@@ -253,8 +261,6 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               </div>
             )}
 
-            <p className="text-sm text-foreground/80">{issue.details}</p>
-
             {/* Affected lines (max 5) */}
             {affectedLines.length > 0 && (
               <div className="space-y-1">
@@ -271,6 +277,32 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 </div>
               </div>
             )}
+
+            {/* PROJ-45-ADD-ON: Warntext + PriceCell fuer price-mismatch */}
+            {issue?.type === 'price-mismatch' && (
+              <div className="rounded border border-orange-300/60 bg-orange-50/10 p-2 text-xs text-orange-700">
+                <span className="font-semibold">ACHTUNG:</span> Um Uploadfehler zu vermeiden, muss bei Auswahl
+                des Rechnungspreises dieser bereits in Sage ERP hinterlegt sein.
+              </div>
+            )}
+
+            {issue?.type === 'price-mismatch' && (currentRun?.isExpanded ?? false) && (() => {
+              const mismatchLine = affectedLines.find(l => l.priceCheckStatus === 'mismatch');
+              if (!mismatchLine) return null;
+              return (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Preis anpassen:</span>
+                  <PriceCell
+                    line={mismatchLine}
+                    onSetPrice={(_lineId, price) => {
+                      if (currentRun) {
+                        setManualPriceByPosition(mismatchLine.positionIndex, price, currentRun.id);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })()}
 
             {/* Escalation info */}
             {issue.status === 'pending' && (
@@ -447,9 +479,12 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 <p className="font-mono truncate">
                   Betreff: [FALMEC-ReceiptPro] {issue.severity === 'error' ? 'Fehler' : issue.severity === 'warning' ? 'Warnung' : 'Info'}: {issue.message}
                 </p>
-                <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed mt-1">
-                  {buildIssueClipboardText(issue, invoiceLines)}
-                </pre>
+                <Textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  className="text-xs font-mono bg-white/40 whitespace-pre-wrap leading-relaxed mt-1 min-h-[120px]"
+                  rows={8}
+                />
               </div>
 
               <p className="text-xs text-muted-foreground">

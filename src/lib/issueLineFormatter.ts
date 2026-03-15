@@ -6,6 +6,7 @@
  * PROJ-39: added generateMailtoLink for escalation via mailto:
  */
 import type { InvoiceLine, Issue } from '@/types';
+import { resolveIssueLines } from '@/store/runStore';
 
 const MAILTO_LINE_LIMIT = 10; // mailto: URI length safety
 const ISSUE_TYPE_LABELS_FOR_MAIL: Record<string, string> = {
@@ -48,11 +49,8 @@ export function generateMailtoLink(
 
   const subject = encodeURIComponent(`[FALMEC-ReceiptPro] ${severityLabel}: ${issue.message}`);
 
-  // Resolve affected lines
-  const lineMap = new Map(allLines.map(l => [l.lineId, l]));
-  const affectedLines = (issue.affectedLineIds ?? [])
-    .map(id => lineMap.get(id))
-    .filter((l): l is InvoiceLine => l != null);
+  // Resolve affected lines (PROJ-45-ADD-ON: nutzt resolveIssueLines für korrekte Post-Expansion-Auflösung)
+  const affectedLines = resolveIssueLines(issue.affectedLineIds ?? [], allLines, true);
   const displayLines = affectedLines.slice(0, MAILTO_LINE_LIMIT);
   const overflow = affectedLines.length - displayLines.length;
 
@@ -168,12 +166,9 @@ export function buildIssueClipboardText(issue: Issue, allLines: InvoiceLine[]): 
     parts.push(issue.details);
   }
 
-  // Betroffene Positionen aufloesen
+  // Betroffene Positionen aufloesen (PROJ-45-ADD-ON: nutzt resolveIssueLines für korrekte Post-Expansion-Auflösung)
   if (issue.affectedLineIds.length > 0) {
-    const lineMap = new Map(allLines.map(l => [l.lineId, l]));
-    const affectedLines = issue.affectedLineIds
-      .map(id => lineMap.get(id))
-      .filter((l): l is InvoiceLine => l != null);
+    const affectedLines = resolveIssueLines(issue.affectedLineIds, allLines, true);
 
     if (affectedLines.length > 0) {
       const displayLines = affectedLines.slice(0, LINE_LIMIT).map(formatLineForDisplay);

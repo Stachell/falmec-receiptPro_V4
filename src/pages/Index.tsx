@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { AlertTriangle, ChevronsRight, PackageOpen, FolderOpen, FileText, Trash2, Search, Database } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronsRight, PackageOpen, FolderOpen, FileText, Trash2, Search, Database } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Run } from '@/types';
+import type { Run, Issue } from '@/types';
 import type { PersistedRunSummary } from '@/services/runPersistenceService';
 import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
 import { useExportConfigStore } from '@/store/exportConfigStore';
@@ -61,14 +61,19 @@ interface TableRow_ {
   /** Summen-Check bestanden (true), fehlgeschlagen (false), oder ungeprüft (null) */
   step1AmountCheckPassed: boolean | null;
   exportReady: boolean;
+  /** PROJ-45-ADD-ON: true wenn alle Issues resolved sind */
+  allIssuesResolved: boolean;
   /** Full run object — only present for session runs */
   run?: Run;
   /** True for persisted-only rows (not loaded in memory) */
   isPersistedOnly?: boolean;
 }
 
-function toTableRow(run: Run): TableRow_ {
+function toTableRow(run: Run, issues: Issue[]): TableRow_ {
   const totalIssues = run.steps.reduce((acc, step) => acc + step.issuesCount, 0);
+  const runIssues = issues.filter(i => i.runId === run.id);
+  const allIssuesResolved = totalIssues > 0 && runIssues.length > 0
+    && runIssues.every(i => i.status === 'resolved');
   return {
     id: run.id,
     fattura: run.invoice.fattura,
@@ -84,6 +89,7 @@ function toTableRow(run: Run): TableRow_ {
         ? false
         : null,
     exportReady: run.steps.every(s => s.status === 'ok' || s.status === 'soft-fail'),
+    allIssuesResolved,
     run,
   };
 }
@@ -100,6 +106,7 @@ function persistedToTableRow(s: PersistedRunSummary): TableRow_ {
     invoiceTotal: s.invoiceTotal,
     step1AmountCheckPassed: s.step1AmountCheckPassed,
     exportReady: s.stats.exportReady,
+    allIssuesResolved: false, // persisted-only runs have no issues in store
     isPersistedOnly: true,
   };
 }
@@ -107,7 +114,7 @@ function persistedToTableRow(s: PersistedRunSummary): TableRow_ {
 type StatusFilterValue = 'all' | Run['status'];
 
 const Index = () => {
-  const { runs, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines, setBookingDate, incrementExportVersion } = useRunStore();
+  const { runs, issues, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines, setBookingDate, incrementExportVersion } = useRunStore();
   const { columnOrder, csvDelimiter, csvIncludeHeader } = useExportConfigStore();
   const navigate = useNavigate();
 
@@ -128,7 +135,7 @@ const Index = () => {
   const sessionRunIds = new Set(runs.map(r => r.id));
   const persistedOnly = persistedRunSummaries.filter(s => !sessionRunIds.has(s.id));
 
-  const sessionRows: TableRow_[] = runs.map(toTableRow);
+  const sessionRows: TableRow_[] = runs.map(r => toTableRow(r, issues));
   const persistedRows: TableRow_[] = persistedOnly.map(persistedToTableRow);
   const allRows: TableRow_[] = [...sessionRows, ...persistedRows];
 
@@ -347,10 +354,17 @@ const Index = () => {
                   {/* FEHLER */}
                   <TableCell>
                     {row.totalIssues > 0 ? (
-                      <span className="flex items-center gap-1.5 text-status-soft-fail">
-                        <AlertTriangle className="w-4 h-4" />
-                        {row.totalIssues}
-                      </span>
+                      row.allIssuesResolved ? (
+                        <span className="flex items-center gap-1.5 text-status-ok">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {row.totalIssues}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-status-soft-fail">
+                          <AlertTriangle className="w-4 h-4" />
+                          {row.totalIssues}
+                        </span>
+                      )
                     ) : (
                       <span className="text-muted-foreground">–</span>
                     )}
