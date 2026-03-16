@@ -201,7 +201,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
 
   return (
     <Dialog open={!!issue} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[800px] w-full h-[600px] flex flex-col" style={{ backgroundColor: '#D8E6E7' }}>
+      <DialogContent className="max-w-6xl w-full h-[85vh] max-h-[850px] flex flex-col" style={{ backgroundColor: '#D8E6E7' }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <SeverityBadge severity={issue.severity} />
@@ -278,31 +278,45 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               </div>
             )}
 
-            {/* PROJ-45-ADD-ON: Warntext + PriceCell fuer price-mismatch */}
-            {issue?.type === 'price-mismatch' && (
-              <div className="rounded border border-orange-300/60 bg-orange-50/10 p-2 text-xs text-orange-700">
-                <span className="font-semibold">ACHTUNG:</span> Um Uploadfehler zu vermeiden, muss bei Auswahl
-                des Rechnungspreises dieser bereits in Sage ERP hinterlegt sein.
-              </div>
-            )}
-
+            {/* PROJ-45-ADD-ON-round2: PriceCell prominent (Block 3) — vor Warnung */}
             {issue?.type === 'price-mismatch' && (currentRun?.isExpanded ?? false) && (() => {
               const mismatchLine = affectedLines.find(l => l.priceCheckStatus === 'mismatch');
               if (!mismatchLine) return null;
               return (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Preis anpassen:</span>
-                  <PriceCell
-                    line={mismatchLine}
-                    onSetPrice={(_lineId, price) => {
-                      if (currentRun) {
-                        setManualPriceByPosition(mismatchLine.positionIndex, price, currentRun.id);
+                <div className="rounded-lg border-2 border-teal-400/50 bg-white/40 p-3">
+                  <p className="text-sm font-semibold mb-0.5">Preis korrigieren:</p>
+                  <p className="text-xs text-muted-foreground mb-2">Waehlen Sie die korrekte Preisquelle</p>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="inline-flex items-center gap-2 rounded border border-black/60 bg-green-50/40 px-3 py-1.5 cursor-pointer shadow-sm hover:bg-green-100/50 transition-colors"
+                    onClick={(e) => {
+                      const btn = e.currentTarget.querySelector('button');
+                      if (btn && !btn.contains(e.target as Node)) {
+                        btn.click();
                       }
                     }}
-                  />
+                  >
+                    <PriceCell
+                      line={mismatchLine}
+                      onSetPrice={(_lineId, price) => {
+                        if (currentRun) {
+                          setManualPriceByPosition(mismatchLine.positionIndex, price, currentRun.id);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
               );
             })()}
+
+            {/* PROJ-45-ADD-ON-round2: Warntext (Block 4) — kompakter, nach PriceCell */}
+            {issue?.type === 'price-mismatch' && (
+              <div className="rounded border border-orange-300/40 bg-orange-50/5 py-1.5 px-3 text-xs text-orange-700">
+                <span className="font-semibold">ACHTUNG:</span> Um Uploadfehler zu vermeiden, muss bei Auswahl
+                des Rechnungspreises dieser bereits in Sage ERP hinterlegt sein.
+              </div>
+            )}
 
             {/* Escalation info */}
             {issue.status === 'pending' && (
