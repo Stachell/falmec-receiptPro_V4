@@ -24,6 +24,9 @@ import * as XLSX from 'xlsx';
 import type { ArticleMaster } from '@/types';
 import { FALMEC_SCHEMA } from '@/services/matchers/modules/FalmecMatcher_Master';
 
+// PROJ-45-ADD-ON-round4: Default Regex für Falmec Art-Nr (DE) — 6 Ziffern, erste muss 1 sein
+const DEFAULT_ARTNO_DE_REGEX = /^1\d{5}$/;
+
 export interface MasterDataParseResult {
   articles: ArticleMaster[];
   rowCount: number;
@@ -158,7 +161,9 @@ function cellBool(v: unknown): boolean {
  */
 export async function parseMasterDataFile(
   file: File,
+  options?: { artNoDeRegex?: RegExp },
 ): Promise<MasterDataParseResult> {
+  const artNoDeOverrideRegex = options?.artNoDeRegex;
   const warnings: string[] = [];
 
   // Read file as ArrayBuffer
@@ -224,7 +229,10 @@ export async function parseMasterDataFile(
   for (let ri = 0; ri < dataRows.length; ri++) {
     const row = dataRows[ri];
 
-    const falmecArticleNo = idx('artNoDE') >= 0 ? cellStr(row[idx('artNoDE')]) : '';
+    // PROJ-45-ADD-ON-round4: Regex-Validierung — ungültige Art-Nr wird bereinigt, Artikel bleibt erhalten
+    const falmecArticleNoRaw = idx('artNoDE') >= 0 ? cellStr(row[idx('artNoDE')]) : '';
+    const artNoRegex = artNoDeOverrideRegex ?? DEFAULT_ARTNO_DE_REGEX;
+    const falmecArticleNo = artNoRegex.test(falmecArticleNoRaw.trim()) ? falmecArticleNoRaw.trim() : '';
     const manufacturerArticleNo = idx('artNoIT') >= 0 ? cellStr(row[idx('artNoIT')]) : '';
     const ean = idx('ean') >= 0 ? cellStr(row[idx('ean')]) : '';
 

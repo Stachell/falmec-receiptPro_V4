@@ -543,6 +543,16 @@ export function SettingsPopup({
     }
   };
 
+  // PROJ-45-ADD-ON-round4: Matcher-Overrides zurücksetzen (Regex auf Default)
+  const handleResetMatcherOverrides = () => {
+    if (window.confirm(
+      'Der aktuelle Wert wird durch die Grundeinstellung (^1\\d{5}$) ersetzt. ' +
+      'Der überschriebene Wert wird nicht gesichert. Wollen Sie fortfahren?'
+    )) {
+      setGlobalConfig({ matcherProfileOverrides: { enabled: true } });
+    }
+  };
+
   // PROJ-27 ADD-ON Pillar 3: Archiv ablegen — Standard (Export + >N Monate löschen)
   const handleArchiveDefault = async (months: number) => {
     setArchiveBusy(true);
@@ -1200,9 +1210,14 @@ export function SettingsPopup({
                   />
                 </div>
                 {matcherOverrideEnabled && (
-                  <FooterButton onClick={() => openOverrideModal(2)}>
-                    Anpassen
-                  </FooterButton>
+                  <div className="flex gap-2">
+                    <FooterButton onClick={() => openOverrideModal(2)}>
+                      Bearbeiten
+                    </FooterButton>
+                    <FooterButton onClick={handleResetMatcherOverrides}>
+                      Zurücksetzen
+                    </FooterButton>
+                  </div>
                 )}
 
                 {/* [D] Letzte Diagnose Step 2 */}

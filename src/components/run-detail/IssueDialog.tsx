@@ -46,8 +46,10 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Issue, InvoiceLine } from '@/types';
+import { STORAGE_LOCATIONS } from '@/types';
 import {
   formatLineForDisplay,
   buildIssueClipboardText,
@@ -101,6 +103,149 @@ function getLineLabel(issue: Issue, line: InvoiceLine): string {
     default:
       return `${pos}: ${line.lineId}`;
   }
+}
+
+// ── PROJ-45-ADD-ON-round4: ArticleMatchCard ───────────────────────────────
+const ARTNO_REGEX = /^1\d{5}$/;
+
+interface ArticleFormData {
+  falmecArticleNo: string;
+  manufacturerArticleNo: string;
+  ean: string;
+  serialRequired: boolean;
+  storageLocation: string;
+  descriptionDE: string;
+  supplierId: string;
+  orderNumberAssigned: string;
+}
+
+function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string }) {
+  const { setManualArticleByPosition, globalConfig } = useRunStore();
+  const [formData, setFormData] = useState<ArticleFormData>(() => ({
+    falmecArticleNo: line.falmecArticleNo ?? '',
+    manufacturerArticleNo: line.manufacturerArticleNo ?? '',
+    ean: line.ean ?? '',
+    serialRequired: line.serialRequired ?? false,
+    storageLocation: line.storageLocation ?? '',
+    descriptionDE: line.descriptionDE ?? '',
+    supplierId: line.supplierId ?? '',
+    orderNumberAssigned: line.orderNumberAssigned ?? '',
+  }));
+  const [saved, setSaved] = useState(false);
+
+  const artNoRegexStr = globalConfig?.matcherProfileOverrides?.artNoDeRegex;
+  const artNoRegex = artNoRegexStr
+    ? (() => { try { return new RegExp(artNoRegexStr); } catch { return ARTNO_REGEX; } })()
+    : ARTNO_REGEX;
+  const isValid = artNoRegex.test(formData.falmecArticleNo.trim());
+
+  const update = (field: keyof ArticleFormData) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSaved(false);  // Hotfix: saved-State zurücksetzen bei Eingabe
+    setFormData(prev => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    setManualArticleByPosition(line.positionIndex, {
+      falmecArticleNo: formData.falmecArticleNo.trim(),
+      manufacturerArticleNo: formData.manufacturerArticleNo || undefined,
+      ean: formData.ean || undefined,
+      serialRequired: formData.serialRequired,
+      storageLocation: formData.storageLocation || undefined,
+      descriptionDE: formData.descriptionDE || undefined,
+      supplierId: formData.supplierId || undefined,
+      orderNumberAssigned: formData.orderNumberAssigned || undefined,
+    }, runId);
+    setSaved(true);
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200/60 bg-white/30 p-3 space-y-2">
+      <p className="text-xs text-muted-foreground font-medium">
+        POS {line.positionIndex + 1}:{line.ean ? ` EAN ${line.ean}` : ''}{line.manufacturerArticleNo ? ` / ${line.manufacturerArticleNo}` : ''}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <Label className="text-xs mb-0.5 block">Artikelnr (Falmec)*</Label>
+          <Input
+            value={formData.falmecArticleNo}
+            onChange={update('falmecArticleNo')}
+            placeholder="1XXXXX"
+            className={`h-7 text-xs ${!isValid && formData.falmecArticleNo ? 'border-red-400' : ''}`}
+          />
+          {!isValid && formData.falmecArticleNo && (
+            <p className="text-xs text-red-500 mt-0.5">{'Format: ^1\\d{5}$'}</p>
+          )}
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">Hersteller-Art-Nr</Label>
+          <Input value={formData.manufacturerArticleNo} onChange={update('manufacturerArticleNo')} className="h-7 text-xs" />
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">EAN</Label>
+          <Input value={formData.ean} onChange={update('ean')} className="h-7 text-xs" />
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">Bezeichnung (DE)</Label>
+          <Input value={formData.descriptionDE} onChange={update('descriptionDE')} className="h-7 text-xs" />
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">S/N-Pflicht</Label>
+          <Select
+            value={formData.serialRequired ? 'ja' : 'nein'}
+            onValueChange={v => {
+              setSaved(false);  // Hotfix: saved-State zurücksetzen
+              setFormData(prev => ({ ...prev, serialRequired: v === 'ja' }));
+            }}
+          >
+            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nein">Nein</SelectItem>
+              <SelectItem value="ja">Ja</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">Wareneingangslager</Label>
+          <Select
+            value={formData.storageLocation || undefined}  // Hotfix: kein leerer String für Radix
+            onValueChange={v => {
+              setSaved(false);  // Hotfix: saved-State zurücksetzen
+              setFormData(prev => ({ ...prev, storageLocation: v }));
+            }}
+          >
+            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Wählen..." /></SelectTrigger>
+            <SelectContent>
+              {(STORAGE_LOCATIONS as readonly string[]).map(loc => (
+                <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">Lieferant</Label>
+          <Input value={formData.supplierId} onChange={update('supplierId')} className="h-7 text-xs" />
+        </div>
+        <div>
+          <Label className="text-xs mb-0.5 block">Bestellnummer (JJJJ-XXXX)</Label>
+          <Input value={formData.orderNumberAssigned} onChange={update('orderNumberAssigned')} className="h-7 text-xs" placeholder="2024-0001" />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <button
+          disabled={!isValid}
+          onClick={handleSubmit}
+          className={`h-7 px-3 text-xs rounded transition-colors ${
+            saved
+              ? 'bg-green-500 text-white cursor-default'
+              : 'bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed'
+          }`}
+        >
+          {saved ? '✓ Übernommen' : 'Übernehmen'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────
@@ -306,6 +451,23 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                       }}
                     />
                   </div>
+                </div>
+              );
+            })()}
+
+            {/* PROJ-45-ADD-ON-round4: ArticleMatchForm — nur bei no-article-match */}
+            {(issue?.type === 'no-article-match' || issue?.type === 'match-artno-not-found') && currentRun && (() => {
+              return (
+                <div className="rounded-lg border-2 border-teal-400/50 bg-white/40 p-3 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold mb-0.5">Artikel manuell zuordnen:</p>
+                    <p className="text-xs text-muted-foreground">
+                      Fehlende Stammdaten ergänzen. Bekannte Daten sind vorbefüllt.
+                    </p>
+                  </div>
+                  {affectedLines.map(line => (
+                    <ArticleMatchCard key={line.lineId} line={line} runId={currentRun.id} />
+                  ))}
                 </div>
               );
             })()}

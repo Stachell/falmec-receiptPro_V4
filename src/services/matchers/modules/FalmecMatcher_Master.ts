@@ -417,32 +417,11 @@ export class FalmecMatcher_Master implements MatcherModule {
         });
       } else {
         if (lineSanitized) attempts.push(`Sanitized-ArtNo fail ('${lineSanitized}')`);
-
-        // ── Strategy 4: Partial ArtNo match (linear scan, fallback) ──
-        let matchByPartial: ArticleMaster | undefined;
-        if (lineCode && lineCode.length >= 4) {
-          matchByPartial = articles.find(a => {
-            const normA = normalize(a.manufacturerArticleNo);
-            return normA.includes(lineCode) || lineCode.includes(normA);
-          });
-        }
-
-        if (matchByPartial) {
-          matchStatus = 'code-it-only';
-          matchedArticle = matchByPartial;
-          reason = `Strat-4 Partial-ArtNo Match: '${line.manufacturerArticleNo}' ⊆ '${matchByPartial.manufacturerArticleNo}' → ${matchByPartial.falmecArticleNo}`;
-          warnings.push({
-            code: 'MATCH_TRACE',
-            message: `[Strat-4] ${attempts.join('; ')} → Partial Treffer: '${line.manufacturerArticleNo}' ~ '${matchByPartial.manufacturerArticleNo}' → ${matchByPartial.falmecArticleNo}`,
-            severity: 'info' as MatcherWarning['severity'],
-            lineId: line.lineId,
-          });
-        } else {
-          matchStatus = 'no-match';
-          matchedArticle = undefined;
-          if (lineCode) attempts.push(`Partial-ArtNo fail`);
-          reason = attempts.join('; ') || 'Kein Identifier vorhanden';
-        }
+        // No match found after Strategies 1-3
+        matchStatus = 'no-match';
+        matchedArticle = undefined;
+        if (lineCode) attempts.push(`ArtNo final fail`);
+        reason = attempts.join('; ') || 'Kein Identifier vorhanden';
       }
     }
 

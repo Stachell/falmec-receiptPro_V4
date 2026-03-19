@@ -408,6 +408,18 @@ function buildOrderParserFailureIssue(
   };
 }
 
+// PROJ-45-ADD-ON-round4: Formulardaten für manuellen Artikel-Fix im IssueDialog
+interface ManualArticleData {
+  falmecArticleNo: string;
+  manufacturerArticleNo?: string;
+  ean?: string;
+  serialRequired?: boolean;
+  storageLocation?: string;
+  descriptionDE?: string;
+  supplierId?: string;
+  orderNumberAssigned?: string;
+}
+
 interface RunState {
   // Data
   runs: Run[];
@@ -534,6 +546,8 @@ interface RunState {
   setManualPrice: (lineId: string, price: number) => void;
   /** PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position setzen */
   setManualPriceByPosition: (positionIndex: number, price: number, runId: string) => void;
+  /** PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position */
+  setManualArticleByPosition: (positionIndex: number, data: ManualArticleData, runId: string) => void;
   /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
   setBookingDate: (runId: string, date: string) => Run | null;
   /** PROJ-42-ADD-ON-V: Export-Version inkrementieren. Returns updated Run or null. */
@@ -687,7 +701,11 @@ export const useRunStore = create<RunState>((set, get) => ({
 
     // Parse articleList immediately on upload → persist to masterDataStore
     if (file.type === 'articleList' && fileWithTimestamp.file) {
-      parseMasterDataFile(fileWithTimestamp.file)
+      const artNoDeRegexStr1 = get().globalConfig?.matcherProfileOverrides?.artNoDeRegex;
+      const artNoDeRegexParsed1 = artNoDeRegexStr1
+        ? (() => { try { return new RegExp(artNoDeRegexStr1); } catch { return undefined; } })()
+        : undefined;
+      parseMasterDataFile(fileWithTimestamp.file, { artNoDeRegex: artNoDeRegexParsed1 })
         .then((result) => {
           useMasterDataStore.getState().save(result.articles, fileWithTimestamp.name);
           logService.info(
@@ -957,7 +975,11 @@ export const useRunStore = create<RunState>((set, get) => ({
       if (articleListFile?.file && useMasterDataStore.getState().articles.length === 0) {
         try {
           set({ parsingProgress: 'Stammdaten laden...' });
-          const result = await parseMasterDataFile(articleListFile.file);
+          const artNoDeRegexStr2 = get().globalConfig?.matcherProfileOverrides?.artNoDeRegex;
+          const artNoDeRegexParsed2 = artNoDeRegexStr2
+            ? (() => { try { return new RegExp(artNoDeRegexStr2); } catch { return undefined; } })()
+            : undefined;
+          const result = await parseMasterDataFile(articleListFile.file, { artNoDeRegex: artNoDeRegexParsed2 });
           await useMasterDataStore.getState().save(result.articles, articleListFile.name);
           logService.info(
             `Stammdaten rehydriert: ${result.rowCount} Artikel aus '${articleListFile.name}'`,
@@ -2644,9 +2666,9 @@ export const useRunStore = create<RunState>((set, get) => ({
       // Build issues for no-match articles
       const newIssues = buildArticleMatchIssues(runId, updatedLines);
 
-      // Determine step 2 status
+      // Determine step 2 status — PROJ-45-ADD-ON-round4: failed (nicht soft-fail) um Auto-Advance zu blockieren
       const noMatchCount = matchStats.noMatchCount ?? 0;
-      const step2Status: StepStatus = noMatchCount > 0 ? 'soft-fail' : 'ok';
+      const step2Status: StepStatus = noMatchCount > 0 ? 'failed' : 'ok';
 
       set((state) => {
         const updatedRun = state.runs.find(r => r.id === runId);
@@ -2774,6 +2796,122 @@ export const useRunStore = create<RunState>((set, get) => ({
 
     // Auto-Resolve feuern
     get().refreshIssues(runId);
+  },
+
+  // ─── PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position ───
+  setManualArticleByPosition: (positionIndex, data, runId) => {
+    // 0. Stammdaten-Lookup — prüfen ob falmecArticleNo im Stamm vorhanden
+    const masterArticles = useMasterDataStore.getState().articles;
+    const matched = masterArticles.find(a => a.falmecArticleNo === data.falmecArticleNo);
+
+    const { globalConfig } = get();
+    const tolerance = globalConfig?.tolerance ?? 0.01;
+
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line => {
+        if (!(line.positionIndex === positionIndex && line.lineId.startsWith(runId + '-line-'))) {
+          return line;
+        }
+
+        const storageLocation = matched?.storageLocation || data.storageLocation || line.storageLocation || null;
+        // EXAKT wie der Matcher: KDD case-sensitive, Default 'WE' für alle anderen Locations
+        const logicalStorageGroup: 'WE' | 'KDD' | null = storageLocation
+          ? (storageLocation.includes('KDD') ? 'KDD' : 'WE')
+          : null;
+
+        const finalPrice = matched?.unitPriceNet ?? null;
+        const priceCheckStatus = (!finalPrice
+          ? 'missing'
+          : Math.abs(finalPrice - line.unitPriceInvoice) <= tolerance
+            ? 'ok'
+            : 'mismatch') as InvoiceLine['priceCheckStatus'];
+        const unitPriceFinal = priceCheckStatus === 'ok' ? finalPrice : line.unitPriceFinal;
+
+        if (matched) {
+          return {
+            ...line,
+            falmecArticleNo: data.falmecArticleNo,
+            matchStatus: 'full-match' as const,
+            unitPriceSage: matched.unitPriceNet,
+            descriptionDE: matched.descriptionDE ?? data.descriptionDE ?? line.descriptionDE,
+            storageLocation,
+            logicalStorageGroup,
+            serialRequired: matched.serialRequirement,  // serialRequirement → serialRequired!
+            manufacturerArticleNo: matched.manufacturerArticleNo || data.manufacturerArticleNo || line.manufacturerArticleNo,
+            ean: matched.ean || data.ean || line.ean,
+            supplierId: matched.supplierId ?? data.supplierId ?? line.supplierId,
+            activeFlag: matched.activeFlag,
+            priceCheckStatus,
+            unitPriceFinal,
+            orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,  // Hotfix: nicht vergessen
+          };
+        } else {
+          return {
+            ...line,
+            falmecArticleNo: data.falmecArticleNo,
+            matchStatus: 'full-match' as const,
+            unitPriceSage: null,
+            descriptionDE: data.descriptionDE ?? line.descriptionDE,
+            storageLocation,
+            logicalStorageGroup,
+            serialRequired: data.serialRequired ?? line.serialRequired,
+            manufacturerArticleNo: data.manufacturerArticleNo ?? line.manufacturerArticleNo,
+            ean: data.ean ?? line.ean,
+            supplierId: data.supplierId ?? line.supplierId,
+            priceCheckStatus,
+            unitPriceFinal,
+            orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,  // Hotfix: nicht vergessen
+          };
+        }
+      }),
+    }));
+
+    logService.info(
+      `Manueller Artikel-Fix: ${data.falmecArticleNo} für Position ${positionIndex}`,
+      { runId, step: 'Artikel extrahieren', details: matched ? 'Stammdaten-Treffer' : 'Nur Formulardaten' },
+    );
+    get().addAuditEntry({
+      runId,
+      action: 'setManualArticle',
+      details: `positionIndex=${positionIndex}, falmecArticleNo=${data.falmecArticleNo}, source=${matched ? 'master' : 'form'}`,
+      userId: 'system',
+    });
+
+    // Match-Stats + Step2-Status re-evaluieren
+    const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const matchStats = computeMatchStats(runLines);
+    const noMatchCount = matchStats.noMatchCount ?? 0;
+    const newStep2Status: StepStatus = noMatchCount > 0 ? 'failed' : 'ok';
+
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === runId
+          ? {
+              ...r,
+              stats: { ...r.stats, ...matchStats },
+              steps: r.steps.map(s => s.stepNo === 2 ? { ...s, status: newStep2Status } : s),
+            }
+          : r
+      ),
+      currentRun: state.currentRun?.id === runId
+        ? {
+            ...state.currentRun,
+            stats: { ...state.currentRun.stats, ...matchStats },
+            steps: state.currentRun.steps.map(s => s.stepNo === 2 ? { ...s, status: newStep2Status } : s),
+          }
+        : state.currentRun,
+    }));
+
+    // Issues neu generieren (Auto-Resolve für behobene no-match Zeilen)
+    get().refreshIssues(runId);
+
+    // Auto-Advance wenn alle no-match Zeilen behoben — PAUSE-GUARD PFLICHT
+    if (noMatchCount === 0) {
+      setTimeout(() => {
+        const s = get();
+        if (!s.isPaused) s.advanceToNextStep(runId);
+      }, 100);
+    }
   },
 
   // ─── PROJ-42-ADD-ON: Buchungsdatum (einmalig beim ersten Export) ───
@@ -3300,9 +3438,9 @@ export const useRunStore = create<RunState>((set, get) => ({
         };
       });
 
-      // Determine step 2 status
+      // Determine step 2 status — PROJ-45-ADD-ON-round4: failed (nicht soft-fail) um Auto-Advance zu blockieren
       const noMatchCount = result.stats.noMatchCount ?? 0;
-      const step2Status: StepStatus = noMatchCount > 0 ? 'soft-fail' : 'ok';
+      const step2Status: StepStatus = noMatchCount > 0 ? 'failed' : 'ok';
 
       // ── PROJ-21: Enrich result.issues with context + generate new issue types ──
       const step2Issues: Issue[] = [...result.issues];
