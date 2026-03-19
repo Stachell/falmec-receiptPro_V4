@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Search, Filter, FilterX, Info, Barcode, ChevronsDown, ChevronsUp, X } from 'lucide-react';
 import { useRunStore } from '@/store/runStore';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,7 @@ import { DetailPopup } from './DetailPopup';
 import { ManualOrderPopup } from './ManualOrderPopup';
 import { getOrderReasonStyle } from './orderReasonStyle';
 import { SerialStatusDot } from './SerialStatusDot';
+import { SerialFixPopup } from './SerialFixPopup';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { InvoiceLine } from '@/types';
@@ -67,6 +68,34 @@ export function ItemsTable() {
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
   const bestellungWidthClass = 'w-[106px]';
+
+  // PROJ-44-R6: Serial-Fix Pop-up State + Handler
+  const [serialFixTarget, setSerialFixTarget] = useState<{
+    lineId: string;
+    positionIndex: number;
+    serialRequired: boolean;
+    serialNumbers: string[];
+    qty: number;
+  } | null>(null);
+
+  const handleSerialDotClick = useCallback((line: InvoiceLine) => {
+    const { currentRun: cr, setActiveTab } = useRunStore.getState();
+    if (!cr) return;
+
+    if (!cr.isExpanded) {
+      // Nicht ausgerollt → RE-Positionen ist der richtige Ort → Tab wechseln
+      setActiveTab('invoice-preview');
+    } else {
+      // Ausgerollt → hier ist der richtige Ort → Pop-up öffnen
+      setSerialFixTarget({
+        lineId: line.lineId,
+        positionIndex: line.positionIndex,
+        serialRequired: line.serialRequired,
+        serialNumbers: line.serialNumbers,
+        qty: line.qty,
+      });
+    }
+  }, []);
 
   const step4 = currentRun?.steps.find(s => s.stepNo === 4);
   const isStep4Done = step4?.status === 'ok' || step4?.status === 'soft-fail';
@@ -435,6 +464,7 @@ export function ItemsTable() {
                                 <SerialStatusDot
                                   serialRequired={line.serialRequired}
                                   serialAssigned={!!line.serialNumber}
+                                  onClick={() => handleSerialDotClick(line)}
                                 />
                               </TooltipTrigger>
                               <TooltipContent>
@@ -505,6 +535,13 @@ export function ItemsTable() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
       />
+
+      {serialFixTarget && (
+        <SerialFixPopup
+          target={serialFixTarget}
+          onClose={() => setSerialFixTarget(null)}
+        />
+      )}
     </Card>
   );
 }

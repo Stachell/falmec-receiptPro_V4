@@ -119,6 +119,8 @@ export interface SerialExtractionResult {
   issues: Issue[];
   /** Checksum: regexHits vs assignedSNs */
   checksum: { regexHits: number; assignedSNs: number; match: boolean };
+  /** PROJ-44-R6: Unzugeordnete Seriennummern (EAN ohne passende Rechnungsposition) */
+  orphanSerials: string[];
 }
 
 // ── Matcher Module Interface (Core Contract) ──────────────────────────

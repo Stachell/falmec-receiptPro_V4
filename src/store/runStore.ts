@@ -551,6 +551,8 @@ interface RunState {
   setManualPriceByPosition: (positionIndex: number, price: number, runId: string) => void;
   /** PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position */
   setManualArticleByPosition: (positionIndex: number, data: ManualArticleData, runId: string) => void;
+  /** PROJ-44-R6: Chirurgischer S/N-Update — ändert NUR serial-relevante Felder, keine Artikel/Preis/Match-Daten */
+  updateLineSerialData: (positionIndex: number, serialRequired: boolean, serialNumbers: string[], runId?: string) => void;
   /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
   setBookingDate: (runId: string, date: string) => Run | null;
   /** PROJ-42-ADD-ON-V: Export-Version inkrementieren. Returns updated Run or null. */
@@ -838,6 +840,7 @@ export const useRunStore = create<RunState>((set, get) => ({
       createdAt: new Date().toISOString(),
       status: 'running',
       isExpanded: false,
+      orphanSerials: [],  // PROJ-44-R6
       config: globalConfig,
       invoice: {
         fattura: 'FA-2025-NEW',
@@ -954,6 +957,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         { stepNo: 5, name: 'Export', status: 'not-started', issuesCount: 0 },
       ],
       isExpanded: false,
+      orphanSerials: [],  // PROJ-44-R6
     };
 
     set((state) => ({
@@ -1452,6 +1456,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           // PROJ-23: invoiceLines are now aggregated (qty>1), so expandedLineCount
           // represents the total individual articles (sum of all qty values).
           isExpanded: false,
+          orphanSerials: updatedRun.orphanSerials ?? [],  // PROJ-44-R6: preserve or init
           stats: {
             ...updatedRun.stats,
             parsedInvoiceLines: result.lines.length,
@@ -2925,6 +2930,78 @@ export const useRunStore = create<RunState>((set, get) => ({
     }
   },
 
+  // ─── PROJ-44-R6: Chirurgischer S/N-Update (bypass — KEIN Artikel/Preis/Match-Update) ───
+
+  updateLineSerialData: (positionIndex, serialRequired, serialNumbers, runId?) => {
+    const { currentRun, invoiceLines } = get();
+    const targetRunId = runId ?? currentRun?.id;
+    if (!targetRunId) return;
+
+    const linePrefix = `${targetRunId}-line-`;
+    const updatedLines = invoiceLines.map(line => {
+      if (!line.lineId.startsWith(linePrefix)) return line;
+      if (line.positionIndex !== positionIndex) return line;
+
+      return {
+        ...line,
+        serialRequired,
+        serialNumbers,
+        serialNumber: serialNumbers[0] ?? null,
+        serialSource: serialNumbers.length > 0 ? 'manual' as const : line.serialSource,
+      };
+    });
+
+    // Stats aktualisieren (serialMatchedCount / serialRequiredCount)
+    const runLines = updatedLines.filter(l => l.lineId.startsWith(linePrefix));
+    const serialRequiredCount = runLines
+      .filter(l => l.serialRequired)
+      .reduce((sum, l) => sum + l.qty, 0);
+    const serialMatchedCount = runLines
+      .filter(l => l.serialRequired)
+      .reduce((sum, l) => sum + l.serialNumbers.length, 0);
+
+    set(state => {
+      const updatedRun = state.runs.find(r => r.id === targetRunId);
+      if (!updatedRun) return { invoiceLines: updatedLines };
+
+      const newRun: Run = {
+        ...updatedRun,
+        stats: {
+          ...updatedRun.stats,
+          serialRequiredCount,
+          serialMatchedCount,
+        },
+      };
+
+      return {
+        runs: state.runs.map(r => r.id === targetRunId ? newRun : r),
+        currentRun: state.currentRun?.id === targetRunId ? newRun : state.currentRun,
+        invoiceLines: updatedLines,
+      };
+    });
+
+    logService.info(
+      `Manuelle S/N-Korrektur: Pos ${positionIndex + 1} — serialRequired=${serialRequired}, ${serialNumbers.length} S/N`,
+      { runId: targetRunId, step: 'Seriennummer anfuegen' },
+    );
+    get().addAuditEntry({
+      runId: targetRunId,
+      action: 'manual-serial-update',
+      details: `Pos ${positionIndex + 1}: serialRequired=${serialRequired}, serialNumbers=[${serialNumbers.join(', ')}]`,
+      userId: 'system',
+    });
+
+    // Hard-Persist in IndexedDB
+    if (runPersistenceService.isAvailable()) {
+      const payload = buildAutoSavePayload(targetRunId);
+      if (payload) {
+        runPersistenceService.saveRun(payload).catch(err =>
+          console.error('[RunStore] updateLineSerialData persist failed:', err)
+        );
+      }
+    }
+  },
+
   // ─── PROJ-42-ADD-ON: Buchungsdatum (einmalig beim ersten Export) ───
 
   setBookingDate: (runId, date) => {
@@ -3138,6 +3215,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         const newRun: Run = {
           ...updatedRun,
           isExpanded: true,  // PROJ-23: Lines are now expanded to qty=1
+          orphanSerials: updatedRun.orphanSerials ?? [],  // PROJ-44-R6: preserve
           stats: {
             ...updatedRun.stats,
             ...result.stats,
@@ -3648,6 +3726,18 @@ export const useRunStore = create<RunState>((set, get) => ({
           };
         });
 
+        // ── PROJ-44-R6: Orphan-Catcher — nicht zugeordnete Serials sammeln ──
+        const orphanSerials: string[] = [];
+        for (const remaining of eanToSerials.values()) {
+          orphanSerials.push(...remaining);
+        }
+        if (orphanSerials.length > 0) {
+          logService.warn(
+            `${orphanSerials.length} Seriennummer(n) ohne passende Rechnungsposition (Orphans)`,
+            { runId, step: 'Seriennummer anfuegen' },
+          );
+        }
+
         const strictSerialRequiredFailure = currentRun.config.strictSerialRequiredFailure ?? true;
         const checksumMatch = assignedCount === requiredCount;
         const shouldHardFail = strictSerialRequiredFailure && !checksumMatch;
@@ -3692,6 +3782,7 @@ export const useRunStore = create<RunState>((set, get) => ({
 
           const newRun: Run = {
             ...updatedRun,
+            orphanSerials,  // PROJ-44-R6: Orphan-Serials auf Run-Level
             stats: {
               ...updatedRun.stats,
               serialMatchedCount: assignedCount,
@@ -3791,6 +3882,7 @@ export const useRunStore = create<RunState>((set, get) => ({
 
         const newRun: Run = {
           ...updatedRun,
+          orphanSerials: result.orphanSerials,  // PROJ-44-R6: Legacy-Pfad Orphans
           stats: {
             ...updatedRun.stats,
             serialMatchedCount: result.stats.assignedCount,
@@ -3871,12 +3963,15 @@ export const useRunStore = create<RunState>((set, get) => ({
         return false;
       }
 
+      // PROJ-44-R6: Backward-Compat — alte Runs ohne orphanSerials normalisieren
+      const normalizedRun: Run = { ...data.run, orphanSerials: data.run.orphanSerials ?? [] };
+
       set((state) => {
         // Merge persisted run into runs array (replace if exists, add if not)
         const existingIndex = state.runs.findIndex(r => r.id === runId);
         const updatedRuns = existingIndex >= 0
-          ? state.runs.map(r => r.id === runId ? data.run : r)
-          : [data.run, ...state.runs];
+          ? state.runs.map(r => r.id === runId ? normalizedRun : r)
+          : [normalizedRun, ...state.runs];
 
         // Merge invoice lines: remove old lines for this run, add persisted
         const linePrefix = `${runId}-line-`;
@@ -3890,7 +3985,7 @@ export const useRunStore = create<RunState>((set, get) => ({
 
         return {
           runs: updatedRuns,
-          currentRun: data.run,
+          currentRun: normalizedRun,
           invoiceLines: [...data.invoiceLines, ...otherLines],
           issues: [...data.issues, ...otherIssues],
           auditLog: [...data.auditLog, ...otherAudit],

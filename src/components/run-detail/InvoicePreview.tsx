@@ -10,7 +10,7 @@
  * @component
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, AlertTriangle, FileText, ChevronsDown, ChevronsUp, FilterX, Info, Search, Filter, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -36,6 +36,7 @@ import { PriceCell } from './PriceCell';
 import { StatusCheckbox } from './StatusCheckbox';
 import { SerialStatusDot } from './SerialStatusDot';
 import { InvoiceLineDetailPopup } from './InvoiceLineDetailPopup';
+import { SerialFixPopup } from './SerialFixPopup';
 import type { InvoiceHeader, InvoiceParserWarning, ParsedInvoiceLineExtended, PriceCheckStatus, InvoiceLine } from '@/types';
 
 interface InvoicePreviewProps {
@@ -77,6 +78,35 @@ export function InvoicePreview({
   const [collapsedHeightPx, setCollapsedHeightPx] = useState(400);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const toggleContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // PROJ-44-R6: Serial-Fix Pop-up State + Handler
+  const [serialFixTarget, setSerialFixTarget] = useState<{
+    lineId: string;
+    positionIndex: number;
+    serialRequired: boolean;
+    serialNumbers: string[];
+    qty: number;
+  } | null>(null);
+
+  const handleSerialDotClick = useCallback((line: InvoiceLine) => {
+    const { currentRun, setActiveTab } = useRunStore.getState();
+    if (!currentRun) return;
+
+    if (currentRun.isExpanded) {
+      // Ausgerollt → Artikelliste ist der richtige Ort → Tab wechseln
+      setActiveTab('items');
+    } else {
+      // Nicht ausgerollt → hier ist der richtige Ort → Pop-up öffnen
+      setSerialFixTarget({
+        lineId: line.lineId,
+        positionIndex: line.positionIndex,
+        serialRequired: line.serialRequired,
+        serialNumbers: line.serialNumbers,
+        qty: line.qty,
+      });
+    }
+  }, []);
+
   const bestellungWidthClass = 'w-24';
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
   const warningCount = warnings.filter((w) => w.severity === 'warning').length;
@@ -575,6 +605,7 @@ export function InvoicePreview({
                                     <SerialStatusDot
                                       serialRequired={posStatus.serialRequired}
                                       serialAssigned={posStatus.serialAssigned}
+                                      onClick={posStatus.representativeLine ? () => handleSerialDotClick(posStatus.representativeLine!) : undefined}
                                     />
                                   </TooltipTrigger>
                                   <TooltipContent>
@@ -635,6 +666,13 @@ export function InvoicePreview({
         position={detailPosition}
         linesForPosition={detailPosition ? (linesByPosition.get(detailPosition.positionIndex) ?? []) : []}
       />
+
+      {serialFixTarget && (
+        <SerialFixPopup
+          target={serialFixTarget}
+          onClose={() => setSerialFixTarget(null)}
+        />
+      )}
 
     </div>
   );

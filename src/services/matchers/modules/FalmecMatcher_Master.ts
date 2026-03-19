@@ -541,30 +541,44 @@ export class FalmecMatcher_Master implements MatcherModule {
 
     const regexHits = matchingRows.filter(r => r.serialCandidate !== null).length;
 
-    // Assign serials to lines that require them
+    // PROJ-44-R6: Assign serials to lines — qty-basiert (bis zu line.qty S/N pro Zeile)
     let assignedCount = 0;
     const updatedLines = lines.map(line => {
       // PROJ-45-R5: Manuelle S/N sind heilig — Step 3 darf sie nicht überschreiben
       if (line.serialSource === 'manual') return line;
       if (!line.serialRequired) return line;
 
-      // Find next unconsumed row with a serial candidate
-      const availableRow = matchingRows.find(r => r.serialCandidate !== null && !r.consumed);
-      if (!availableRow) return line;
+      // Sammle bis zu line.qty unconsumed Serials
+      const assigned: string[] = [];
+      for (let i = 0; i < line.qty; i++) {
+        const availableRow = matchingRows.find(r => r.serialCandidate !== null && !r.consumed);
+        if (!availableRow) break;
+        availableRow.consumed = true;
+        assigned.push(availableRow.serialCandidate!);
+      }
 
-      availableRow.consumed = true;
-      assignedCount++;
+      if (assigned.length === 0) return line;
+      assignedCount += assigned.length;
 
       return {
         ...line,
-        serialNumber: availableRow.serialCandidate,
+        serialNumbers: assigned,                   // PROJ-44-R6: Array (qty-basiert)
+        serialNumber: assigned[0] ?? null,         // Compat: erstes Element
         serialSource: 'serialList' as const,
       };
     });
 
-    const requiredCount = lines.filter(l => l.serialRequired && l.serialSource !== 'manual').length;  // PROJ-45-R5
-    const mismatchCount = requiredCount - assignedCount;
+    // PROJ-44-R6: Summe qty statt Zeilenanzahl
+    const requiredCount = lines
+      .filter(l => l.serialRequired && l.serialSource !== 'manual')
+      .reduce((sum, l) => sum + l.qty, 0);
+    const mismatchCount = Math.max(0, requiredCount - assignedCount);
     const checksumMatch = regexHits === assignedCount;
+
+    // PROJ-44-R6: Orphan-Catcher — unconsumed Serials nach Assignment
+    const orphanSerials = matchingRows
+      .filter(r => r.serialCandidate !== null && !r.consumed)
+      .map(r => r.serialCandidate!);
 
     if (!checksumMatch) {
       warnings.push({
@@ -601,6 +615,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       warnings,
       issues,
       checksum: { regexHits, assignedSNs: assignedCount, match: checksumMatch },
+      orphanSerials,  // PROJ-44-R6: Unconsumed Serials ohne passende Zeile
     };
   }
 }

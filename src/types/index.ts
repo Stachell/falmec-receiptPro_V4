@@ -271,6 +271,8 @@ export interface Run {
   /** PROJ-23: Whether invoiceLines have been expanded from aggregated (qty>1) to individual (qty=1) lines.
    *  Set to true after Run 3 of the MatchingEngine. Before that, lines are aggregated. */
   isExpanded: boolean;
+  /** PROJ-44-R6: Unzugeordnete Seriennummern aus Step 3 (EAN ohne passende Rechnungsposition) */
+  orphanSerials: string[];
 }
 
 export interface InvoiceLine {
