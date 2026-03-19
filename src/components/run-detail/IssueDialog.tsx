@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -117,6 +118,9 @@ interface ArticleFormData {
   descriptionDE: string;
   supplierId: string;
   orderNumberAssigned: string;
+  unitPriceSage: string;         // PROJ-45-R5: String wegen Input (parseFloat bei Submit)
+  quantity: number;              // PROJ-45-R5: Zahl, min=1
+  serialNumbers: string[];       // PROJ-45-R5: Array für S/N-Pop-up
 }
 
 function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string }) {
@@ -130,8 +134,12 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
     descriptionDE: line.descriptionDE ?? '',
     supplierId: line.supplierId ?? '',
     orderNumberAssigned: line.orderNumberAssigned ?? '',
+    unitPriceSage: line.unitPriceSage != null ? String(line.unitPriceSage) : '',  // PROJ-45-R5
+    quantity: line.qty ?? 1,                                                       // PROJ-45-R5
+    serialNumbers: line.serialNumbers?.length ? [...line.serialNumbers] : [],      // PROJ-45-R5
   }));
   const [saved, setSaved] = useState(false);
+  const [showSerialDialog, setShowSerialDialog] = useState(false);  // PROJ-45-R5
 
   const artNoRegexStr = globalConfig?.matcherProfileOverrides?.artNoDeRegex;
   const artNoRegex = artNoRegexStr
@@ -146,6 +154,13 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
 
   const handleSubmit = () => {
     if (!isValid) return;
+
+    // PROJ-45-R5: S/N bereinigen — slice auf quantity, trim, leere rauswerfen
+    const cleanedSerials = formData.serialNumbers
+      .slice(0, formData.quantity)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
     setManualArticleByPosition(line.positionIndex, {
       falmecArticleNo: formData.falmecArticleNo.trim(),
       manufacturerArticleNo: formData.manufacturerArticleNo || undefined,
@@ -155,6 +170,9 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
       descriptionDE: formData.descriptionDE || undefined,
       supplierId: formData.supplierId || undefined,
       orderNumberAssigned: formData.orderNumberAssigned || undefined,
+      unitPriceSage: formData.unitPriceSage ? parseFloat(formData.unitPriceSage) : undefined,  // PROJ-45-R5
+      quantity: formData.quantity,                                                               // PROJ-45-R5
+      serialNumbers: cleanedSerials.length > 0 ? cleanedSerials : undefined,                   // PROJ-45-R5
     }, runId);
     setSaved(true);
   };
@@ -230,7 +248,56 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
           <Label className="text-xs mb-0.5 block">Bestellnummer (JJJJ-XXXX)</Label>
           <Input value={formData.orderNumberAssigned} onChange={update('orderNumberAssigned')} className="h-7 text-xs text-white" placeholder="2024-0001" />
         </div>
+        {/* PROJ-45-R5: Sage ERP Preis */}
+        <div>
+          <Label className="text-xs mb-0.5 block">Sage ERP Preis (Netto)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.unitPriceSage}
+            onChange={(e) => {
+              setSaved(false);
+              setFormData(prev => ({ ...prev, unitPriceSage: e.target.value }));
+            }}
+            placeholder="0.00"
+            className="h-7 text-xs text-white"
+          />
+        </div>
+        {/* PROJ-45-R5: Menge Stepper */}
+        <div>
+          <Label className="text-xs mb-0.5 block">Menge</Label>
+          <Input
+            type="number"
+            min={1}
+            step={1}
+            value={formData.quantity}
+            onChange={(e) => {
+              setSaved(false);
+              const val = Math.max(1, parseInt(e.target.value, 10) || 1);
+              setFormData(prev => ({
+                ...prev,
+                quantity: val,
+                // PROJ-45-R5: Überschüssige S/N abschneiden wenn Menge reduziert wird
+                serialNumbers: prev.serialNumbers.slice(0, val),
+              }));
+            }}
+            className="h-7 w-20 text-xs text-white"
+          />
+        </div>
       </div>
+      {/* PROJ-45-R5: Serial eintragen Button */}
+      {formData.serialRequired && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowSerialDialog(true)}
+            className="h-7 px-3 text-xs rounded bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+          >
+            Serial eintragen ({formData.serialNumbers.filter(s => s.trim()).length}/{formData.quantity})
+          </button>
+        </div>
+      )}
       <div className="flex justify-end">
         <button
           disabled={!isValid}
@@ -244,6 +311,46 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
           {saved ? '✓ Übernommen' : 'Übernehmen'}
         </button>
       </div>
+
+      {/* PROJ-45-R5: S/N-Pop-up-Dialog — KEIN text-white (weißer shadcn bg-background)! */}
+      <Dialog open={showSerialDialog} onOpenChange={setShowSerialDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm text-white">
+              Seriennummern eintragen ({formData.quantity} Stück)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[40vh] overflow-y-auto py-2">
+            {Array.from({ length: formData.quantity }, (_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Label className="text-xs w-8 shrink-0">#{i + 1}</Label>
+                <Input
+                  value={formData.serialNumbers[i] ?? ''}
+                  onChange={(e) => {
+                    setSaved(false);
+                    setFormData(prev => {
+                      const updated = [...prev.serialNumbers];
+                      while (updated.length <= i) updated.push('');
+                      updated[i] = e.target.value;
+                      return { ...prev, serialNumbers: updated };
+                    });
+                  }}
+                  placeholder="z.B. K25645407008K"
+                  className="h-7 text-xs text-white"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setShowSerialDialog(false)}
+              className="h-7 px-3 text-xs rounded bg-teal-600 text-white hover:bg-teal-700"
+            >
+              Übernehmen
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

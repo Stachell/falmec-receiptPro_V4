@@ -544,6 +544,8 @@ export class FalmecMatcher_Master implements MatcherModule {
     // Assign serials to lines that require them
     let assignedCount = 0;
     const updatedLines = lines.map(line => {
+      // PROJ-45-R5: Manuelle S/N sind heilig — Step 3 darf sie nicht überschreiben
+      if (line.serialSource === 'manual') return line;
       if (!line.serialRequired) return line;
 
       // Find next unconsumed row with a serial candidate
@@ -560,7 +562,7 @@ export class FalmecMatcher_Master implements MatcherModule {
       };
     });
 
-    const requiredCount = lines.filter(l => l.serialRequired).length;
+    const requiredCount = lines.filter(l => l.serialRequired && l.serialSource !== 'manual').length;  // PROJ-45-R5
     const mismatchCount = requiredCount - assignedCount;
     const checksumMatch = regexHits === assignedCount;
 

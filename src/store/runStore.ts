@@ -418,6 +418,9 @@ interface ManualArticleData {
   descriptionDE?: string;
   supplierId?: string;
   orderNumberAssigned?: string;
+  unitPriceSage?: number;       // PROJ-45-R5: Manueller Sage ERP Netto-Preis
+  quantity?: number;            // PROJ-45-R5: Manuelle Rechnungsmenge
+  serialNumbers?: string[];     // PROJ-45-R5: Manuell eingegebene Seriennummern
 }
 
 interface RunState {
@@ -2819,7 +2822,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           ? (storageLocation.includes('KDD') ? 'KDD' : 'WE')
           : null;
 
-        const finalPrice = matched?.unitPriceNet ?? null;
+        const finalPrice = data.unitPriceSage ?? matched?.unitPriceNet ?? null;  // PROJ-45-R5: manueller Preis hat Vorrang
         const priceCheckStatus = (!finalPrice
           ? 'missing'
           : Math.abs(finalPrice - line.unitPriceInvoice) <= tolerance
@@ -2832,11 +2835,11 @@ export const useRunStore = create<RunState>((set, get) => ({
             ...line,
             falmecArticleNo: data.falmecArticleNo,
             matchStatus: 'full-match' as const,
-            unitPriceSage: matched.unitPriceNet,
+            unitPriceSage: data.unitPriceSage ?? matched.unitPriceNet,           // PROJ-45-R5
             descriptionDE: matched.descriptionDE ?? data.descriptionDE ?? line.descriptionDE,
             storageLocation,
             logicalStorageGroup,
-            serialRequired: matched.serialRequirement,  // serialRequirement → serialRequired!
+            serialRequired: data.serialRequired ?? matched.serialRequirement,    // PROJ-45-R5: Formular gewinnt
             manufacturerArticleNo: matched.manufacturerArticleNo || data.manufacturerArticleNo || line.manufacturerArticleNo,
             ean: matched.ean || data.ean || line.ean,
             supplierId: matched.supplierId ?? data.supplierId ?? line.supplierId,
@@ -2844,13 +2847,17 @@ export const useRunStore = create<RunState>((set, get) => ({
             priceCheckStatus,
             unitPriceFinal,
             orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,  // Hotfix: nicht vergessen
+            qty: data.quantity ?? line.qty,                                            // PROJ-45-R5
+            serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,  // PROJ-45-R5
+            serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber, // PROJ-45-R5
+            serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,     // PROJ-45-R5
           };
         } else {
           return {
             ...line,
             falmecArticleNo: data.falmecArticleNo,
             matchStatus: 'full-match' as const,
-            unitPriceSage: null,
+            unitPriceSage: data.unitPriceSage ?? null,                            // PROJ-45-R5
             descriptionDE: data.descriptionDE ?? line.descriptionDE,
             storageLocation,
             logicalStorageGroup,
@@ -2861,6 +2868,10 @@ export const useRunStore = create<RunState>((set, get) => ({
             priceCheckStatus,
             unitPriceFinal,
             orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,  // Hotfix: nicht vergessen
+            qty: data.quantity ?? line.qty,                                            // PROJ-45-R5
+            serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,  // PROJ-45-R5
+            serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber, // PROJ-45-R5
+            serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,     // PROJ-45-R5
           };
         }
       }),
@@ -3613,6 +3624,8 @@ export const useRunStore = create<RunState>((set, get) => ({
         let assignedCount = 0;
         let requiredCount = 0;
         const updatedRunLines = runLines.map(line => {
+          // PROJ-45-R5: Manuelle S/N sind heilig — Step 3 darf sie nicht überschreiben
+          if (line.serialSource === 'manual') return line;
           if (!line.serialRequired) return line;
           requiredCount += line.qty;
 
