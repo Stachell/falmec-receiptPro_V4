@@ -171,7 +171,7 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
             value={formData.falmecArticleNo}
             onChange={update('falmecArticleNo')}
             placeholder="1XXXXX"
-            className={`h-7 text-xs ${!isValid && formData.falmecArticleNo ? 'border-red-400' : ''}`}
+            className={`h-7 text-xs text-white ${!isValid && formData.falmecArticleNo ? 'border-red-400' : ''}`}
           />
           {!isValid && formData.falmecArticleNo && (
             <p className="text-xs text-red-500 mt-0.5">{'Format: ^1\\d{5}$'}</p>
@@ -179,15 +179,15 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">Hersteller-Art-Nr</Label>
-          <Input value={formData.manufacturerArticleNo} onChange={update('manufacturerArticleNo')} className="h-7 text-xs" />
+          <Input value={formData.manufacturerArticleNo} onChange={update('manufacturerArticleNo')} className="h-7 text-xs text-white" />
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">EAN</Label>
-          <Input value={formData.ean} onChange={update('ean')} className="h-7 text-xs" />
+          <Input value={formData.ean} onChange={update('ean')} className="h-7 text-xs text-white" />
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">Bezeichnung (DE)</Label>
-          <Input value={formData.descriptionDE} onChange={update('descriptionDE')} className="h-7 text-xs" />
+          <Input value={formData.descriptionDE} onChange={update('descriptionDE')} className="h-7 text-xs text-white" />
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">S/N-Pflicht</Label>
@@ -198,7 +198,7 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
               setFormData(prev => ({ ...prev, serialRequired: v === 'ja' }));
             }}
           >
-            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-7 text-xs text-white"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="nein">Nein</SelectItem>
               <SelectItem value="ja">Ja</SelectItem>
@@ -214,7 +214,7 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
               setFormData(prev => ({ ...prev, storageLocation: v }));
             }}
           >
-            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Wählen..." /></SelectTrigger>
+            <SelectTrigger className="h-7 text-xs text-white"><SelectValue placeholder="Wählen..." /></SelectTrigger>
             <SelectContent>
               {(STORAGE_LOCATIONS as readonly string[]).map(loc => (
                 <SelectItem key={loc} value={loc}>{loc}</SelectItem>
@@ -224,11 +224,11 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">Lieferant</Label>
-          <Input value={formData.supplierId} onChange={update('supplierId')} className="h-7 text-xs" />
+          <Input value={formData.supplierId} onChange={update('supplierId')} className="h-7 text-xs text-white" />
         </div>
         <div>
           <Label className="text-xs mb-0.5 block">Bestellnummer (JJJJ-XXXX)</Label>
-          <Input value={formData.orderNumberAssigned} onChange={update('orderNumberAssigned')} className="h-7 text-xs" placeholder="2024-0001" />
+          <Input value={formData.orderNumberAssigned} onChange={update('orderNumberAssigned')} className="h-7 text-xs text-white" placeholder="2024-0001" />
         </div>
       </div>
       <div className="flex justify-end">

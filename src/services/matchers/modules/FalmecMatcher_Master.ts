@@ -262,26 +262,6 @@ export class FalmecMatcher_Master implements MatcherModule {
     const noMatchNoConflict = matchResults.filter(r => r.line.matchStatus === 'no-match' && !r.isConflict);
     const conflictResults = matchResults.filter(r => r.isConflict);
 
-    // Rollup: no-article-match (backwards-compatible summary)
-    const allNoMatch = matchResults.filter(r => r.line.matchStatus === 'no-match');
-    if (allNoMatch.length > 0) {
-      issues.push({
-        id: `issue-${runId}-step2-no-match-${Date.now()}`,
-        runId,
-        severity: 'error',
-        stepNo: 2,
-        type: 'no-article-match',
-        message: `${allNoMatch.length} Artikel ohne Match in Stammdaten`,
-        details: `${allNoMatch.length} Artikel ohne Match in Stammdaten`,
-        relatedLineIds: allNoMatch.map(r => r.line.lineId),
-        affectedLineIds: allNoMatch.map(r => r.line.lineId),
-        status: 'open',
-        createdAt: now,
-        resolvedAt: null,
-        resolutionNote: null,
-      });
-    }
-
     // Granular: match-artno-not-found (no-match lines that are NOT conflicts)
     if (noMatchNoConflict.length > 0) {
       issues.push({
