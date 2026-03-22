@@ -223,23 +223,22 @@ export class FalmecMatcher_Master implements MatcherModule {
         && (!l.supplierId || !SUPPLIER_REGEX.test(l.supplierId))
     );
 
-    if (supplierIssueLines.length > 0) {
+    for (const l of supplierIssueLines) {
       issues.push({
-        id: `issue-${runId}-step2-supplier-item-${Date.now()}`,
+        id: `issue-${runId}-step2-supplier-pos${l.positionIndex}`,
         runId,
         severity: 'warning',
         stepNo: 2,
         type: 'supplier-missing',
-        message: `Lieferant fehlt/ungültig bei ${supplierIssueLines.length} gematchten Artikeln`,
-        details: supplierIssueLines
-          .map(l => `${l.falmecArticleNo || l.manufacturerArticleNo}: "${l.supplierId ?? 'leer'}"`)
-          .join(', '),
-        relatedLineIds: supplierIssueLines.map(l => l.lineId),
-        affectedLineIds: supplierIssueLines.map(l => l.lineId),
+        message: `Pos ${l.positionIndex}: Lieferant fehlt/ungültig`,
+        details: `${l.falmecArticleNo || l.manufacturerArticleNo}: "${l.supplierId ?? 'leer'}"`,
+        relatedLineIds: [l.lineId],
+        affectedLineIds: [l.lineId],
         status: 'open',
         createdAt: now,
         resolvedAt: null,
         resolutionNote: null,
+        context: { positionIndex: l.positionIndex, field: 'supplierId' },
       });
     }
 
@@ -263,40 +262,42 @@ export class FalmecMatcher_Master implements MatcherModule {
     const conflictResults = matchResults.filter(r => r.isConflict);
 
     // Granular: match-artno-not-found (no-match lines that are NOT conflicts)
-    if (noMatchNoConflict.length > 0) {
+    for (const r of noMatchNoConflict) {
       issues.push({
-        id: `issue-${runId}-step2-artno-${Date.now()}`,
+        id: `issue-${runId}-step2-artno-pos${r.line.positionIndex}`,
         runId,
         severity: 'error',
         stepNo: 2,
         type: 'match-artno-not-found',
-        message: `${noMatchNoConflict.length} Zeilen: Artikelnummer/EAN nicht im Stamm gefunden`,
-        details: `${noMatchNoConflict.length} Zeilen: Artikelnummer/EAN nicht im Stamm`,
-        relatedLineIds: noMatchNoConflict.map(r => r.line.lineId),
-        affectedLineIds: noMatchNoConflict.map(r => r.line.lineId),
+        message: `Pos ${r.line.positionIndex}: Artikelnummer/EAN nicht im Stamm gefunden`,
+        details: `${r.line.manufacturerArticleNo || r.line.ean || r.line.lineId}: ${r.reason}`,
+        relatedLineIds: [r.line.lineId],
+        affectedLineIds: [r.line.lineId],
         status: 'open',
         createdAt: now,
         resolvedAt: null,
         resolutionNote: null,
+        context: { positionIndex: r.line.positionIndex, field: 'matchStatus', expectedValue: 'full-match' },
       });
     }
 
     // Granular: match-conflict-id
-    if (conflictResults.length > 0) {
+    for (const r of conflictResults) {
       issues.push({
-        id: `issue-${runId}-step2-conflict-${Date.now()}`,
+        id: `issue-${runId}-step2-conflict-pos${r.line.positionIndex}`,
         runId,
         severity: 'error',
         stepNo: 2,
         type: 'match-conflict-id',
-        message: `${conflictResults.length} Zeilen: ArtNo/EAN-Konflikt (verschiedene Artikel)`,
-        details: `${conflictResults.length} Zeilen: ArtNo/EAN-Konflikt`,
-        relatedLineIds: conflictResults.map(r => r.line.lineId),
-        affectedLineIds: conflictResults.map(r => r.line.lineId),
+        message: `Pos ${r.line.positionIndex}: ArtNo/EAN-Konflikt (verschiedene Artikel)`,
+        details: `${r.line.manufacturerArticleNo || r.line.ean}: ${r.reason}`,
+        relatedLineIds: [r.line.lineId],
+        affectedLineIds: [r.line.lineId],
         status: 'open',
         createdAt: now,
         resolvedAt: null,
         resolutionNote: null,
+        context: { positionIndex: r.line.positionIndex, field: 'matchStatus', expectedValue: 'full-match' },
       });
     }
 
@@ -590,23 +591,28 @@ export class FalmecMatcher_Master implements MatcherModule {
 
     // PROJ-17: Issue when not enough serials for required lines
     if (mismatchCount > 0) {
-      const unassignedLineIds = updatedLines
-        .filter(l => l.serialRequired && !l.serialNumber)
-        .map(l => l.lineId);
-      issues.push({
-        id: `issue-step3-insufficient-${Date.now()}`,
-        severity: 'warning',
-        stepNo: 3,
-        type: 'sn-insufficient-count',
-        message: `${mismatchCount} Zeilen ohne Seriennummer (${assignedCount}/${requiredCount} zugewiesen)`,
-        details: `${mismatchCount} Zeilen ohne Seriennummer (${assignedCount}/${requiredCount} zugewiesen)`,
-        relatedLineIds: unassignedLineIds,
-        affectedLineIds: unassignedLineIds,
-        status: 'open',
-        createdAt: new Date().toISOString(),
-        resolvedAt: null,
-        resolutionNote: null,
-      });
+      const unassignedLines = updatedLines.filter(l => l.serialRequired && !l.serialNumber);
+      // Dedup: 1 Issue pro positionIndex (defensiv gegen expandierte Zeilen bei Re-Run)
+      const seenPositions = new Set<number>();
+      for (const l of unassignedLines) {
+        if (seenPositions.has(l.positionIndex)) continue;
+        seenPositions.add(l.positionIndex);
+        issues.push({
+          id: `issue-step3-insufficient-pos${l.positionIndex}`,
+          severity: 'warning',
+          stepNo: 3,
+          type: 'sn-insufficient-count',
+          message: `Pos ${l.positionIndex}: Seriennummer fehlt`,
+          details: `${l.falmecArticleNo || l.manufacturerArticleNo || l.lineId}: S/N nicht zugewiesen`,
+          relatedLineIds: [l.lineId],
+          affectedLineIds: [l.lineId],
+          status: 'open',
+          createdAt: new Date().toISOString(),
+          resolvedAt: null,
+          resolutionNote: null,
+          context: { positionIndex: l.positionIndex, field: 'serialNumbers' },
+        });
+      }
     }
 
     return {

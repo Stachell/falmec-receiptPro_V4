@@ -66,54 +66,61 @@ function buildEngineIssues(
   const issues: Issue[] = [];
   const now = new Date().toISOString();
 
-  // 1. order-no-match: Expanded lines without any order assignment
+  // 1. order-no-match: 1 Issue pro positionIndex (EXPANDIERT — Dedup zwingend)
   const notOrderedLines = expandedLines.filter(l => l.orderAssignmentReason === 'not-ordered');
-  if (notOrderedLines.length > 0) {
-    // Group by positionIndex for cleaner reporting
-    const positionIndices = new Set(notOrderedLines.map(l => l.positionIndex));
-    issues.push({
-      id: `issue-${runId}-step4-not-ordered-${Date.now()}`,
-      runId,
-      severity: 'warning',
-      stepNo: 4,
-      type: 'order-no-match',
-      message: `${positionIndices.size} Positionen (${notOrderedLines.length} Einzelartikel) ohne Bestellzuordnung`,
-      details: `${positionIndices.size} Positionen ohne Bestellzuordnung`,
-      relatedLineIds: notOrderedLines.map(l => l.lineId),
-      affectedLineIds: notOrderedLines.map(l => l.lineId),
-      status: 'open',
-      createdAt: now,
-      resolvedAt: null,
-      resolutionNote: null,
-      context: { field: 'orderAssignmentReason', expectedValue: 'assigned', actualValue: 'not-ordered' },
-    });
+  {
+    const seenPositions = new Set<number>();
+    for (const l of notOrderedLines) {
+      if (seenPositions.has(l.positionIndex)) continue;
+      seenPositions.add(l.positionIndex);
+      issues.push({
+        id: `issue-${runId}-step4-not-ordered-pos${l.positionIndex}`,
+        runId,
+        severity: 'warning',
+        stepNo: 4,
+        type: 'order-no-match',
+        message: `Pos ${l.positionIndex}: Keine Bestellzuordnung`,
+        details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+        relatedLineIds: [l.lineId],
+        affectedLineIds: [l.lineId],
+        status: 'open',
+        createdAt: now,
+        resolvedAt: null,
+        resolutionNote: null,
+        context: { positionIndex: l.positionIndex, field: 'orderAssignmentReason', expectedValue: 'assigned', actualValue: 'not-ordered' },
+      });
+    }
   }
 
-  // 2. order-fifo-only: Positions assigned exclusively via FIFO (no PDF reference)
+  // 2. order-fifo-only: 1 Issue pro positionIndex (EXPANDIERT — Dedup zwingend)
   const fifoOnlyLines = expandedLines.filter(l =>
     l.allocatedOrders.length > 0 && l.allocatedOrders.every(a => a.reason === 'fifo-fallback')
   );
-  if (fifoOnlyLines.length > 0) {
-    const positionIndices = new Set(fifoOnlyLines.map(l => l.positionIndex));
-    issues.push({
-      id: `issue-${runId}-step4-fifo-only-${Date.now()}`,
-      runId,
-      severity: 'info',
-      stepNo: 4,
-      type: 'order-fifo-only',
-      message: `${positionIndices.size} Positionen nur via FIFO zugeordnet (keine PDF-Referenz)`,
-      details: `${positionIndices.size} Positionen nur via FIFO zugeordnet`,
-      relatedLineIds: fifoOnlyLines.map(l => l.lineId),
-      affectedLineIds: fifoOnlyLines.map(l => l.lineId),
-      status: 'open',
-      createdAt: now,
-      resolvedAt: null,
-      resolutionNote: null,
-      context: { field: 'orderAssignmentReason', expectedValue: 'reference-match', actualValue: 'fifo-fallback' },
-    });
+  {
+    const seenPositions = new Set<number>();
+    for (const l of fifoOnlyLines) {
+      if (seenPositions.has(l.positionIndex)) continue;
+      seenPositions.add(l.positionIndex);
+      issues.push({
+        id: `issue-${runId}-step4-fifo-only-pos${l.positionIndex}`,
+        runId,
+        severity: 'info',
+        stepNo: 4,
+        type: 'order-fifo-only',
+        message: `Pos ${l.positionIndex}: Nur via FIFO zugeordnet`,
+        details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+        relatedLineIds: [l.lineId],
+        affectedLineIds: [l.lineId],
+        status: 'open',
+        createdAt: now,
+        resolvedAt: null,
+        resolutionNote: null,
+        context: { positionIndex: l.positionIndex, field: 'orderAssignmentReason', expectedValue: 'reference-match', actualValue: 'fifo-fallback' },
+      });
+    }
   }
 
-  // 3. order-multi-split: Positions where expanded lines reference 3+ different orders
+  // 3. order-multi-split: 1 Issue pro positionIndex (Map-Entries bereits eindeutig)
   const positionOrders = new Map<number, Set<string>>();
   for (const line of expandedLines) {
     if (line.orderNumberAssigned) {
@@ -124,25 +131,24 @@ function buildEngineIssues(
   }
   const multiSplitPositions = Array.from(positionOrders.entries())
     .filter(([, orders]) => orders.size >= 3);
-  if (multiSplitPositions.length > 0) {
-    const relatedLines = expandedLines.filter(l =>
-      multiSplitPositions.some(([pi]) => l.positionIndex === pi)
-    );
+  for (const [pi, orders] of multiSplitPositions) {
+    const representative = expandedLines.find(l => l.positionIndex === pi);
+    if (!representative) continue;
     issues.push({
-      id: `issue-${runId}-step4-multi-split-${Date.now()}`,
+      id: `issue-${runId}-step4-multi-split-pos${pi}`,
       runId,
       severity: 'info',
       stepNo: 4,
       type: 'order-multi-split',
-      message: `${multiSplitPositions.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      details: `${multiSplitPositions.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      relatedLineIds: relatedLines.map(l => l.lineId),
-      affectedLineIds: relatedLines.map(l => l.lineId),
+      message: `Pos ${pi}: Auf ${orders.size} Bestellungen aufgeteilt`,
+      details: `${representative.falmecArticleNo ?? representative.manufacturerArticleNo ?? representative.lineId}: ${orders.size} Bestellungen`,
+      relatedLineIds: [representative.lineId],
+      affectedLineIds: [representative.lineId],
       status: 'open',
       createdAt: now,
       resolvedAt: null,
       resolutionNote: null,
-      context: { field: 'allocatedOrders' },
+      context: { positionIndex: pi, field: 'allocatedOrders' },
     });
   }
 

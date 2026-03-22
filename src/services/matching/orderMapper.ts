@@ -332,93 +332,93 @@ export function mapAllOrders(
   const issues: Issue[] = [];
   const now = new Date().toISOString();
 
-  // 1. order-no-match: Positions without any order assignment
+  // 1. order-no-match: 1 Issue pro positionIndex (AGGREGIERT — kein Dedup nötig)
   const notOrderedLines = updatedLines.filter(l => l.orderAssignmentReason === 'not-ordered');
-  if (notOrderedLines.length > 0) {
+  for (const l of notOrderedLines) {
     issues.push({
-      id: `issue-${runId}-step4-not-ordered-${Date.now()}`,
+      id: `issue-${runId}-step4-not-ordered-pos${l.positionIndex}`,
       runId,
       severity: 'warning',
       stepNo: 4,
       type: 'order-no-match',
-      message: `${notOrderedLines.length} Positionen ohne Bestellzuordnung`,
-      details: `${notOrderedLines.length} Positionen ohne Bestellzuordnung`,
-      relatedLineIds: notOrderedLines.map(l => l.lineId),
-      affectedLineIds: notOrderedLines.map(l => l.lineId),
+      message: `Pos ${l.positionIndex}: Keine Bestellzuordnung`,
+      details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+      relatedLineIds: [l.lineId],
+      affectedLineIds: [l.lineId],
       status: 'open',
       createdAt: now,
       resolvedAt: null,
       resolutionNote: null,
-      context: { field: 'orderAssignmentReason', expectedValue: 'assigned', actualValue: 'not-ordered' },
+      context: { positionIndex: l.positionIndex, field: 'orderAssignmentReason', expectedValue: 'assigned', actualValue: 'not-ordered' },
     });
   }
 
-  // 2. PROJ-21: order-incomplete — allocated qty < line.qty (partial assignment)
+  // 2. PROJ-21: order-incomplete — 1 Issue pro positionIndex
   const incompleteLines = updatedLines.filter(l => {
     if (l.allocatedOrders.length === 0) return false;
     const allocated = l.allocatedOrders.reduce((s, a) => s + a.qty, 0);
     return allocated > 0 && allocated < l.qty;
   });
-  if (incompleteLines.length > 0) {
+  for (const l of incompleteLines) {
     issues.push({
-      id: `issue-${runId}-step4-incomplete-${Date.now()}`,
+      id: `issue-${runId}-step4-incomplete-pos${l.positionIndex}`,
       runId,
       severity: 'warning',
       stepNo: 4,
       type: 'order-incomplete',
-      message: `${incompleteLines.length} Positionen nicht vollständig zugeordnet`,
-      details: `${incompleteLines.length} Positionen nicht vollständig zugeordnet`,
-      relatedLineIds: incompleteLines.map(l => l.lineId),
-      affectedLineIds: incompleteLines.map(l => l.lineId),
+      message: `Pos ${l.positionIndex}: Nicht vollständig zugeordnet`,
+      details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+      relatedLineIds: [l.lineId],
+      affectedLineIds: [l.lineId],
       status: 'open',
       createdAt: now,
       resolvedAt: null,
       resolutionNote: null,
-      context: { field: 'allocatedOrders', expectedValue: 'qty' },
+      context: { positionIndex: l.positionIndex, field: 'allocatedOrders', expectedValue: 'qty' },
     });
   }
 
-  // 3. PROJ-21: order-multi-split — position split across 3+ orders
+  // 3. PROJ-21: order-multi-split — 1 Issue pro positionIndex
   const multiSplitLines = updatedLines.filter(l => l.allocatedOrders.length >= 3);
-  if (multiSplitLines.length > 0) {
+  for (const l of multiSplitLines) {
     issues.push({
-      id: `issue-${runId}-step4-multi-split-${Date.now()}`,
+      id: `issue-${runId}-step4-multi-split-pos${l.positionIndex}`,
       runId,
       severity: 'info',
       stepNo: 4,
       type: 'order-multi-split',
-      message: `${multiSplitLines.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      details: `${multiSplitLines.length} Positionen auf 3+ Bestellungen aufgeteilt`,
-      relatedLineIds: multiSplitLines.map(l => l.lineId),
-      affectedLineIds: multiSplitLines.map(l => l.lineId),
+      message: `Pos ${l.positionIndex}: Auf ${l.allocatedOrders.length} Bestellungen aufgeteilt`,
+      details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+      relatedLineIds: [l.lineId],
+      affectedLineIds: [l.lineId],
       status: 'open',
       createdAt: now,
       resolvedAt: null,
       resolutionNote: null,
-      context: { field: 'allocatedOrders' },
+      context: { positionIndex: l.positionIndex, field: 'allocatedOrders' },
     });
   }
 
-  // 4. PROJ-21: order-fifo-only — position assigned exclusively via FIFO (no PDF reference)
+  // 4. PROJ-21: order-fifo-only — 1 Issue pro positionIndex
   const fifoOnlyLines = updatedLines.filter(l =>
     l.allocatedOrders.length > 0 && l.allocatedOrders.every(a => a.reason === 'fifo-fallback')
   );
-  if (fifoOnlyLines.length > 0) {
+  for (const l of fifoOnlyLines) {
     issues.push({
-      id: `issue-${runId}-step4-fifo-only-${Date.now()}`,
+      id: `issue-${runId}-step4-fifo-only-pos${l.positionIndex}`,
       runId,
       severity: 'info',
       stepNo: 4,
       type: 'order-fifo-only',
-      message: `${fifoOnlyLines.length} Positionen nur via FIFO zugeordnet (keine PDF-Referenz)`,
-      details: `${fifoOnlyLines.length} Positionen nur via FIFO zugeordnet`,
-      relatedLineIds: fifoOnlyLines.map(l => l.lineId),
-      affectedLineIds: fifoOnlyLines.map(l => l.lineId),
+      message: `Pos ${l.positionIndex}: Nur via FIFO zugeordnet`,
+      details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+      relatedLineIds: [l.lineId],
+      affectedLineIds: [l.lineId],
       status: 'open',
       createdAt: now,
       resolvedAt: null,
       resolutionNote: null,
-      context: { field: 'orderAssignmentReason', expectedValue: 'reference-match', actualValue: 'fifo-fallback' },
+      context: { positionIndex: l.positionIndex, field: 'orderAssignmentReason', expectedValue: 'reference-match', actualValue: 'fifo-fallback' },
     });
   }
 

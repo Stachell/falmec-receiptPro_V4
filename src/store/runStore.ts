@@ -354,20 +354,22 @@ function buildArticleMatchIssues(runId: string, lines: InvoiceLine[]): Issue[] {
   const noMatchLines = lines.filter(l => l.matchStatus === 'no-match');
   if (noMatchLines.length === 0) return [];
 
-  return [{
-    id: `issue-${runId}-step2-no-match-${Date.now()}`,
+  return noMatchLines.map(l => ({
+    id: `issue-${runId}-step2-no-match-pos${l.positionIndex}`,
     runId,
-    severity: 'error',
+    severity: 'error' as const,
     stepNo: 2,
-    type: 'no-article-match',
-    message: `${noMatchLines.length} Artikel ohne Match in Stammdaten`,
-    details: noMatchLines.map(l => l.manufacturerArticleNo || l.ean || l.lineId).join(', '),
-    relatedLineIds: noMatchLines.map(l => l.lineId),
-    status: 'open',
+    type: 'no-article-match' as const,
+    message: `Pos ${l.positionIndex}: Artikel ohne Match in Stammdaten`,
+    details: `${l.manufacturerArticleNo || l.ean || l.lineId}`,
+    relatedLineIds: [l.lineId],
+    affectedLineIds: [l.lineId],
+    status: 'open' as const,
     createdAt: new Date().toISOString(),
     resolvedAt: null,
     resolutionNote: null,
-  }];
+    context: { positionIndex: l.positionIndex, field: 'matchStatus', expectedValue: 'full-match' },
+  }));
 }
 
 function formatOrderParserDiagnostics(diagnostics?: OrderParserSelectionDiagnostics): string {
@@ -2403,31 +2405,36 @@ export const useRunStore = create<RunState>((set, get) => ({
     // Generate new issues for still-failing conditions (no duplicates)
     const newIssues: Issue[] = [];
 
-    // missing-storage-location
+    // missing-storage-location — 1 Issue pro positionIndex (EXPANDIERT — Dedup zwingend)
     const missingLocLines = lines.filter(l => !l.storageLocation);
-    if (missingLocLines.length > 0) {
-      const existingOpen = updatedIssues.find(
-        i => i.runId === runId && i.stepNo === 5 && i.type === 'missing-storage-location'
-          && (i.status === 'open' || i.status === 'pending'),
-      );
-      if (!existingOpen) {
-        newIssues.push({
-          id: `issue-${runId}-step5-missing-loc-${Date.now()}`,
-          runId,
-          severity: 'error',
-          stepNo: 5,
-          type: 'missing-storage-location',
-          message: `${missingLocLines.length} Zeile(n) ohne Lagerort`,
-          details: missingLocLines.slice(0, 15).map(l =>
-            `Pos ${l.positionIndex}: ${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`
-          ).join(', ') + (missingLocLines.length > 15 ? ` ... (+${missingLocLines.length - 15} weitere)` : ''),
-          relatedLineIds: missingLocLines.map(l => l.lineId),
-          affectedLineIds: missingLocLines.map(l => l.lineId),
-          status: 'open',
-          createdAt: now,
-          resolvedAt: null,
-          resolutionNote: null,
-        });
+    {
+      const seenPositions = new Set<number>();
+      for (const l of missingLocLines) {
+        if (seenPositions.has(l.positionIndex)) continue;
+        seenPositions.add(l.positionIndex);
+        const existingOpen = updatedIssues.find(
+          i => i.runId === runId && i.stepNo === 5 && i.type === 'missing-storage-location'
+            && (i.status === 'open' || i.status === 'pending')
+            && i.context?.positionIndex === l.positionIndex,
+        );
+        if (!existingOpen) {
+          newIssues.push({
+            id: `issue-${runId}-step5-missing-loc-pos${l.positionIndex}`,
+            runId,
+            severity: 'error',
+            stepNo: 5,
+            type: 'missing-storage-location',
+            message: `Pos ${l.positionIndex}: Lagerort fehlt`,
+            details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}`,
+            relatedLineIds: [l.lineId],
+            affectedLineIds: [l.lineId],
+            status: 'open',
+            createdAt: now,
+            resolvedAt: null,
+            resolutionNote: null,
+            context: { positionIndex: l.positionIndex, field: 'storageLocation' },
+          });
+        }
       }
     }
 
@@ -2755,6 +2762,12 @@ export const useRunStore = create<RunState>((set, get) => ({
         ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
         : state.currentRun,
     }));
+
+    // PROJ-44-ADD-ON-R7: Auto-Resolve nach manuellem Preis (analog setManualPriceByPosition)
+    const runIdForRefresh = get().currentRun?.id;
+    if (runIdForRefresh) {
+      get().refreshIssues(runIdForRefresh);
+    }
   },
 
   // ─── PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position ──
@@ -3000,6 +3013,9 @@ export const useRunStore = create<RunState>((set, get) => ({
         );
       }
     }
+
+    // PROJ-44-ADD-ON: Auto-resolve serial issues after manual S/N update
+    get().refreshIssues(targetRunId);
   },
 
   // ─── PROJ-42-ADD-ON: Buchungsdatum (einmalig beim ersten Export) ───
@@ -3544,7 +3560,7 @@ export const useRunStore = create<RunState>((set, get) => ({
         }
       }
 
-      // New: price-mismatch issue (warning)
+      // New: price-mismatch issue (warning) — 1 Issue pro positionIndex
       const priceMismatchLines = enrichedLines.filter(l => l.priceCheckStatus === 'mismatch');
       if (priceMismatchLines.length > 0) {
         // Deduplicate by positionIndex (enrichedLines may have multiple expansion rows per position)
@@ -3554,28 +3570,27 @@ export const useRunStore = create<RunState>((set, get) => ({
           seenPositions.add(l.positionIndex);
           return true;
         });
-        step2Issues.push({
-          id: `issue-${runId}-step2-price-mismatch-${Date.now()}`,
-          runId,
-          severity: 'warning',
-          stepNo: 2,
-          type: 'price-mismatch',
-          message: `${uniquePriceMismatch.length} Positionen mit Preisabweichung`,
-          details: uniquePriceMismatch.slice(0, 15).map(l =>
-            `Pos ${l.positionIndex}: ${l.unitPriceInvoice.toFixed(2)}€ vs ${(l.unitPriceSage ?? 0).toFixed(2)}€`
-          ).join(', ') + (uniquePriceMismatch.length > 15 ? ` ... (+${uniquePriceMismatch.length - 15} weitere)` : ''),
-          relatedLineIds: priceMismatchLines.map(l => l.lineId),
-          // PROJ-43 Bug-Fix: affectedLineIds was missing
-          affectedLineIds: priceMismatchLines.map(l => l.lineId),
-          status: 'open',
-          createdAt: now21,
-          resolvedAt: null,
-          resolutionNote: null,
-          context: { field: 'priceCheckStatus', expectedValue: 'ok', actualValue: 'mismatch' },
-        });
+        for (const l of uniquePriceMismatch) {
+          step2Issues.push({
+            id: `issue-${runId}-step2-price-mismatch-pos${l.positionIndex}`,
+            runId,
+            severity: 'warning',
+            stepNo: 2,
+            type: 'price-mismatch',
+            message: `Pos ${l.positionIndex}: Preisabweichung RE ${l.unitPriceInvoice.toFixed(2)}€ vs. Sage ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
+            details: `${l.falmecArticleNo ?? l.manufacturerArticleNo} — RE ${l.unitPriceInvoice.toFixed(2)}€, Sage ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
+            relatedLineIds: [l.lineId],
+            affectedLineIds: [l.lineId],
+            status: 'open',
+            createdAt: now21,
+            resolvedAt: null,
+            resolutionNote: null,
+            context: { positionIndex: l.positionIndex, field: 'priceCheckStatus', expectedValue: 'ok', actualValue: 'mismatch' },
+          });
+        }
       }
 
-      // New: inactive-article issue (info)
+      // New: inactive-article issue (info) — 1 Issue pro positionIndex
       const inactiveLines = enrichedLines.filter(l => l.activeFlag === false && l.matchStatus !== 'no-match');
       if (inactiveLines.length > 0) {
         const seenPositions = new Set<number>();
@@ -3584,25 +3599,24 @@ export const useRunStore = create<RunState>((set, get) => ({
           seenPositions.add(l.positionIndex);
           return true;
         });
-        step2Issues.push({
-          id: `issue-${runId}-step2-inactive-${Date.now()}`,
-          runId,
-          severity: 'info',
-          stepNo: 2,
-          type: 'inactive-article',
-          message: `${uniqueInactive.length} inaktive Artikel im Stamm`,
-          details: uniqueInactive.slice(0, 15).map(l =>
-            `Pos ${l.positionIndex}: ${l.falmecArticleNo ?? l.manufacturerArticleNo}`
-          ).join(', ') + (uniqueInactive.length > 15 ? ` ... (+${uniqueInactive.length - 15} weitere)` : ''),
-          relatedLineIds: inactiveLines.map(l => l.lineId),
-          // PROJ-43 Bug-Fix: affectedLineIds was missing
-          affectedLineIds: inactiveLines.map(l => l.lineId),
-          status: 'open',
-          createdAt: now21,
-          resolvedAt: null,
-          resolutionNote: null,
-          context: { field: 'activeFlag', expectedValue: 'true', actualValue: 'false' },
-        });
+        for (const l of uniqueInactive) {
+          step2Issues.push({
+            id: `issue-${runId}-step2-inactive-pos${l.positionIndex}`,
+            runId,
+            severity: 'info',
+            stepNo: 2,
+            type: 'inactive-article',
+            message: `Pos ${l.positionIndex}: Inaktiver Artikel im Stamm`,
+            details: `${l.falmecArticleNo ?? l.manufacturerArticleNo}`,
+            relatedLineIds: [l.lineId],
+            affectedLineIds: [l.lineId],
+            status: 'open',
+            createdAt: now21,
+            resolvedAt: null,
+            resolutionNote: null,
+            context: { positionIndex: l.positionIndex, field: 'activeFlag', expectedValue: 'true', actualValue: 'false' },
+          });
+        }
       }
 
       set((state) => {
@@ -3747,26 +3761,28 @@ export const useRunStore = create<RunState>((set, get) => ({
         const step3Issues: Issue[] = [];
         if (!checksumMatch) {
           const underServedLines = updatedRunLines.filter(l => l.serialRequired && l.serialNumbers.length < l.qty);
-          step3Issues.push({
-            id: `issue-${runId}-step3-sn-mismatch-${Date.now()}`,
-            runId,
-            severity: shouldHardFail ? 'error' : 'warning',
-            stepNo: 3,
-            type: 'serial-mismatch',
-            message: shouldHardFail
-              ? `Pflicht-S/N fehlen: ${assignedCount}/${requiredCount} zugewiesen`
-              : `S/N Zuordnung unvollständig: ${assignedCount}/${requiredCount} zugewiesen`,
-            details: underServedLines.slice(0, 20).map(l =>
-              `Pos ${l.positionIndex}: ${l.serialNumbers.length}/${l.qty} S/N`
-            ).join(', ') + (underServedLines.length > 20 ? ` ... (+${underServedLines.length - 20} weitere)` : ''),
-            relatedLineIds: underServedLines.map(l => l.lineId),
-            affectedLineIds: underServedLines.map(l => l.lineId),  // PROJ-41: Fehlercenter-Rendering
-            status: 'open',
-            createdAt: new Date().toISOString(),
-            resolvedAt: null,
-            resolutionNote: null,
-            context: { field: 'serialNumbers', expectedValue: 'qty', actualValue: `${assignedCount}/${requiredCount}` },
-          });
+          // Dedup: 1 Issue pro positionIndex (defensiv gegen expandierte Zeilen bei Re-Run)
+          const seenPositions = new Set<number>();
+          for (const l of underServedLines) {
+            if (seenPositions.has(l.positionIndex)) continue;
+            seenPositions.add(l.positionIndex);
+            step3Issues.push({
+              id: `issue-${runId}-step3-sn-mismatch-pos${l.positionIndex}`,
+              runId,
+              severity: shouldHardFail ? 'error' : 'warning',
+              stepNo: 3,
+              type: 'serial-mismatch',
+              message: `Pos ${l.positionIndex}: S/N fehlt (${l.serialNumbers.length}/${l.qty})`,
+              details: `${l.falmecArticleNo ?? l.manufacturerArticleNo ?? l.lineId}: ${l.serialNumbers.length}/${l.qty} S/N zugewiesen`,
+              relatedLineIds: [l.lineId],
+              affectedLineIds: [l.lineId],
+              status: 'open',
+              createdAt: new Date().toISOString(),
+              resolvedAt: null,
+              resolutionNote: null,
+              context: { positionIndex: l.positionIndex, field: 'serialNumbers', expectedValue: 'qty', actualValue: `${l.serialNumbers.length}/${l.qty}` },
+            });
+          }
 
           // PROJ-41: Mismatch als WARN/ERROR loggen
           const logFn = shouldHardFail ? logService.error.bind(logService) : logService.warn.bind(logService);
