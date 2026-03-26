@@ -39,7 +39,12 @@ export function PriceCell({ line, onSetPrice, readOnly = false, onJumpToArticleL
   const [customPrice, setCustomPrice] = useState('');
   const [open, setOpen] = useState(false);
 
-  const badge = BADGE_CONFIG[line.priceCheckStatus];
+  // PROJ-46: custom+confirmed → grüner Badge mit Icon, custom+draft → blauer Badge (default)
+  const baseBadge = BADGE_CONFIG[line.priceCheckStatus];
+  const isConfirmedCustom = line.priceCheckStatus === 'custom' && line.manualStatus === 'confirmed';
+  const badge = isConfirmedCustom
+    ? { label: 'bestätigt', className: 'bg-green-100 text-green-700', display: 'icon' }
+    : baseBadge;
   const displayPrice = line.unitPriceFinal ?? line.unitPriceInvoice;
   const okCompactSizeClass = 'w-[25px] h-5 text-[11.25px] leading-none justify-center';
 
@@ -67,6 +72,10 @@ export function PriceCell({ line, onSetPrice, readOnly = false, onJumpToArticleL
   const renderStatusVisual = (status: PriceCheckStatus, sizeClass: string) => {
     if (status === 'pending') {
       return <PendingHourglassIcon sizeClass={sizeClass} withCircle={false} />;
+    }
+    // PROJ-46: confirmed custom → Manuell_check_ICON
+    if (isConfirmedCustom) {
+      return <img src="/src/assets/icons/Manuell_check_ICON.ico" alt="bestätigt" className="w-3.5 h-3.5" />;
     }
     return (
       <span aria-hidden="true" className={`${sizeClass} leading-none`}>
@@ -196,7 +205,7 @@ export function PriceCell({ line, onSetPrice, readOnly = false, onJumpToArticleL
                   placeholder="0,00"
                   value={customPrice}
                   onChange={(e) => setCustomPrice(e.target.value)}
-                  className="flex-1 text-sm"
+                  className="flex-1 text-sm text-foreground"
                   onKeyDown={(e) => e.key === 'Enter' && handleCustomPrice()}
                 />
                 <Button size="sm" onClick={handleCustomPrice}>

@@ -112,8 +112,8 @@ export function formatLineForDisplay(line: InvoiceLine): string {
   const hasSage = line.unitPriceSage != null && line.unitPriceSage !== 0;
   if (hasInvoice || hasSage) {
     const priceParts: string[] = [];
-    if (hasInvoice) priceParts.push(`RE: ${line.unitPriceInvoice?.toFixed(2)} EUR`);
-    if (hasSage) priceParts.push(`Sage: ${line.unitPriceSage?.toFixed(2)} EUR`);
+    if (hasInvoice) priceParts.push(`PDF-Rechnung: ${line.unitPriceInvoice?.toFixed(2)} EUR`);
+    if (hasSage) priceParts.push(`Sage ERP: ${line.unitPriceSage?.toFixed(2)} EUR`);
     parts.push(`Preis: ${priceParts.join(' / ')}`);
   }
 

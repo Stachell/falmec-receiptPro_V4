@@ -399,11 +399,16 @@ export function ItemsTable() {
                       </TableCell>
 
                       <TableCell className="px-1 pl-0 text-left">
-                        <div className="flex justify-start">
+                        <div className="flex justify-start items-center gap-0.5">
                           <StatusCheckbox
                             status={line.matchStatus}
                             onClick={() => setDetailLine(line)}
                           />
+                          {line.articleSource === 'manual' && (
+                            line.manualStatus === 'confirmed'
+                              ? <img src="/src/assets/icons/Manuell_check_ICON.ico" alt="bestätigt" className="w-3.5 h-3.5" title="Artikel manuell zugeordnet (bestätigt)" />
+                              : <span className="text-[10px] leading-none" title="Artikel manuell zugeordnet (Entwurf)">{'\u{1F6B9}'}</span>
+                          )}
                         </div>
                       </TableCell>
 
@@ -453,6 +458,11 @@ export function ItemsTable() {
                           line={line}
                           onSetPrice={handleSetPrice}
                           readOnly={!currentRun?.isExpanded}
+                          onJumpToArticleList={
+                            currentRun?.isExpanded && line.priceCheckStatus === 'custom'
+                              ? () => useRunStore.getState().setActiveTab('issues')
+                              : undefined
+                          }
                         />
                       </TableCell>
 
@@ -464,6 +474,8 @@ export function ItemsTable() {
                                 <SerialStatusDot
                                   serialRequired={line.serialRequired}
                                   serialAssigned={!!line.serialNumber}
+                                  isManual={line.serialSource === 'manual'}
+                                  isConfirmed={line.manualStatus === 'confirmed'}
                                   onClick={() => handleSerialDotClick(line)}
                                 />
                               </TooltipTrigger>

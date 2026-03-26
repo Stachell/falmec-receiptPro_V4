@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
 import { useClickLock } from '@/hooks/useClickLock';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, AlertTriangle, FolderOpen, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle, FolderOpen, Loader2, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/AppLayout';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import {
 
 export default function NewRun() {
   const navigate = useNavigate();
-  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing, loadStoredFiles } = useRunStore();
+  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing, loadStoredFiles, clearUploadedFiles } = useRunStore();
   const { wrap, isLocked } = useClickLock();
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
@@ -217,16 +217,29 @@ export default function NewRun() {
                 </p>
               )}
             </div>
-            <Button
-              type="button"
-              size="lg"
-              className="gap-2"
-              disabled={!allFilesUploaded || isLocked('start')}
-              onClick={wrap('start', handleStartProcessing)}
-            >
-              <Play className="w-4 h-4" />
-              Verarbeitung starten
-            </Button>
+            <div className="flex items-center gap-3">
+              {uploadedFiles.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={clearUploadedFiles}
+                  className="bg-white text-black border-border hover:bg-[#008C99] hover:text-[#FFFFFF] transition-colors duration-200"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Uploads leeren
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="lg"
+                className="gap-2"
+                disabled={!allFilesUploaded || isLocked('start')}
+                onClick={wrap('start', handleStartProcessing)}
+              >
+                <Play className="w-4 h-4" />
+                Verarbeitung starten
+              </Button>
+            </div>
           </div>
         </div>
       </div>

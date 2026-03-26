@@ -48,7 +48,6 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import type { Issue, InvoiceLine } from '@/types';
 import { STORAGE_LOCATIONS } from '@/types';
 import {
@@ -91,7 +90,7 @@ function getLineLabel(issue: Issue, line: InvoiceLine): string {
   const pos = `Pos. ${line.positionIndex}`;
   switch (issue.type) {
     case 'price-mismatch':
-      return `${pos}: ${line.falmecArticleNo ?? line.manufacturerArticleNo ?? ''} — RE ${(line.unitPriceInvoice ?? 0).toFixed(2)} EUR vs. Sage ${(line.unitPriceSage ?? 0).toFixed(2)} EUR`;
+      return `${pos}: ${line.falmecArticleNo ?? line.manufacturerArticleNo ?? ''} — PDF-Rechnung ${(line.unitPriceInvoice ?? 0).toFixed(2)} EUR vs. Sage ERP ${(line.unitPriceSage ?? 0).toFixed(2)} EUR`;
     case 'no-article-match':
     case 'match-artno-not-found':
     case 'match-ean-not-found':
@@ -316,7 +315,7 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
       <Dialog open={showSerialDialog} onOpenChange={setShowSerialDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-sm text-white">
+            <DialogTitle className="text-sm text-foreground">
               Seriennummern eintragen ({formData.quantity} Stück)
             </DialogTitle>
           </DialogHeader>
@@ -336,7 +335,7 @@ function ArticleMatchCard({ line, runId }: { line: InvoiceLine; runId: string })
                     });
                   }}
                   placeholder="z.B. K25645407008K"
-                  className="h-7 text-xs text-white"
+                  className="h-7 text-xs text-foreground"
                 />
               </div>
             ))}
@@ -368,18 +367,25 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
     currentRun,
     resolveIssue,
     escalateIssue,
-    splitIssue,
     reopenIssue,
     setManualPriceByPosition,
+    refreshIssues,
+    confirmManualFix,
   } = useRunStore();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [resolutionNote, setResolutionNote] = useState('');
-  const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [selectedEmail, setSelectedEmail] = useState('');
   const [manualEmail, setManualEmail] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const { isCopied, copy } = useCopyToClipboard(2000);
+
+  // PROJ-44-ADD-ON-R7: Pending-Preis für Bestätigungs-Workflow
+  const [pendingPrice, setPendingPrice] = useState<{
+    positionIndex: number;
+    price: number;
+    lineLabel: string;
+  } | null>(null);
 
   const invoiceLines = currentRun
     ? allInvoiceLines.filter(l => l.lineId.startsWith(`${currentRun.id}-line-`))
@@ -395,6 +401,13 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
       setStoredEmails(getStoredEmailAddresses());
       setEmailBody(buildIssueClipboardText(issue, invoiceLines));
     }
+    // PROJ-44-ADD-ON-R7: Pending-Preis zurücksetzen bei Issue-Wechsel (Ghost-Value-Schutz)
+    setPendingPrice(null);
+    // PROJ-44-R9: Vollständiger State-Reset bei Issue-Wechsel (Ghost-State-Fix)
+    setActiveTab('overview');
+    setResolutionNote('');
+    setSelectedEmail('');
+    setManualEmail('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issue]);
 
@@ -420,11 +433,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
 
   const handleResolve = () => {
     if (!resolutionNote.trim()) return;
-    if (selectedLineIds.length > 0 && selectedLineIds.length < affectedLines.length) {
-      splitIssue(issue.id, selectedLineIds, resolutionNote.trim());
-    } else {
-      resolveIssue(issue.id, resolutionNote.trim());
-    }
+    resolveIssue(issue.id, resolutionNote.trim());
     onClose();
   };
 
@@ -445,15 +454,13 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
     copy(text);
   };
 
-  const toggleLine = (lineId: string) => {
-    setSelectedLineIds(prev =>
-      prev.includes(lineId) ? prev.filter(id => id !== lineId) : [...prev, lineId]
-    );
-  };
-
   return (
     <Dialog open={!!issue} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-6xl w-full h-[85vh] max-h-[850px] flex flex-col" style={{ backgroundColor: '#D8E6E7' }}>
+      <DialogContent
+        className="max-w-6xl w-full h-[85vh] max-h-[850px] flex flex-col"
+        style={{ backgroundColor: '#D8E6E7' }}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <SeverityBadge severity={issue.severity} />
@@ -513,45 +520,35 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               </div>
             )}
 
-            {/* Affected lines (max 5) */}
+            {/* Affected line */}
             {affectedLines.length > 0 && (
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Betroffene Positionen (max. 5):</Label>
-                <div className="space-y-0.5">
-                  {affectedLines.slice(0, 5).map(line => (
-                    <p key={line.lineId} className="text-xs font-mono text-foreground">
-                      {getLineLabel(issue, line)}
-                    </p>
-                  ))}
-                  {affectedLines.length > 5 && (
-                    <p className="text-xs text-muted-foreground">... (+{affectedLines.length - 5} weitere)</p>
-                  )}
-                </div>
+                <Label className="text-xs text-muted-foreground">Betroffene Position:</Label>
+                <p className="text-xs font-mono text-foreground">
+                  {getLineLabel(issue, affectedLines[0])}
+                </p>
               </div>
             )}
 
             {/* PROJ-45-ADD-ON-round2: PriceCell prominent (Block 3) — vor Warnung */}
-            {issue?.type === 'price-mismatch' && (currentRun?.isExpanded ?? false) && (() => {
-              const mismatchLine = affectedLines.find(l => l.priceCheckStatus === 'mismatch');
+            {issue?.type === 'price-mismatch' && (() => {
+              // PROJ-46: Auch custom+draft matchen (nach Preiswahl bleibt PriceCell sichtbar)
+              const mismatchLine = affectedLines.find(l =>
+                l.priceCheckStatus === 'mismatch' ||
+                (l.priceCheckStatus === 'custom' && l.manualStatus === 'draft')
+              );
               if (!mismatchLine) return null;
               return (
                 <div className="rounded-lg border-2 border-teal-400/50 bg-white/40 p-3">
                   <p className="text-sm font-semibold mb-0.5">Preis korrigieren:</p>
                   <p className="text-xs text-muted-foreground mb-2">Waehlen Sie die korrekte Preisquelle</p>
                   <div
-                    role="button"
-                    tabIndex={0}
-                    className="inline-flex items-center gap-2 rounded border border-black/60 bg-green-50/40 px-3 py-1.5 cursor-pointer shadow-sm hover:bg-green-100/50 transition-colors"
-                    onClick={(e) => {
-                      const btn = e.currentTarget.querySelector('button');
-                      if (btn && !btn.contains(e.target as Node)) {
-                        btn.click();
-                      }
-                    }}
+                    className="inline-flex items-center gap-2 rounded border border-black/60 bg-green-50/40 px-3 py-1.5 shadow-sm"
                   >
                     <PriceCell
                       line={mismatchLine}
                       onSetPrice={(_lineId, price) => {
+                        // PROJ-46: Sofort als Draft in Store schreiben (Issue bleibt offen)
                         if (currentRun) {
                           setManualPriceByPosition(mismatchLine.positionIndex, price, currentRun.id);
                         }
@@ -572,9 +569,9 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                       Fehlende Stammdaten ergänzen. Bekannte Daten sind vorbefüllt.
                     </p>
                   </div>
-                  {affectedLines.map(line => (
-                    <ArticleMatchCard key={line.lineId} line={line} runId={currentRun.id} />
-                  ))}
+                  {affectedLines.length > 0 && (
+                    <ArticleMatchCard line={affectedLines[0]} runId={currentRun.id} />
+                  )}
                 </div>
               );
             })()}
@@ -641,7 +638,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
             </Button>
           </TabsContent>
 
-          {/* ── Tab 3: Loesung erzwingen ──────────────────────────────── */}
+          {/* ── Tab 3: Loesung erzwingen (PROJ-46 Redesign) ──────────── */}
           <TabsContent value="resolve" className="flex-1 min-h-0 w-full outline-none mt-0">
             <div className="flex flex-col h-full overflow-hidden">
             <div className="flex-1 overflow-y-auto space-y-3">
@@ -649,67 +646,104 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 <span className="font-semibold">Achtung:</span> Manuelle Loesungen koennen die Sage-ERP-Integritaet beeintraechtigen.
               </div>
 
-              {/* Line selection */}
-              {affectedLines.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold">Zeilen auswaehlen:</Label>
-                    <button
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setSelectedLineIds(
-                          selectedLineIds.length === affectedLines.length
-                            ? []
-                            : affectedLines.map(l => l.lineId)
-                        )
-                      }
-                    >
-                      {selectedLineIds.length === affectedLines.length ? 'Alle abwaehlen' : 'Alle auswaehlen'}
-                    </button>
-                  </div>
-                  <div className="max-h-[22vh] overflow-y-auto space-y-1 border border-border rounded p-2 bg-white/20">
-                    {affectedLines.map(line => (
-                      <div key={line.lineId} className="flex items-start gap-2">
-                        <Checkbox
-                          id={`line-${line.lineId}`}
-                          checked={selectedLineIds.includes(line.lineId)}
-                          onCheckedChange={() => toggleLine(line.lineId)}
-                          className="mt-0.5"
-                        />
-                        <label
-                          htmlFor={`line-${line.lineId}`}
-                          className="text-xs font-mono cursor-pointer leading-snug"
-                        >
-                          {getLineLabel(issue, line)}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                  {selectedLineIds.length > 0 && selectedLineIds.length < affectedLines.length && (
-                    <p className="text-xs text-amber-600">
-                      {selectedLineIds.length} von {affectedLines.length} Zeilen ausgewaehlt — Issue wird gesplittet
+              {/* PROJ-46: Readonly-Zusammenfassung — Preisabweichung (liest aus Store-Draft) */}
+              {issue.type === 'price-mismatch' && (() => {
+                const draftLine = affectedLines.find(l => l.priceCheckStatus === 'custom' && l.manualStatus === 'draft');
+                if (!draftLine) return null;
+                return (
+                  <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-1">
+                    <p className="text-sm font-semibold text-teal-800">
+                      Preiskorrektur bestaetigen
                     </p>
-                  )}
+                    <p className="text-xs text-muted-foreground">
+                      Folgende Werte werden bei Klick auf &bdquo;Loesung anwenden&ldquo; persistent geschrieben:
+                    </p>
+                    <div className="flex items-center gap-3 rounded border border-teal-300/50 bg-white/40 px-3 py-2">
+                      <span className="text-xs font-mono text-foreground">{getLineLabel(issue, draftLine)}</span>
+                      <span className="ml-auto text-sm font-bold text-teal-700">
+                        {draftLine.unitPriceFinal?.toFixed(2) ?? '—'} EUR
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* PROJ-46: Readonly-Zusammenfassung — Artikel-Issues */}
+              {(issue.type === 'no-article-match' || issue.type === 'match-artno-not-found' || issue.type === 'match-ean-not-found') && affectedLines.length > 0 && (
+                <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-teal-800">
+                    Artikeldaten bestaetigen
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Folgende Werte werden bei Klick auf &bdquo;Loesung anwenden&ldquo; persistent geschrieben:
+                  </p>
+                  {affectedLines.map(line => (
+                    <div key={line.lineId} className="text-xs space-y-0.5 border border-teal-300/50 bg-white/40 rounded p-2">
+                      <div className="grid grid-cols-[140px_1fr] gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-teal-800">Position:</span>
+                        <span>{line.positionIndex + 1}</span>
+                        <span className="font-semibold text-teal-800">Falmec Art-Nr:</span>
+                        <span className="font-mono">{line.falmecArticleNo ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">Hersteller-Nr:</span>
+                        <span className="font-mono">{line.manufacturerArticleNo ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">EAN:</span>
+                        <span className="font-mono">{line.ean ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">Bezeichnung (DE):</span>
+                        <span>{line.descriptionDE ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">S/N-Pflicht:</span>
+                        <span>{line.serialRequired ? 'Ja' : 'Nein'}</span>
+                        <span className="font-semibold text-teal-800">Lagerort:</span>
+                        <span>{line.storageLocation ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">Lieferant:</span>
+                        <span>{line.supplierId ?? '—'}</span>
+                        <span className="font-semibold text-teal-800">Sage ERP Preis:</span>
+                        <span>{line.unitPriceSage != null ? `${line.unitPriceSage.toFixed(2)} EUR` : '—'}</span>
+                        <span className="font-semibold text-teal-800">Menge:</span>
+                        <span>{line.qty}</span>
+                        {line.serialRequired && line.serialNumbers.length > 0 && (
+                          <>
+                            <span className="font-semibold text-teal-800">Seriennummern:</span>
+                            <span className="font-mono">{line.serialNumbers.join(', ')}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* Resolution note (required) */}
+              {/* PROJ-46: Readonly-Zusammenfassung — Sonstige Issue-Types (generisch) */}
+              {!['price-mismatch', 'no-article-match', 'match-artno-not-found', 'match-ean-not-found'].includes(issue.type) && affectedLines.length > 0 && (
+                <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-1">
+                  <p className="text-sm font-semibold text-teal-800">Betroffene Positionen</p>
+                  <pre className="text-xs font-mono bg-white/30 rounded p-2 whitespace-pre-wrap leading-relaxed">
+                    {affectedLines.map(l => formatLineForDisplay(l)).join('\n')}
+                  </pre>
+                </div>
+              )}
+
+              {/* Resolution note (optional) */}
               <div className="space-y-1">
-                <Label className="text-xs font-semibold">Loesungsbeschreibung (Pflichtfeld)</Label>
+                <Label className="text-xs font-semibold">Loesungsbeschreibung (optional)</Label>
                 <Textarea
-                  placeholder="Begruendung fuer die manuelle Loesung..."
+                  placeholder="Optionale Begruendung fuer die manuelle Loesung..."
                   value={resolutionNote}
                   onChange={e => setResolutionNote(e.target.value)}
                   className="bg-white/40 text-sm"
-                  rows={3}
+                  rows={2}
                 />
               </div>
             </div>
 
             <div className="pt-2 shrink-0">
               <Button
-                onClick={handleResolve}
-                disabled={!resolutionNote.trim()}
+                disabled={!affectedLines.some(l => l.manualStatus === 'draft')}
+                onClick={() => {
+                  if (!currentRun) return;
+                  // PROJ-46: confirmManualFix → draft→confirmed + resolve + refresh
+                  confirmManualFix(issue.id, resolutionNote || undefined);
+                  onClose();
+                }}
                 className="gap-1 text-xs bg-white text-orange-600 border border-orange-600 shadow-sm hover:bg-green-600 hover:text-white"
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
@@ -822,7 +856,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                         size="sm"
                         variant="outline"
                         className="gap-1 text-xs h-7 px-2"
-                        onClick={() => { resolveIssue(pi.id, 'Manuell als geloest markiert'); }}
+                        onClick={() => { resolveIssue(pi.id, 'Manuell als geloest markiert'); onClose(); }}
                       >
                         <Check className="w-3 h-3" />
                         Als geloest markieren
@@ -839,7 +873,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="gap-1 text-xs h-7 px-2 text-muted-foreground"
+                        className="gap-1 text-xs h-7 px-2"
                         onClick={() => { reopenIssue(pi.id); }}
                       >
                         Zurueck zu Offen

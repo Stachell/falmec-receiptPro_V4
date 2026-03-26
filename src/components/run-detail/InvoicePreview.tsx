@@ -585,7 +585,9 @@ export function InvoicePreview({
                                 readOnly={false}
                                 onJumpToArticleList={
                                   currentRun?.isExpanded
-                                    ? () => handlePriceJump(position.positionIndex)
+                                    ? (posStatus.representativeLine.priceCheckStatus === 'custom'
+                                      ? () => useRunStore.getState().setActiveTab('issues')
+                                      : () => handlePriceJump(position.positionIndex))
                                     : undefined
                                 }
                               />
@@ -605,6 +607,8 @@ export function InvoicePreview({
                                     <SerialStatusDot
                                       serialRequired={posStatus.serialRequired}
                                       serialAssigned={posStatus.serialAssigned}
+                                      isManual={posStatus.representativeLine?.serialSource === 'manual'}
+                                      isConfirmed={posStatus.representativeLine?.manualStatus === 'confirmed'}
                                       onClick={posStatus.representativeLine ? () => handleSerialDotClick(posStatus.representativeLine!) : undefined}
                                     />
                                   </TooltipTrigger>

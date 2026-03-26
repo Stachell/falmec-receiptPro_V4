@@ -71,6 +71,7 @@ export default function RunDetail() {
     advanceToNextStep,
     retryStep,              // HOTFIX-2
     createNewRunWithParsing,
+    reprocessCurrentRun,
     executeMatcherCrossMatch,
     isProcessing,
     isPaused,
@@ -555,7 +556,8 @@ export default function RunDetail() {
     );
   }
 
-  const totalIssues = currentRun.steps.reduce((acc, step) => acc + step.issuesCount, 0);
+  // PROJ-46: Nur offene Issues zählen (nicht erledigte)
+  const totalIssues = issues.filter(i => (i.runId === currentRun.id || !i.runId) && i.status === 'open').length;
 
   // Determine next workflow step (includes failed steps for manual retry)
   const getNextStep = () => {
@@ -679,16 +681,7 @@ export default function RunDetail() {
               className="gap-2 border bg-[#c9c3b6] text-[#666666] border-[#666666] hover:bg-[#008C99] hover:text-[#E3E0CF] hover:border-[#008C99] transition-colors"
               disabled={isProcessing || isLocked('reprocess')}
               onClick={wrap('reprocess', () => {
-                const parsingPromise = createNewRunWithParsing();
-                const initialRun = getStoreState().currentRun;
-                if (initialRun) {
-                  navigate(`/run/${encodeURIComponent(initialRun.id)}`);
-                  parsingPromise.then(finalRun => {
-                    if (finalRun && finalRun.id !== initialRun.id) {
-                      navigate(`/run/${encodeURIComponent(finalRun.id)}`, { replace: true });
-                    }
-                  });
-                }
+                reprocessCurrentRun(currentRun.id);
               })}
             >
               <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />

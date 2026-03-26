@@ -45,6 +45,12 @@ export type PriceCheckStatus = 'pending' | 'ok' | 'mismatch' | 'missing' | 'cust
 
 export type SerialSource = 'serialList' | 'openWE' | 'manual' | 'none';
 
+export type ArticleSource = 'matcher' | 'manual' | 'none';
+
+// PROJ-46: Redaktionelle Phase manueller Korrekturen (orthogonal zu ArticleSource/PriceCheckStatus)
+// undefined/'none' = Parser-Daten, 'draft' = Entwurf (blau), 'confirmed' = bestätigt (grün, gesperrt)
+export type ManualStatus = 'none' | 'draft' | 'confirmed';
+
 export type OrderAssignmentReason =
   | 'direct-match'
   | 'exact-qty-match'
@@ -303,6 +309,12 @@ export interface InvoiceLine {
 
   // --- PROJ-11: Match status ---
   matchStatus: MatchStatus;
+
+  // --- PROJ-44-R9: Article source tracking ---
+  articleSource?: ArticleSource;
+
+  // --- PROJ-46: Entwurf/Bestätigt-Phase manueller Korrekturen ---
+  manualStatus?: ManualStatus;
 
   // --- PROJ-11: Serial requirement ---
   serialRequired: boolean;

@@ -254,20 +254,24 @@ function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
 
   switch (issue.type) {
     case 'price-mismatch':
-      return related.some(l => l.priceCheckStatus === 'mismatch');
+      // PROJ-46: Draft-Guard — Entwürfe (custom+draft) halten den Fehler offen
+      return related.some(l => l.priceCheckStatus === 'mismatch' || (l.priceCheckStatus === 'custom' && l.manualStatus === 'draft'));
 
     case 'no-article-match':
     case 'match-artno-not-found':
     case 'match-ean-not-found':
-      return related.some(l => l.matchStatus === 'no-match');
+      // PROJ-46: Draft-Guard — manuell zugeordnet aber noch nicht bestätigt
+      return related.some(l => l.matchStatus === 'no-match' || l.manualStatus === 'draft');
 
     case 'match-conflict-id':
       // Conflict resolves when all related lines have a definitive match
-      return related.some(l => l.matchStatus === 'no-match' || l.matchStatus === 'pending');
+      // PROJ-46: Draft-Guard
+      return related.some(l => l.matchStatus === 'no-match' || l.matchStatus === 'pending' || l.manualStatus === 'draft');
 
     case 'serial-mismatch':
     case 'sn-insufficient-count':
-      return related.some(l => l.serialRequired && l.serialNumbers.length < l.qty);
+      // PROJ-46: Draft-Guard
+      return related.some(l => (l.serialRequired && l.serialNumbers.length < l.qty) || l.manualStatus === 'draft');
 
     case 'order-no-match':
       return related.some(l => l.orderAssignmentReason === 'not-ordered' || l.orderAssignmentReason === 'pending');
@@ -285,6 +289,57 @@ function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
     // These types are not auto-resolvable (parser errors, info hints, etc.)
     default:
       return true;
+  }
+}
+
+/**
+ * PROJ-44-R11: Zentrale Blocker-Matrix — SSOT für Workflow-Guards.
+ * Entscheidet typbasiert (NICHT severity-basiert), ob ein Issue den Step blockiert.
+ */
+function isIssueBlockingStep(issue: Issue, stepNo: number, config: RunConfig): boolean {
+  // Nur offene/pending Issues können blockieren
+  if (issue.status !== 'open' && issue.status !== 'pending') return false;
+  // Issue muss zum aktuellen Step gehören
+  if (issue.stepNo !== stepNo) return false;
+
+  switch (stepNo) {
+    case 1:
+      // Parser-Fehler blockieren immer
+      return issue.type === 'parser-error';
+
+    case 2:
+      // Artikel-Fehler blockieren IMMER
+      if (
+        issue.type === 'no-article-match' ||
+        issue.type === 'match-artno-not-found' ||
+        issue.type === 'match-ean-not-found' ||
+        issue.type === 'match-conflict-id'
+      ) {
+        return true;
+      }
+      // Preisabweichung blockiert NUR wenn Config-Toggle aktiv
+      if (issue.type === 'price-mismatch') {
+        return config.blockStep2OnPriceMismatch === true;
+      }
+      return false;
+
+    case 4:
+      // Order-Fehler blockieren NUR wenn Config-Toggle aktiv
+      if (
+        issue.type === 'order-no-match' ||
+        issue.type === 'order-incomplete' ||
+        issue.type === 'order-assignment'
+      ) {
+        return config.blockStep4OnMissingOrder === true;
+      }
+      return false;
+
+    case 5:
+      // Export-Fehler blockieren IMMER
+      return issue.type === 'missing-storage-location' || issue.type === 'export-no-lines';
+
+    default:
+      return false;
   }
 }
 
@@ -521,6 +576,8 @@ interface RunState {
   // Workflow actions
   advanceToNextStep: (runId: string) => void;
   retryStep: (runId: string, stepNo: number) => void;  // HOTFIX-2
+  /** PROJ-44-R9: Re-Process — Steps 2-5 neu starten, Step 1 + invoiceLines bleiben */
+  reprocessCurrentRun: (runId: string) => void;
   deleteRun: (runId: string) => void;
   /** PROJ-25: Pause a running run — clears auto-advance timer to prevent deadlock */
   pauseRun: (runId: string) => void;
@@ -534,10 +591,12 @@ interface RunState {
   generateStep5Issues: (runId: string) => void;
   /** PROJ-43: Re-evaluate all open issues and generate fresh Step-5 issues */
   refreshIssues: (runId: string) => void;
-  /** PROJ-43: Split an issue — resolve a subset of affected lines, keep rest open */
-  splitIssue: (issueId: string, resolvedLineIds: string[], resolutionNote: string) => void;
   /** PROJ-43: Reopen a pending issue (pending → open) */
   reopenIssue: (issueId: string) => void;
+  /** PROJ-46: Bestätigt einen Entwurf (draft→confirmed), resolved Issue, refresht Kaskade */
+  confirmManualFix: (issueId: string, resolutionNote?: string) => void;
+  /** PROJ-46: Bulk-Bestätigung aller Entwürfe mit 3-stufiger Validierung */
+  bulkConfirmDraftIssues: (runId: string) => { success: boolean; message?: string };
 
   // PROJ-12: Archive & abort actions
   archiveRun: (runId: string) => Promise<{ success: boolean; folderName: string }>;
@@ -553,6 +612,8 @@ interface RunState {
   setManualPriceByPosition: (positionIndex: number, price: number, runId: string) => void;
   /** PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position */
   setManualArticleByPosition: (positionIndex: number, data: ManualArticleData, runId: string) => void;
+  /** PROJ-44-R11: Chirurgischer Artikel-Fix — nur einzelne ausgerollte Zeile, keine Geschwister */
+  setManualArticleByLine: (lineId: string, data: ManualArticleData, runId: string) => void;
   /** PROJ-44-R6: Chirurgischer S/N-Update — ändert NUR serial-relevante Felder, keine Artikel/Preis/Match-Daten */
   updateLineSerialData: (positionIndex: number, serialRequired: boolean, serialNumbers: string[], runId?: string) => void;
   /** PROJ-42-ADD-ON: Set bookingDate on first export only. Returns updated Run or null. */
@@ -650,7 +711,12 @@ export const useRunStore = create<RunState>((set, get) => ({
   showStep4WaitingDialog: false,
 
   // Actions
-  setCurrentRun: (run) => set({ currentRun: run }),
+  setCurrentRun: (run) => set({
+    currentRun: run,
+    // PROJ-44-R11: Parse-Ownership synchronisieren — verhindert latenten Datenverlust
+    // wenn ein Run aktiviert wird, ohne loadPersistedRun() durchzulaufen.
+    currentParsedRunId: run?.id ?? null,
+  }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -1568,24 +1634,19 @@ export const useRunStore = create<RunState>((set, get) => ({
     // Find current running step
     const runningStep = run.steps.find(s => s.status === 'running');
 
-    // PROJ-28: Block-Step Guard — checked at completion of the running step
+    // PROJ-44-R11: Typbasierter Blocker-Guard (SSOT) — ersetzt severity-basierte Prüfung
     if (runningStep) {
       const { globalConfig, issues } = get();
-
-      // Block leaving Step 2 when price-mismatch errors are unresolved
-      // PROJ-43: severity check removed — blockStep2OnPriceMismatch flag already expresses blocking intent.
-      // 'pending' must also block (escalated price-mismatch still needs resolution).
-      if (runningStep.stepNo === 2 && globalConfig.blockStep2OnPriceMismatch) {
-        const openPriceErrors = issues.filter(
-          i => i.type === 'price-mismatch' && (i.status === 'open' || i.status === 'pending') && i.runId === runId,
+      const effectiveConfig = run.config ?? globalConfig;
+      const blockingIssues = issues.filter(
+        i => i.runId === runId && isIssueBlockingStep(i, runningStep.stepNo, effectiveConfig as RunConfig),
+      );
+      if (blockingIssues.length > 0) {
+        logService.warn(
+          `Block-Guard: Step ${runningStep.stepNo} blockiert (${blockingIssues.length} blockierende Issues: ${blockingIssues.map(i => i.type).join(', ')})`,
+          { runId, step: 'System' },
         );
-        if (openPriceErrors.length > 0) {
-          logService.warn(
-            `Block-Guard: Step 2 → Step 3 blockiert (${openPriceErrors.length} offene Preisabweichungen)`,
-            { runId, step: 'Artikel extrahieren' },
-          );
-          return;
-        }
+        return;
       }
 
       // Set current step to 'ok'
@@ -2020,6 +2081,44 @@ export const useRunStore = create<RunState>((set, get) => ({
         get().updateStepStatus(runId, stepNo, 'failed');
         break;
     }
+  },
+
+  // PROJ-44-R9: Re-Process ab Step 2 — invoiceLines + manuell korrigierte Daten bleiben erhalten
+  reprocessCurrentRun: (runId) => {
+    const state = get();
+    const run = state.runs.find(r => r.id === runId);
+    if (!run) return;
+
+    logService.info('Reprocess: Steps 2-5 werden zurueckgesetzt', { runId, step: 'System' });
+    get().addAuditEntry({ runId, action: 'reprocessCurrentRun', details: 'Steps 2-5 reset, invoiceLines beibehalten', userId: 'system' });
+
+    // 1. Steps 2-5 zuruecksetzen, Step 1 bleibt 'ok'
+    const resetSteps = run.steps.map(s =>
+      s.stepNo >= 2 ? { ...s, status: 'not-started' as const, issuesCount: 0 } : s
+    );
+
+    // 2. Issues von Steps 2-5 loeschen (Step-1-Issues bleiben!)
+    const keptIssues = state.issues.filter(i => !(i.runId === runId && i.stepNo >= 2));
+
+    // 3. Run-Status auf 'running' setzen + Issues bereinigen
+    set((s) => ({
+      runs: s.runs.map(r =>
+        r.id === runId ? { ...r, steps: resetSteps, status: 'running' as const } : r
+      ),
+      currentRun: s.currentRun?.id === runId
+        ? { ...s.currentRun, steps: resetSteps, status: 'running' as const }
+        : s.currentRun,
+      issues: keptIssues,
+      latestDiagnostics: {},
+      // PROJ-44-R11: Parse-Ownership explizit mitführen — verhindert,
+      // dass buildAutoSavePayload die PDF-Daten als leer persistiert.
+      currentParsedRunId: runId,
+    }));
+
+    // 4. Pipeline ab Step 2 triggern — analog retryStep
+    get().updateStepStatus(runId, 2, 'running');
+    get().updateRunStatus(runId, 'running');
+    setTimeout(() => get().executeMatcherCrossMatch(), 50);
   },
 
   updateInvoiceLine: (lineId, updates) => {
@@ -2478,73 +2577,207 @@ export const useRunStore = create<RunState>((set, get) => ({
     logService.info('Issues aktualisiert', { runId, step: 'Issues' });
   },
 
-  // PROJ-43: Split an issue — resolve subset of affected lines, keep rest open
-  splitIssue: (issueId, resolvedLineIds, resolutionNote) => {
-    const state = get();
-    const original = state.issues.find(i => i.id === issueId);
-    if (!original) return;
-
-    const resolvedSet = new Set(resolvedLineIds);
-    const remainingLineIds = (original.affectedLineIds ?? []).filter(id => !resolvedSet.has(id));
-    const now = new Date().toISOString();
-    const runId = original.runId ?? get().currentRun?.id ?? '';
-
-    if (remainingLineIds.length === 0) {
-      // All lines resolved — delegate to resolveIssue
-      get().resolveIssue(issueId, resolutionNote);
-      return;
-    }
-
-    // Build split-resolved clone
-    const resolvedClone: Issue = {
-      ...original,
-      id: `${issueId}-split-${Date.now()}`,
-      affectedLineIds: [...resolvedLineIds],          // COPY — only UI-display
-      relatedLineIds: [...original.relatedLineIds],   // FULL COPY from original — DO NOT CHANGE
-      status: 'resolved',
-      resolvedAt: now,
-      resolutionNote: `Teilaufloesung: ${resolutionNote}`,
-      message: `${original.message} (${resolvedLineIds.length} Positionen gelöst)`,
-    };
-
-    // Update original issue immutably
-    const updatedOriginal: Issue = {
-      ...original,
-      affectedLineIds: [...remainingLineIds],          // COPY — only UI-display
-      relatedLineIds: [...original.relatedLineIds],    // UNCHANGED — DO NOT CHANGE
-      message: `${original.message} (${remainingLineIds.length} Positionen verbleibend)`,
-    };
-
-    set((s) => ({
-      issues: s.issues.map(i => i.id === issueId ? updatedOriginal : i).concat([resolvedClone]),
-    }));
-
-    logService.info(
-      `Issue gesplittet: ${resolvedLineIds.length} Zeilen gelöst, ${remainingLineIds.length} verbleibend`,
-      { runId, step: 'Issues', details: `issueId=${issueId}` },
-    );
-    get().addAuditEntry({
-      runId,
-      action: 'splitIssue',
-      details: `issueId=${issueId}, resolved=${resolvedLineIds.length}, remaining=${remainingLineIds.length}, note=${resolutionNote}`,
-      userId: 'system',
-    });
-  },
-
   // PROJ-43: Reopen a pending issue (pending → open)
   reopenIssue: (issueId) => {
-    set((state) => ({
-      issues: state.issues.map(issue =>
-        issue.id === issueId
-          ? { ...issue, status: 'open' as const }
-          : issue
-      ),
-    }));
+    const issueToReopen = get().issues.find(i => i.id === issueId);
+    if (!issueToReopen) return;
+
+    set((state) => {
+      let updatedLines = state.invoiceLines;
+
+      // PROJ-44-R10: Bei price-mismatch die betroffenen Zeilen zurücksetzen
+      if (issueToReopen.type === 'price-mismatch' && issueToReopen.affectedLineIds?.length) {
+        const affectedSet = new Set(issueToReopen.affectedLineIds);
+        // Auch expandierte Zeilen der betroffenen Positionen zurücksetzen
+        const affectedPositions = new Set(
+          state.invoiceLines
+            .filter(l => affectedSet.has(l.lineId))
+            .map(l => l.positionIndex),
+        );
+        const runPrefix = issueToReopen.runId + '-';
+        updatedLines = state.invoiceLines.map(line =>
+          line.lineId.startsWith(runPrefix)
+            && affectedPositions.has(line.positionIndex)
+            && line.priceCheckStatus === 'custom'
+            ? { ...line, priceCheckStatus: 'mismatch' as const, unitPriceFinal: null, manualStatus: undefined } // PROJ-46: manualStatus zurücksetzen
+            : line
+        );
+      }
+
+      // PROJ-46: Bei Artikel-Issues confirmed→draft zurückstufen (kein Full-Reset)
+      const articleIssueTypes = ['no-article-match', 'match-artno-not-found', 'match-ean-not-found'];
+      if (articleIssueTypes.includes(issueToReopen.type)) {
+        const affIds = new Set(issueToReopen.affectedLineIds ?? issueToReopen.relatedLineIds ?? []);
+        const affPos = new Set(
+          state.invoiceLines.filter(l => affIds.has(l.lineId)).map(l => l.positionIndex),
+        );
+        const runPfx = issueToReopen.runId + '-';
+        updatedLines = updatedLines.map(line =>
+          line.lineId.startsWith(runPfx)
+            && affPos.has(line.positionIndex)
+            && line.manualStatus === 'confirmed'
+            ? { ...line, manualStatus: 'draft' as const }
+            : line
+        );
+      }
+
+      return {
+        invoiceLines: updatedLines,
+        issues: state.issues.map(issue =>
+          issue.id === issueId
+            ? {
+                ...issue,
+                status: 'open' as const,
+                resolvedAt: null,
+                resolutionNote: null,
+                escalatedAt: undefined,
+                escalatedTo: undefined,
+              }
+            : issue
+        ),
+      };
+    });
+
     const runId = get().issues.find(i => i.id === issueId)?.runId ?? get().currentRun?.id;
     if (runId) {
       logService.info(`Issue reaktiviert: ${issueId}`, { runId, step: 'Issues' });
       get().addAuditEntry({ runId, action: 'reopenIssue', details: `issueId=${issueId}`, userId: 'system' });
+
+      // PROJ-44-R10: Price-Stats aktualisieren nach Line-Reset
+      if (issueToReopen.type === 'price-mismatch') {
+        const { invoiceLines } = get();
+        const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId));
+        const priceStats = {
+          priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
+          priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
+          priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
+          priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
+        };
+        set((state) => ({
+          runs: state.runs.map(r =>
+            r.id === runId ? { ...r, stats: { ...r.stats, ...priceStats } } : r
+          ),
+          currentRun: state.currentRun?.id === runId
+            ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
+            : state.currentRun,
+        }));
+      }
     }
+  },
+
+  // ─── PROJ-46: Einzelbestätigung — draft→confirmed + resolve + refresh ───
+  confirmManualFix: (issueId, resolutionNote) => {
+    const issue = get().issues.find(i => i.id === issueId);
+    if (!issue) return;
+    const runId = issue.runId ?? get().currentRun?.id;
+    if (!runId) return;
+
+    // 1. Alle betroffenen Positionen ermitteln (relatedLineIds → positionIndex)
+    const allLines = get().invoiceLines;
+    const affectedSet = new Set(issue.relatedLineIds ?? []);
+    const affectedPositions = new Set(
+      allLines.filter(l => affectedSet.has(l.lineId)).map(l => l.positionIndex),
+    );
+
+    // 2. Alle Draft-Lines dieser Positionen auf confirmed upgraden
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId.startsWith(runId + '-line-')
+          && affectedPositions.has(line.positionIndex)
+          && line.manualStatus === 'draft'
+          ? { ...line, manualStatus: 'confirmed' as const }
+          : line
+      ),
+    }));
+
+    // 3. Issue resolven
+    get().resolveIssue(issueId, resolutionNote || 'Manuell bestätigt');
+
+    // 4. Kaskade (Step-5 etc.)
+    get().refreshIssues(runId);
+
+    get().addAuditEntry({
+      runId,
+      action: 'confirmManualFix',
+      details: `issueId=${issueId}, positions=[${[...affectedPositions].join(',')}]`,
+      userId: 'system',
+    });
+  },
+
+  // ─── PROJ-46: Bulk-Bestätigung mit 3-stufiger Validierung ───
+  bulkConfirmDraftIssues: (runId) => {
+    const { issues, invoiceLines, globalConfig } = get();
+    const runIssues = issues.filter(i => i.runId === runId && i.status === 'open');
+    const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId + '-line-'));
+    const draftLines = runLines.filter(l => l.manualStatus === 'draft');
+
+    // Stufe 1: Preisabweichung offen?
+    const priceMismatchOpen = runIssues.some(i => i.type === 'price-mismatch');
+    if (priceMismatchOpen) {
+      return { success: false, message: 'Bitte erst Preisabweichungen in Einzelbearbeitung loesen (Mail an Buchhaltung empfohlen).' };
+    }
+
+    // Keine Entwürfe vorhanden?
+    if (draftLines.length === 0) {
+      return { success: false, message: 'Keine Entwuerfe zum Bestaetigen vorhanden.' };
+    }
+
+    // Stufe 2: Strikte Feld-Checkliste pro Draft-Line
+    const artNoRegexStr = globalConfig?.matcherProfileOverrides?.artNoDeRegex;
+    let artNoRegex: RegExp;
+    try {
+      artNoRegex = artNoRegexStr ? new RegExp(artNoRegexStr) : /^1\d{5}$/;
+    } catch {
+      artNoRegex = /^1\d{5}$/;
+    }
+
+    for (const line of draftLines) {
+      const pos = line.positionIndex + 1;
+      if (line.articleSource === 'manual') {
+        if (!line.falmecArticleNo || !artNoRegex.test(line.falmecArticleNo)) {
+          return { success: false, message: `Position ${pos}: Artikelnummer ungueltig oder fehlt.` };
+        }
+        if (!line.storageLocation) {
+          return { success: false, message: `Position ${pos}: Lagerort fehlt.` };
+        }
+        if (!line.ean) {
+          return { success: false, message: `Position ${pos}: EAN fehlt.` };
+        }
+      }
+      if (line.serialRequired && line.serialNumbers.length < line.qty) {
+        return { success: false, message: `Position ${pos}: Seriennummern unvollstaendig (${line.serialNumbers.length}/${line.qty}).` };
+      }
+    }
+
+    // Stufe 3: Alle valide → draft→confirmed
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line =>
+        line.lineId.startsWith(runId + '-line-') && line.manualStatus === 'draft'
+          ? { ...line, manualStatus: 'confirmed' as const }
+          : line
+      ),
+    }));
+
+    // Zugehörige Issues resolven
+    const draftPositions = new Set(draftLines.map(l => l.positionIndex));
+    const issuesToResolve = runIssues.filter(i =>
+      (i.relatedLineIds ?? []).some(lid => {
+        const line = runLines.find(l => l.lineId === lid);
+        return line && draftPositions.has(line.positionIndex);
+      })
+    );
+    for (const issue of issuesToResolve) {
+      get().resolveIssue(issue.id, 'Bulk-Bestaetigung via Aktualisieren');
+    }
+
+    get().refreshIssues(runId);
+    get().addAuditEntry({
+      runId,
+      action: 'bulkConfirmDraftIssues',
+      details: `${draftLines.length} Entwuerfe bestaetigt, ${issuesToResolve.length} Issues resolved`,
+      userId: 'system',
+    });
+    return { success: true };
   },
 
   // PROJ-12 / PROJ-27-ADDON-2: Write archive package to disk
@@ -2733,6 +2966,7 @@ export const useRunStore = create<RunState>((set, get) => ({
               ...line,
               unitPriceFinal: price,
               priceCheckStatus: 'custom' as const,
+              manualStatus: 'draft' as const, // PROJ-46: Entwurf (blau)
             }
           : line
       ),
@@ -2763,11 +2997,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         : state.currentRun,
     }));
 
-    // PROJ-44-ADD-ON-R7: Auto-Resolve nach manuellem Preis (analog setManualPriceByPosition)
-    const runIdForRefresh = get().currentRun?.id;
-    if (runIdForRefresh) {
-      get().refreshIssues(runIdForRefresh);
-    }
   },
 
   // ─── PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position ──
@@ -2779,6 +3008,7 @@ export const useRunStore = create<RunState>((set, get) => ({
               ...line,
               unitPriceFinal: price,
               priceCheckStatus: 'custom' as const,
+              manualStatus: 'draft' as const, // PROJ-46: Entwurf (blau)
             }
           : line
       ),
@@ -2815,8 +3045,6 @@ export const useRunStore = create<RunState>((set, get) => ({
         : state.currentRun,
     }));
 
-    // Auto-Resolve feuern
-    get().refreshIssues(runId);
   },
 
   // ─── PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position ───
@@ -2869,6 +3097,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,  // PROJ-45-R5
             serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber, // PROJ-45-R5
             serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,     // PROJ-45-R5
+            articleSource: 'manual' as const,  // PROJ-44-R9: Manuell-Marker
+            manualStatus: 'draft' as const,    // PROJ-46: Entwurf (blau)
           };
         } else {
           return {
@@ -2890,6 +3120,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,  // PROJ-45-R5
             serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber, // PROJ-45-R5
             serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,     // PROJ-45-R5
+            articleSource: 'manual' as const,  // PROJ-44-R9: Manuell-Marker
+            manualStatus: 'draft' as const,    // PROJ-46: Entwurf (blau)
           };
         }
       }),
@@ -2931,16 +3163,106 @@ export const useRunStore = create<RunState>((set, get) => ({
         : state.currentRun,
     }));
 
-    // Issues neu generieren (Auto-Resolve für behobene no-match Zeilen)
-    get().refreshIssues(runId);
+  },
 
-    // Auto-Advance wenn alle no-match Zeilen behoben — PAUSE-GUARD PFLICHT
-    if (noMatchCount === 0) {
-      setTimeout(() => {
-        const s = get();
-        if (!s.isPaused) s.advanceToNextStep(runId);
-      }, 100);
-    }
+  // ─── PROJ-44-R11: Chirurgischer Artikel-Fix für einzelne ausgerollte Zeile ───
+  setManualArticleByLine: (lineId, data, runId) => {
+    const masterArticles = useMasterDataStore.getState().articles;
+    const matched = masterArticles.find(a => a.falmecArticleNo === data.falmecArticleNo);
+
+    const { globalConfig } = get();
+    const tolerance = globalConfig?.tolerance ?? 0.01;
+
+    set((state) => ({
+      invoiceLines: state.invoiceLines.map(line => {
+        if (line.lineId !== lineId) return line;
+
+        const storageLocation = matched?.storageLocation || data.storageLocation || line.storageLocation || null;
+        const logicalStorageGroup: 'WE' | 'KDD' | null = storageLocation
+          ? (storageLocation.includes('KDD') ? 'KDD' : 'WE')
+          : null;
+
+        const finalPrice = data.unitPriceSage ?? matched?.unitPriceNet ?? null;
+        const priceCheckStatus = (!finalPrice
+          ? 'missing'
+          : Math.abs(finalPrice - line.unitPriceInvoice) <= tolerance
+            ? 'ok'
+            : 'mismatch') as InvoiceLine['priceCheckStatus'];
+        const unitPriceFinal = priceCheckStatus === 'ok' ? finalPrice : line.unitPriceFinal;
+
+        if (matched) {
+          return {
+            ...line,
+            falmecArticleNo: data.falmecArticleNo,
+            matchStatus: 'full-match' as const,
+            unitPriceSage: data.unitPriceSage ?? matched.unitPriceNet,
+            descriptionDE: matched.descriptionDE ?? data.descriptionDE ?? line.descriptionDE,
+            storageLocation,
+            logicalStorageGroup,
+            serialRequired: data.serialRequired ?? matched.serialRequirement,
+            manufacturerArticleNo: matched.manufacturerArticleNo || data.manufacturerArticleNo || line.manufacturerArticleNo,
+            ean: matched.ean || data.ean || line.ean,
+            supplierId: matched.supplierId ?? data.supplierId ?? line.supplierId,
+            activeFlag: matched.activeFlag,
+            priceCheckStatus,
+            unitPriceFinal,
+            orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,
+            qty: data.quantity ?? line.qty,
+            serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,
+            serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber,
+            serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,
+            articleSource: 'manual' as const,
+            manualStatus: 'draft' as const,    // PROJ-46: Entwurf (blau)
+          };
+        } else {
+          return {
+            ...line,
+            falmecArticleNo: data.falmecArticleNo,
+            matchStatus: 'full-match' as const,
+            unitPriceSage: data.unitPriceSage ?? null,
+            descriptionDE: data.descriptionDE ?? line.descriptionDE,
+            storageLocation,
+            logicalStorageGroup,
+            serialRequired: data.serialRequired ?? line.serialRequired,
+            manufacturerArticleNo: data.manufacturerArticleNo ?? line.manufacturerArticleNo,
+            ean: data.ean ?? line.ean,
+            supplierId: data.supplierId ?? line.supplierId,
+            priceCheckStatus,
+            unitPriceFinal,
+            orderNumberAssigned: data.orderNumberAssigned || line.orderNumberAssigned,
+            qty: data.quantity ?? line.qty,
+            serialNumbers: data.serialNumbers?.length ? data.serialNumbers : line.serialNumbers,
+            serialNumber: data.serialNumbers?.length ? data.serialNumbers[0] : line.serialNumber,
+            serialSource: data.serialNumbers?.length ? 'manual' as const : line.serialSource,
+            articleSource: 'manual' as const,
+            manualStatus: 'draft' as const,    // PROJ-46: Entwurf (blau)
+          };
+        }
+      }),
+    }));
+
+    logService.info(
+      `Manueller Artikel-Fix (line-scoped): ${data.falmecArticleNo} für lineId=${lineId}`,
+      { runId, step: 'Artikel extrahieren', details: matched ? 'Stammdaten-Treffer' : 'Nur Formulardaten' },
+    );
+    get().addAuditEntry({
+      runId,
+      action: 'setManualArticleByLine',
+      details: `lineId=${lineId}, falmecArticleNo=${data.falmecArticleNo}, source=${matched ? 'master' : 'form'}`,
+      userId: 'system',
+    });
+
+    // Match-Stats re-evaluieren (KEIN refreshIssues, KEIN auto-advance!)
+    const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const matchStats = computeMatchStats(runLines);
+    set((state) => ({
+      runs: state.runs.map(r =>
+        r.id === runId ? { ...r, stats: { ...r.stats, ...matchStats } } : r
+      ),
+      currentRun: state.currentRun?.id === runId
+        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats } }
+        : state.currentRun,
+    }));
   },
 
   // ─── PROJ-44-R6: Chirurgischer S/N-Update (bypass — KEIN Artikel/Preis/Match-Update) ───
@@ -3527,6 +3849,13 @@ export const useRunStore = create<RunState>((set, get) => ({
       const enrichedLines = allRunLines.map(line => {
         const matched = matchedByPosition.get(line.positionIndex);
         if (!matched) return line;
+
+        // PROJ-46: Nur BESTÄTIGTE manuelle Artikel schützen; Entwürfe werden vom Parser überschrieben
+        if (line.articleSource === 'manual' && line.manualStatus === 'confirmed') return line;
+
+        // PROJ-46: Nur BESTÄTIGTE manuelle Preise schützen; Entwürfe werden vom Parser überschrieben
+        const protectPrice = line.priceCheckStatus === 'custom' && line.manualStatus === 'confirmed';
+
         // Copy all match-result fields but keep this line's own lineId/expansionIndex
         return {
           ...line,
@@ -3538,8 +3867,12 @@ export const useRunStore = create<RunState>((set, get) => ({
           activeFlag: matched.activeFlag,
           storageLocation: matched.storageLocation,
           logicalStorageGroup: matched.logicalStorageGroup,
-          priceCheckStatus: matched.priceCheckStatus,
-          unitPriceFinal: matched.unitPriceFinal,
+          // Preisfelder: nur ueberschreiben wenn NICHT manuell korrigiert
+          priceCheckStatus: protectPrice ? line.priceCheckStatus : matched.priceCheckStatus,
+          unitPriceFinal: protectPrice ? line.unitPriceFinal : matched.unitPriceFinal,
+          // Artikelquelle: Matcher hat zugeordnet
+          articleSource: 'matcher' as const,
+          manualStatus: undefined, // PROJ-46: Draft zurücksetzen bei Matcher-Überschreibung
         };
       });
 
@@ -3577,8 +3910,8 @@ export const useRunStore = create<RunState>((set, get) => ({
             severity: 'warning',
             stepNo: 2,
             type: 'price-mismatch',
-            message: `Pos ${l.positionIndex}: Preisabweichung RE ${l.unitPriceInvoice.toFixed(2)}€ vs. Sage ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
-            details: `${l.falmecArticleNo ?? l.manufacturerArticleNo} — RE ${l.unitPriceInvoice.toFixed(2)}€, Sage ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
+            message: `Pos ${l.positionIndex}: Preisabweichung PDF-Rechnung ${l.unitPriceInvoice.toFixed(2)}€ vs. Sage ERP ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
+            details: `${l.falmecArticleNo ?? l.manufacturerArticleNo} — PDF-Rechnung ${l.unitPriceInvoice.toFixed(2)}€, Sage ERP ${(l.unitPriceSage ?? 0).toFixed(2)}€`,
             relatedLineIds: [l.lineId],
             affectedLineIds: [l.lineId],
             status: 'open',

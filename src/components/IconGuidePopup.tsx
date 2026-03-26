@@ -47,11 +47,13 @@ const PRICE_LEGEND: Array<{ status: PriceCheckStatus; text: string }> = [
 const SERIAL_LEGEND: Array<{
   serialRequired: boolean;
   serialAssigned: boolean;
+  isManual?: boolean;       // PROJ-44-R9
   text: string;
 }> = [
   { serialRequired: true, serialAssigned: false, text: 'S/N-pflichtig, noch nicht zugeteilt' },
   { serialRequired: false, serialAssigned: false, text: 'Nicht S/N-pflichtig' },
   { serialRequired: true, serialAssigned: true, text: 'S/N erfolgreich zugeteilt' },
+  { serialRequired: true, serialAssigned: true, isManual: true, text: 'S/N manuell zugewiesen' },
 ];
 
 /* ── Sektion 4: Bestell-Pill legend rows (1 per colour group) ── */
@@ -127,6 +129,22 @@ export function IconGuidePopup({ open, onOpenChange }: IconGuidePopupProps) {
                   <span className="text-xs">{row.text}</span>
                 </div>
               ))}
+              {/* PROJ-46: Manuell Entwurf (nur blaues Icon) */}
+              <div className="flex items-center gap-3">
+                <div className="w-8 flex items-center justify-center">
+                  <span className="inline-flex items-center justify-center rounded px-1 py-0.5 bg-blue-100 text-blue-700">
+                    <span className="text-[11px] leading-none">{'\u{1F6B9}'}</span>
+                  </span>
+                </div>
+                <span className="text-xs">Manuell zugeordnet (Entwurf)</span>
+              </div>
+              {/* PROJ-46: Manuell bestätigt (nur grünes Icon) */}
+              <div className="flex items-center gap-3">
+                <div className="w-8 flex items-center justify-center">
+                  <img src="/src/assets/icons/Manuell_check_ICON.ico" alt="bestätigt" className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs">Manuell zugeordnet (bestätigt)</span>
+              </div>
             </div>
 
             {/* Sub: PREIS / CHECK */}
@@ -140,6 +158,13 @@ export function IconGuidePopup({ open, onOpenChange }: IconGuidePopupProps) {
                   <span className="text-xs">{row.text}</span>
                 </div>
               ))}
+              {/* PROJ-46: Preis manuell bestätigt Icon */}
+              <div className="flex items-center gap-3">
+                <div className="w-8 flex items-center justify-center">
+                  <img src="/src/assets/icons/Manuell_check_ICON.ico" alt="bestätigt" className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs">Preis manuell bestätigt</span>
+              </div>
             </div>
           </section>
 
@@ -162,6 +187,7 @@ export function IconGuidePopup({ open, onOpenChange }: IconGuidePopupProps) {
                     <SerialStatusDot
                       serialRequired={row.serialRequired}
                       serialAssigned={row.serialAssigned}
+                      isManual={row.isManual}
                     />
                   </div>
                   <span className="text-xs">{row.text}</span>
@@ -187,7 +213,7 @@ export function IconGuidePopup({ open, onOpenChange }: IconGuidePopupProps) {
                     <span
                       className={cn(
                         style.pillClass,
-                        'inline-flex items-center text-[10px] leading-none',
+                        'inline-flex items-center justify-center text-[10px] leading-none min-w-[38px] py-0.5',
                       )}
                     >
                       {row.label}

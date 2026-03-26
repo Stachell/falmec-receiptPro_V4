@@ -202,7 +202,11 @@ function IssueCard({ issue, invoiceLines, onSend, onIsolate, onEdit, isExpanded,
         <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
           {/* PROJ-45: PriceCell nur für nächste unfixierte Mismatch-Position */}
           {issue.type === 'price-mismatch' && isExpanded && (() => {
-            const mismatchLine = affectedLines.find(l => l.priceCheckStatus === 'mismatch');
+            // PROJ-46: Auch custom+draft matchen (nach Preiswahl bleibt PriceCell sichtbar)
+            const mismatchLine = affectedLines.find(l =>
+              l.priceCheckStatus === 'mismatch' ||
+              (l.priceCheckStatus === 'custom' && l.manualStatus === 'draft')
+            );
             if (!mismatchLine) return null;
             return (
               <PriceCell
@@ -332,6 +336,9 @@ export function IssuesCenter() {
     setActiveIssueFilterIds,
     setActiveTab,
     setManualPriceByPosition,
+    reopenIssue,
+    resolveIssue,
+    bulkConfirmDraftIssues,
   } = useRunStore();
 
   // Sync store-driven filter (from KPI-click navigation) into local state
@@ -427,10 +434,24 @@ export function IssuesCenter() {
     setActiveTab('items');
   };
 
-  // PROJ-43: Aktualisieren-Button — re-evaluate issues without re-running steps
+  // PROJ-43/46: Aktualisieren-Button — Bulk-Confirm Entwürfe + re-evaluate issues
   const handleRefresh = () => {
     if (!currentRun) return;
     setIsRefreshing(true);
+
+    // PROJ-46: Prüfen ob Draft-Lines existieren → Bulk-Confirm mit 3-Stufen-Validierung
+    const draftExists = allInvoiceLines.some(
+      l => l.lineId.startsWith(currentRun.id + '-line-') && l.manualStatus === 'draft',
+    );
+    if (draftExists) {
+      const result = bulkConfirmDraftIssues(currentRun.id);
+      if (!result.success) {
+        alert(result.message);
+        setIsRefreshing(false);
+        return;
+      }
+    }
+
     refreshIssues(currentRun.id);
     setTimeout(() => setIsRefreshing(false), 600);
   };
@@ -596,7 +617,10 @@ export function IssuesCenter() {
                       onEdit={setSelectedIssue}
                       isExpanded={currentRun?.isExpanded ?? false}
                       onBulkSetPrice={(positionIndex, price) => {
-                        if (currentRun) setManualPriceByPosition(positionIndex, price, currentRun.id);
+                        if (currentRun) {
+                          // PROJ-46: Nur Draft setzen, NICHT resolven (Issue bleibt offen)
+                          setManualPriceByPosition(positionIndex, price, currentRun.id);
+                        }
                       }}
                     />
                   ))}
@@ -640,7 +664,7 @@ export function IssuesCenter() {
                   <div key={issue.id} className="enterprise-card p-4 opacity-60 mb-3">
                     <div className="flex items-start gap-4">
                       <CheckCircle2 className="w-5 h-5 text-status-ok flex-shrink-0 mt-0.5" />
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-foreground line-through">{issue.message}</h4>
                         {issue.resolutionNote && (
                           <p className={`text-sm mt-1 ${
@@ -656,6 +680,16 @@ export function IssuesCenter() {
                           </p>
                         )}
                       </div>
+                      {/* PROJ-44-R9: Wieder öffnen Button */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1 text-xs h-7 px-2 flex-shrink-0"
+                        onClick={() => reopenIssue(issue.id)}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Wieder öffnen
+                      </Button>
                     </div>
                   </div>
                 ))}
