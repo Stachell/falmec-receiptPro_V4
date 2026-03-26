@@ -520,8 +520,8 @@ export default function RunDetail() {
   }, [currentRun?.steps, setActiveTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!currentRun) {
-    if (isProcessing) {
-      // Brief transition: run ID was renamed, URL update pending
+    if (isProcessing || loadingPersisted) {
+      // Brief transition: run ID was renamed, URL update pending, or loading from IndexedDB
       return (
         <AppLayout>
           <div className="py-8 flex items-center justify-center min-h-[400px]">
@@ -946,13 +946,27 @@ export default function RunDetail() {
               />
             ) : (
               <div className="enterprise-card p-8 text-center">
-                <FileWarning className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="font-semibold text-foreground mb-2">
-                  Keine Parsing-Daten verfuegbar
-                </h3>
-                <p className="text-muted-foreground">
-                  Die Rechnungsdaten wurden noch nicht geparst oder sind nicht mehr verfuegbar.
-                </p>
+                {isProcessing || loadingPersisted ? (
+                  <>
+                    <Loader2 className="w-12 h-12 text-muted-foreground mx-auto mb-4 animate-spin" />
+                    <h3 className="font-semibold text-foreground mb-2">
+                      Rechnungsdaten werden geladen...
+                    </h3>
+                    <p className="text-muted-foreground">
+                      Die Rechnungspositionen werden gerade extrahiert und verarbeitet.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <FileWarning className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="font-semibold text-foreground mb-2">
+                      Keine Parsing-Daten verfuegbar
+                    </h3>
+                    <p className="text-muted-foreground">
+                      Die Rechnungsdaten wurden noch nicht geparst oder sind nicht mehr verfuegbar.
+                    </p>
+                  </>
+                )}
               </div>
             )}
           </TabsContent>

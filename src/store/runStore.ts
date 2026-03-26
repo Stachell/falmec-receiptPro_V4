@@ -1068,6 +1068,38 @@ export const useRunStore = create<RunState>((set, get) => ({
         }
       }
 
+      // ── Fix B: Lazy Hydration Guard — rehydrate preFilteredSerials when starting from memory ──
+      const serialListFile = uploadedFiles.find(f => f.type === 'serialList');
+      if (serialListFile?.file && get().preFilteredSerials.length === 0) {
+        try {
+          set({ parsingProgress: 'Seriennummernliste laden...' });
+          const { preFilterSerialExcel } = await import('@/services/serialFinder');
+          const serialResult = await preFilterSerialExcel(serialListFile.file);
+          const serialDocRows: SerialDocumentRow[] = serialResult.filteredRows.map(row => ({
+            rowIndex: row.sourceRowIndex,
+            invoiceRef: row.invoiceReference.replace(/\D/g, '').slice(-5),
+            serialRaw: row.serialNumber,
+            serialCandidate: row.serialNumber,
+            consumed: false,
+          }));
+          const serialDoc: SerialDocument = {
+            rows: serialDocRows,
+            fileName: serialListFile.name,
+            columnMapping: {},
+          };
+          set({ preFilteredSerials: serialResult.filteredRows, serialDocument: serialDoc });
+          logService.info(
+            `S/N Pre-Filter rehydriert: ${serialResult.regexMatchCount}/${serialResult.totalRowsScanned} Zeilen`,
+            { step: 'Seriennummer anfuegen' }
+          );
+        } catch (err) {
+          logService.error(
+            `S/N Pre-Filter Rehydrierung fehlgeschlagen: ${err instanceof Error ? err.message : err}`,
+            { step: 'Seriennummer anfuegen' }
+          );
+        }
+      }
+
       // Parse invoice if file is available
       if (invoiceFile?.file) {
         set({ parsingProgress: 'Lese PDF...' });
@@ -2132,6 +2164,19 @@ export const useRunStore = create<RunState>((set, get) => ({
     if (currentRun) {
       const resolved = autoResolveIssues(issues, invoiceLines, currentRun.id);
       if (resolved !== issues) set({ issues: resolved });
+      // Recompute stats so KPI tiles reflect manual corrections (price, match, etc.)
+      const runPrefix = `${currentRun.id}-line-`;
+      const runLines = invoiceLines.filter(l => l.lineId.startsWith(runPrefix));
+      const matchStats = computeMatchStats(runLines);
+      const orderStats = computeOrderStats(runLines);
+      set((state) => ({
+        runs: state.runs.map(r =>
+          r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...matchStats, ...orderStats } } : r
+        ),
+        currentRun: state.currentRun?.id === currentRun.id
+          ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats, ...orderStats } }
+          : state.currentRun,
+      }));
     }
   },
 
@@ -3872,7 +3917,7 @@ export const useRunStore = create<RunState>((set, get) => ({
           unitPriceFinal: protectPrice ? line.unitPriceFinal : matched.unitPriceFinal,
           // Artikelquelle: Matcher hat zugeordnet
           articleSource: 'matcher' as const,
-          manualStatus: undefined, // PROJ-46: Draft zurücksetzen bei Matcher-Überschreibung
+          manualStatus: protectPrice ? line.manualStatus : undefined, // PROJ-46: confirmed bleibt gesperrt, Draft wird zurückgesetzt
         };
       });
 
@@ -4079,8 +4124,8 @@ export const useRunStore = create<RunState>((set, get) => ({
           orphanSerials.push(...remaining);
         }
         if (orphanSerials.length > 0) {
-          logService.warn(
-            `${orphanSerials.length} Seriennummer(n) ohne passende Rechnungsposition (Orphans)`,
+          logService.info(
+            `${orphanSerials.length} Seriennummer(n) übersprungen (Positionen ohne S/N-Pflicht)`,
             { runId, step: 'Seriennummer anfuegen' },
           );
         }

@@ -39,8 +39,13 @@ export function buildAutoSavePayload(runId: string) {
     invoiceLines: runLines,
     issues: current.issues.filter(i => i.runId === runId),
     auditLog: current.auditLog.filter(a => a.runId === runId),
-    parsedPositions: current.currentParsedRunId === runId ? current.parsedPositions : [],
-    parserWarnings: current.currentParsedRunId === runId ? current.parserWarnings : [],
+    // Guard: Run-Isolierung — Positionen nur speichern wenn sie zu diesem Run gehören.
+    // BUGFIX: currentParsedRunId === null (Unmount-Flush nach setCurrentRun(null))
+    // → Daten trotzdem speichern, da sie noch im Speicher liegen und korrekt sind.
+    parsedPositions: (current.currentParsedRunId === runId || current.currentParsedRunId === null)
+      ? current.parsedPositions : [],
+    parserWarnings: (current.currentParsedRunId === runId || current.currentParsedRunId === null)
+      ? current.parserWarnings : [],
     parsedInvoiceResult: current.parsedInvoiceResult ?? null,
     serialDocument: current.serialDocument ?? null,
     preFilteredSerials: current.preFilteredSerials.length > 0
