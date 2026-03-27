@@ -19,6 +19,8 @@ export type IssueType =
   | 'match-artno-not-found'
   | 'match-ean-not-found'
   | 'match-conflict-id'
+  // PROJ-48-ADD-ON: Ambiguous match — multiple articles for same identifier
+  | 'match-ambiguous'
   // PROJ-17: Step 3 deep-logging subtypes
   | 'sn-invoice-ref-missing'
   | 'sn-regex-failed'
@@ -396,6 +398,7 @@ export interface Issue {
     field?: string;                // Affected field (e.g. 'priceCheckStatus', 'serialNumber')
     expectedValue?: string;        // Expected value (for auto-resolve check)
     actualValue?: string;          // Current value
+    candidates?: ArticleMaster[];  // PROJ-48-ADD-ON: Ambiguous match candidates
   };
   // PROJ-39: Escalation fields (PROJ-43: escalateIssue now sets status to 'pending')
   escalatedAt?: string;            // ISO timestamp when issue was escalated (optional)

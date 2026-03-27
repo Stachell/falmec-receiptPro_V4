@@ -74,6 +74,7 @@ const issueTypeLabels: Record<string, string> = {
   'match-artno-not-found': 'Artikelnummer/EAN nicht im Stamm',
   'match-ean-not-found': 'EAN nicht im Stamm',
   'match-conflict-id': 'Artikelnummer/EAN-Konflikt',
+  'match-ambiguous': 'Mehrdeutige Artikelzuordnung',
   'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
   'sn-regex-failed': 'S/N Regex kein Treffer',
   'sn-insufficient-count': 'Zu wenige Seriennummern',
@@ -94,6 +95,7 @@ function getLineLabel(issue: Issue, line: InvoiceLine): string {
     case 'no-article-match':
     case 'match-artno-not-found':
     case 'match-ean-not-found':
+    case 'match-ambiguous':
       return `${pos}: EAN ${line.ean ?? '—'} / Art-Nr ${line.manufacturerArticleNo ?? '—'} / ${line.descriptionIT?.slice(0, 30) ?? '—'}`;
     case 'serial-mismatch':
     case 'sn-insufficient-count':
@@ -543,7 +545,12 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                   <p className="text-sm font-semibold mb-0.5">Preis korrigieren:</p>
                   <p className="text-xs text-muted-foreground mb-2">Waehlen Sie die korrekte Preisquelle</p>
                   <div
-                    className="inline-flex items-center gap-2 rounded border border-black/60 bg-green-50/40 px-3 py-1.5 shadow-sm"
+                    className="inline-flex items-center gap-2 rounded border border-black/60 bg-green-50/40 px-3 py-1.5 shadow-sm cursor-pointer hover:bg-green-100/60 transition-colors"
+                    onClick={(e) => {
+                      // Klick auf Container → inneren Popover-Trigger oeffnen
+                      const btn = (e.currentTarget as HTMLElement).querySelector('button[aria-haspopup="dialog"]') as HTMLButtonElement | null;
+                      if (btn && !(e.target as HTMLElement).closest('button')) btn.click();
+                    }}
                   >
                     <PriceCell
                       line={mismatchLine}
@@ -559,17 +566,62 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               );
             })()}
 
-            {/* PROJ-45-ADD-ON-round4: ArticleMatchForm — nur bei no-article-match */}
-            {(issue?.type === 'no-article-match' || issue?.type === 'match-artno-not-found') && currentRun && (() => {
+            {/* PROJ-45-ADD-ON-round4: ArticleMatchForm — nur bei no-article-match / match-ambiguous */}
+            {(issue?.type === 'no-article-match' || issue?.type === 'match-artno-not-found' || issue?.type === 'match-ambiguous') && currentRun && (() => {
+              const candidates = issue?.context?.candidates;
+              const isAmbiguous = issue?.type === 'match-ambiguous' && candidates && candidates.length > 1;
               return (
                 <div className="rounded-lg border-2 border-teal-400/50 bg-white/40 p-3 space-y-3">
                   <div>
-                    <p className="text-sm font-semibold mb-0.5">Artikel manuell zuordnen:</p>
+                    <p className="text-sm font-semibold mb-0.5">
+                      {isAmbiguous ? 'Artikel auswählen:' : 'Artikel manuell zuordnen:'}
+                    </p>
                     <p className="text-xs text-muted-foreground">
-                      Fehlende Stammdaten ergänzen. Bekannte Daten sind vorbefüllt.
+                      {isAmbiguous
+                        ? `${candidates!.length} Artikel mit gleicher Kennung im Stamm. Bitte den korrekten Artikel auswählen.`
+                        : 'Fehlende Stammdaten ergänzen. Bekannte Daten sind vorbefüllt.'}
                     </p>
                   </div>
-                  {affectedLines.length > 0 && (
+                  {/* PROJ-48-ADD-ON: Candidate picker for ambiguous matches */}
+                  {isAmbiguous && (
+                    <div className="space-y-1.5">
+                      {candidates!.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            if (affectedLines.length > 0) {
+                              const { setManualArticleByPosition } = useRunStore.getState();
+                              setManualArticleByPosition(affectedLines[0].positionIndex, {
+                                falmecArticleNo: c.falmecArticleNo,
+                                manufacturerArticleNo: c.manufacturerArticleNo || undefined,
+                                ean: c.ean || undefined,
+                                serialRequired: c.serialRequirement ?? false,
+                                storageLocation: c.storageLocation || undefined,
+                                descriptionDE: c.descriptionDE || undefined,
+                                supplierId: c.supplierId || undefined,
+                                unitPriceSage: c.unitPriceNet ?? undefined,
+                              }, currentRun!.id);
+                            }
+                          }}
+                          className="w-full text-left rounded-md border border-slate-300/60 bg-white/50 hover:bg-teal-50 hover:border-teal-400 transition-colors p-2 space-y-0.5"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-800">{c.falmecArticleNo}</span>
+                            <span className="text-[10px] text-muted-foreground">{c.ean || '—'}</span>
+                          </div>
+                          <p className="text-xs text-slate-600 truncate">{c.descriptionDE || c.manufacturerArticleNo || '—'}</p>
+                          <div className="flex gap-3 text-[10px] text-muted-foreground">
+                            <span>Lager: {c.storageLocation || '—'}</span>
+                            <span>Preis: {c.unitPriceNet != null ? `${c.unitPriceNet.toFixed(2)} €` : '—'}</span>
+                            <span>S/N: {c.serialRequirement ? 'Ja' : 'Nein'}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Standard manual form (also shown for ambiguous after selection as fallback) */}
+                  {!isAmbiguous && affectedLines.length > 0 && (
                     <ArticleMatchCard line={affectedLines[0]} runId={currentRun.id} />
                   )}
                 </div>
