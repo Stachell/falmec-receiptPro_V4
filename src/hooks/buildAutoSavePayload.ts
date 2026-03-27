@@ -30,7 +30,7 @@ export function buildAutoSavePayload(runId: string) {
     .filter(l => l.lineId.startsWith(linePrefix))
     .map(l => ({
       ...l,
-      descriptionIT: l.descriptionIT ? l.descriptionIT.substring(0, 10) : l.descriptionIT,
+      descriptionIT: l.descriptionIT,
     }));
 
   return {

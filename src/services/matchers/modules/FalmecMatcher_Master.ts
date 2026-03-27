@@ -489,7 +489,53 @@ export class FalmecMatcher_Master implements MatcherModule {
         });
       } else {
         if (lineSanitized) attempts.push(`Sanitized-ArtNo fail ('${lineSanitized}')`);
-        // No match found after Strategies 1-3
+
+        // ── PROJ-48-ADD-ON: Strategy 4 — Prefix-Suche (Hersteller-ArtNr + EAN) ──
+        // Nur im no-match Fallback: O(n) Scan auf articles[] nach Prefix-Treffern
+        const prefixCandidates: ArticleMaster[] = [];
+        if (lineCode) {
+          for (const a of articles) {
+            const normArt = normalize(a.manufacturerArticleNo);
+            if (normArt && (normArt.startsWith(lineCode) || lineCode.startsWith(normArt))) {
+              prefixCandidates.push(a);
+            }
+          }
+        }
+        if (prefixCandidates.length === 0 && lineEan) {
+          for (const a of articles) {
+            const normEan = normalize(a.ean);
+            if (normEan && (normEan.startsWith(lineEan) || lineEan.startsWith(normEan))) {
+              prefixCandidates.push(a);
+            }
+          }
+        }
+
+        if (prefixCandidates.length > 0) {
+          // Deduplizieren nach article.id
+          const seen = new Set<string>();
+          const unique = prefixCandidates.filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; });
+          return {
+            line: {
+              ...line,
+              matchStatus: 'no-match',
+              falmecArticleNo: null,
+              descriptionDE: null,
+              unitPriceSage: null,
+              serialRequired: false,
+              activeFlag: true,
+              storageLocation: null,
+              logicalStorageGroup: null,
+              supplierId: null,
+              priceCheckStatus: 'missing',
+              unitPriceFinal: null,
+            },
+            reason: `PREFIX: ${unique.length} Artikel mit ähnlicher Kennung: ${unique.map(c => c.falmecArticleNo).join(', ')}`,
+            isConflict: false,
+            ambiguousCandidates: unique,
+          };
+        }
+
+        // No match found after Strategies 1-4
         matchStatus = 'no-match';
         matchedArticle = undefined;
         if (lineCode) attempts.push(`ArtNo final fail`);

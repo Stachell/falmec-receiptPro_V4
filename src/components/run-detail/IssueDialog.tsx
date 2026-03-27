@@ -96,7 +96,7 @@ function getLineLabel(issue: Issue, line: InvoiceLine): string {
     case 'match-artno-not-found':
     case 'match-ean-not-found':
     case 'match-ambiguous':
-      return `${pos}: EAN ${line.ean ?? '—'} / Art-Nr ${line.manufacturerArticleNo ?? '—'} / ${line.descriptionIT?.slice(0, 30) ?? '—'}`;
+      return `${pos}: EAN ${line.ean ?? '—'} / Art-Nr ${line.manufacturerArticleNo ?? '—'} / ${line.descriptionIT ?? '—'}`;
     case 'serial-mismatch':
     case 'sn-insufficient-count':
       return `${pos}: ${line.falmecArticleNo ?? line.manufacturerArticleNo ?? ''} — benoetigt ${line.qty}, zugewiesen ${line.serialNumbers.length}`;
@@ -380,6 +380,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
   const [selectedEmail, setSelectedEmail] = useState('');
   const [manualEmail, setManualEmail] = useState('');
   const [emailBody, setEmailBody] = useState('');
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);  // PROJ-48-ADD-ON
   const { isCopied, copy } = useCopyToClipboard(2000);
 
   // PROJ-44-ADD-ON-R7: Pending-Preis für Bestätigungs-Workflow
@@ -602,16 +603,27 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                                 supplierId: c.supplierId || undefined,
                                 unitPriceSage: c.unitPriceNet ?? undefined,
                               }, currentRun!.id);
+                              setSelectedCandidateId(c.id);
                             }
                           }}
-                          className="w-full text-left rounded-md border border-slate-300/60 bg-white/50 hover:bg-teal-50 hover:border-teal-400 transition-colors p-2 space-y-0.5"
+                          className={`w-full text-left rounded-md border transition-colors p-2 space-y-0.5 ${
+                            selectedCandidateId === c.id
+                              ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-300'
+                              : 'border-slate-300/60 bg-white/50 hover:bg-teal-50 hover:border-teal-400'
+                          }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-800">{c.falmecArticleNo}</span>
-                            <span className="text-[10px] text-muted-foreground">{c.ean || '—'}</span>
+                            <span className="text-xs font-semibold text-slate-800">
+                              {selectedCandidateId === c.id && <Check className="inline-block w-3.5 h-3.5 text-blue-600 mr-1" />}
+                              {c.falmecArticleNo}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {selectedCandidateId === c.id ? <span className="text-blue-600 font-medium">Manuell zugewiesen</span> : (c.ean || '—')}
+                            </span>
                           </div>
                           <p className="text-xs text-slate-600 truncate">{c.descriptionDE || c.manufacturerArticleNo || '—'}</p>
                           <div className="flex gap-3 text-[10px] text-muted-foreground">
+                            <span>Herst-ArtNr: {c.manufacturerArticleNo || '—'}</span>
                             <span>Lager: {c.storageLocation || '—'}</span>
                             <span>Preis: {c.unitPriceNet != null ? `${c.unitPriceNet.toFixed(2)} €` : '—'}</span>
                             <span>S/N: {c.serialRequirement ? 'Ja' : 'Nein'}</span>
