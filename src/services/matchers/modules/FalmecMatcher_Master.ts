@@ -191,25 +191,46 @@ export class FalmecMatcher_Master implements MatcherModule {
     // Strategy 3: sanitized ArtNo index (special chars stripped)
     const bySanitizedArt = new Map<string, ArticleMaster>();
 
+    // PROJ-48-ADD-ON: Parallel ambiguity index — tracks ALL articles per key
+    const ambigArtNo = new Map<string, ArticleMaster[]>();
+    const ambigEan = new Map<string, ArticleMaster[]>();
+    const ambigSanitized = new Map<string, ArticleMaster[]>();
+
     for (const article of articles) {
       const normArt = normalize(article.manufacturerArticleNo);
       const normEan = normalize(article.ean);
-      if (normArt) byArtNo.set(normArt, article);
-      if (normEan) byEan.set(normEan, article);
+      if (normArt) {
+        byArtNo.set(normArt, article);
+        const arr = ambigArtNo.get(normArt) ?? [];
+        arr.push(article);
+        ambigArtNo.set(normArt, arr);
+      }
+      if (normEan) {
+        byEan.set(normEan, article);
+        const arr = ambigEan.get(normEan) ?? [];
+        arr.push(article);
+        ambigEan.set(normEan, arr);
+      }
       const san = sanitize(normArt);
-      if (san && san !== normArt) bySanitizedArt.set(san, article);
+      if (san && san !== normArt) {
+        bySanitizedArt.set(san, article);
+        const arr = ambigSanitized.get(san) ?? [];
+        arr.push(article);
+        ambigSanitized.set(san, arr);
+      }
     }
 
     // PROJ-18: Collect per-line match results with trace reasons
     const matchResults = lines.map((line) => {
       try {
-        return this.matchSingleLine(line, byArtNo, byEan, bySanitizedArt, articles, config, warnings);
+        return this.matchSingleLine(line, byArtNo, byEan, bySanitizedArt, ambigArtNo, ambigEan, ambigSanitized, articles, config, warnings);
       } catch (error) {
         console.error(`[FalmecMatcher] Error matching line ${line.lineId}:`, error);
         return {
           line: { ...line, matchStatus: 'no-match' as const, priceCheckStatus: 'missing' as const },
           reason: `Fehler beim Matching: ${error instanceof Error ? error.message : error}`,
           isConflict: false,
+          ambiguousCandidates: undefined,
         };
       }
     });
@@ -258,8 +279,10 @@ export class FalmecMatcher_Master implements MatcherModule {
     }
 
     // PROJ-17: Categorized issues instead of single summary
-    const noMatchNoConflict = matchResults.filter(r => r.line.matchStatus === 'no-match' && !r.isConflict);
+    const noMatchNoConflict = matchResults.filter(r => r.line.matchStatus === 'no-match' && !r.isConflict && !r.ambiguousCandidates);
     const conflictResults = matchResults.filter(r => r.isConflict);
+    // PROJ-48-ADD-ON: Ambiguous matches (multiple articles for same identifier)
+    const ambiguousResults = matchResults.filter(r => r.ambiguousCandidates && r.ambiguousCandidates.length > 1);
 
     // Granular: match-artno-not-found (no-match lines that are NOT conflicts)
     for (const r of noMatchNoConflict) {
@@ -301,6 +324,32 @@ export class FalmecMatcher_Master implements MatcherModule {
       });
     }
 
+    // PROJ-48-ADD-ON: Granular: match-ambiguous
+    for (const r of ambiguousResults) {
+      const candidates = r.ambiguousCandidates!;
+      issues.push({
+        id: `issue-${runId}-step2-ambiguous-pos${r.line.positionIndex}`,
+        runId,
+        severity: 'error',
+        stepNo: 2,
+        type: 'match-ambiguous',
+        message: `Pos ${r.line.positionIndex}: ${candidates.length} Artikel mit gleicher Kennung gefunden`,
+        details: `${r.line.manufacturerArticleNo || r.line.ean}: ${candidates.map(c => c.falmecArticleNo).join(', ')}`,
+        relatedLineIds: [r.line.lineId],
+        affectedLineIds: [r.line.lineId],
+        status: 'open',
+        createdAt: now,
+        resolvedAt: null,
+        resolutionNote: null,
+        context: {
+          positionIndex: r.line.positionIndex,
+          field: 'matchStatus',
+          expectedValue: 'full-match',
+          candidates,
+        },
+      });
+    }
+
     return { lines: updatedLines, stats, issues, warnings };
   }
 
@@ -309,10 +358,13 @@ export class FalmecMatcher_Master implements MatcherModule {
     byArtNo: Map<string, ArticleMaster>,
     byEan: Map<string, ArticleMaster>,
     bySanitizedArt: Map<string, ArticleMaster>,
+    ambigArtNo: Map<string, ArticleMaster[]>,
+    ambigEan: Map<string, ArticleMaster[]>,
+    ambigSanitized: Map<string, ArticleMaster[]>,
     articles: ArticleMaster[],
     config: MatcherConfig,
     warnings: MatcherWarning[],
-  ): { line: InvoiceLine; reason: string; isConflict: boolean } {
+  ): { line: InvoiceLine; reason: string; isConflict: boolean; ambiguousCandidates?: ArticleMaster[] } {
     const lineCode = normalize(line.manufacturerArticleNo);
     const lineEan = normalize(line.ean);
 
@@ -335,6 +387,45 @@ export class FalmecMatcher_Master implements MatcherModule {
         },
         reason: 'ArtNo und EAN leer — kein Lookup moeglich',
         isConflict: false,
+      };
+    }
+
+    // PROJ-48-ADD-ON: Ambiguity early-check — before any single-match logic
+    const lineCodeAmb = normalize(line.manufacturerArticleNo);
+    const lineEanAmb = normalize(line.ean);
+    const artNoCandidates = lineCodeAmb ? (ambigArtNo.get(lineCodeAmb) ?? []) : [];
+    const eanCandidates = lineEanAmb ? (ambigEan.get(lineEanAmb) ?? []) : [];
+    const sanAmb = lineCodeAmb ? sanitize(lineCodeAmb) : '';
+    const sanCandidates = sanAmb ? (ambigSanitized.get(sanAmb) ?? []) : [];
+
+    // Pick the first ambiguous set found (ArtNo > EAN > Sanitized)
+    const ambCandidates = artNoCandidates.length > 1
+      ? artNoCandidates
+      : eanCandidates.length > 1
+        ? eanCandidates
+        : sanCandidates.length > 1
+          ? sanCandidates
+          : null;
+
+    if (ambCandidates) {
+      return {
+        line: {
+          ...line,
+          matchStatus: 'no-match',
+          falmecArticleNo: null,
+          descriptionDE: null,
+          unitPriceSage: null,
+          serialRequired: false,
+          activeFlag: true,
+          storageLocation: null,
+          logicalStorageGroup: null,
+          supplierId: null,
+          priceCheckStatus: 'missing',
+          unitPriceFinal: null,
+        },
+        reason: `MEHRDEUTIG: ${ambCandidates.length} Artikel mit gleicher Kennung: ${ambCandidates.map(c => c.falmecArticleNo).join(', ')}`,
+        isConflict: false,
+        ambiguousCandidates: ambCandidates,
       };
     }
 

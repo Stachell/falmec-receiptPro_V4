@@ -264,7 +264,8 @@ function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
       return related.some(l => l.matchStatus === 'no-match' || l.manualStatus === 'draft');
 
     case 'match-conflict-id':
-      // Conflict resolves when all related lines have a definitive match
+    case 'match-ambiguous':   // PROJ-48-ADD-ON
+      // Conflict/ambiguity resolves when all related lines have a definitive match
       // PROJ-46: Draft-Guard
       return related.some(l => l.matchStatus === 'no-match' || l.matchStatus === 'pending' || l.manualStatus === 'draft');
 
@@ -313,7 +314,8 @@ function isIssueBlockingStep(issue: Issue, stepNo: number, config: RunConfig): b
         issue.type === 'no-article-match' ||
         issue.type === 'match-artno-not-found' ||
         issue.type === 'match-ean-not-found' ||
-        issue.type === 'match-conflict-id'
+        issue.type === 'match-conflict-id' ||
+        issue.type === 'match-ambiguous'    // PROJ-48-ADD-ON
       ) {
         return true;
       }

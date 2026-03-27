@@ -24,6 +24,7 @@ const ISSUE_TYPE_LABELS_FOR_MAIL: Record<string, string> = {
   'match-artno-not-found': 'Artikelnummer/EAN nicht im Stamm',
   'match-ean-not-found': 'EAN nicht im Stamm',
   'match-conflict-id': 'Artikelnummer/EAN-Konflikt',
+  'match-ambiguous': 'Mehrdeutige Artikelzuordnung',
   'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
   'sn-regex-failed': 'S/N Regex kein Treffer',
   'sn-insufficient-count': 'Zu wenige Seriennummern',

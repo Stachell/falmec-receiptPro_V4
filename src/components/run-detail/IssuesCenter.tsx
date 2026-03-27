@@ -51,6 +51,8 @@ const issueTypeLabels: Record<string, string> = {
   'match-artno-not-found': 'Artikelnummer/EAN nicht im Stamm',
   'match-ean-not-found': 'EAN nicht im Stamm',
   'match-conflict-id': 'Artikelnummer/EAN-Konflikt',
+  // PROJ-48-ADD-ON
+  'match-ambiguous': 'Mehrdeutige Artikelzuordnung',
   // PROJ-17 Step 3
   'sn-invoice-ref-missing': 'Rechnungsreferenz fehlt',
   'sn-regex-failed': 'S/N Regex kein Treffer',
@@ -69,6 +71,8 @@ const quickFixHints: Partial<Record<IssueType, string>> = {
     'EAN im Artikelstamm fehlt oder weicht von der Rechnung ab. Stammdaten ergaenzen.',
   'match-conflict-id':
     'Artikelnummer und EAN zeigen auf unterschiedliche Artikel im Stamm - Stammdaten bereinigen, damit Artikelnummer und EAN denselben Artikel referenzieren.',
+  'match-ambiguous':
+    'Mehrere Artikel im Stamm mit gleicher Kennung gefunden. Korrekten Artikel aus der Liste auswählen oder Stammdaten bereinigen.',
   'sn-invoice-ref-missing':
     'Die 5-stellige Rechnungsreferenz fehlt im Warenbegleitschein. Stimmt die Rechnungsnummer im Dokument? Format: letzte 5 Ziffern der Fattura-Nr. / Rechnungsnummer',
   'sn-insufficient-count':
