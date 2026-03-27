@@ -200,6 +200,7 @@ class ArchiveService {
         warenbegleitschein: findFile('openWE'),
         exportXml: null,
         exportCsv: null,
+        exportXlsx: null,
         artikelstamm: findFile('articleList'),
         offeneBestellungen: null,
         serialData: null,
@@ -227,7 +228,7 @@ class ArchiveService {
     run: Run,
     lines: InvoiceLine[],
     options?: {
-      extraFiles?: Record<string, string>;
+      extraFiles?: Record<string, string | Blob>;
       preFilteredSerials?: PreFilteredSerialRow[];
       issues?: Issue[];
     }
@@ -273,8 +274,12 @@ class ArchiveService {
     if (options?.extraFiles) {
       for (const [name, content] of Object.entries(options.extraFiles)) {
         const ok = await fileSystemService.saveToArchive(folderName, name, content);
-        if (ok) extraFileInfos.push({ name, size: content.length });
-        else failedFiles.push(name);
+        if (ok) {
+          const size = content instanceof Blob ? content.size : content.length;
+          extraFileInfos.push({ name, size });
+        } else {
+          failedFiles.push(name);
+        }
       }
     }
 
@@ -348,6 +353,7 @@ class ArchiveService {
         // Neue Export-Referenzen
         exportXml: extraFileInfos.find(f => f.name.endsWith('.xml')) ?? null,
         exportCsv: extraFileInfos.find(f => f.name.endsWith('.csv')) ?? null,
+        exportXlsx: extraFileInfos.find(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls')) ?? null,
         serialData: serialDataInfo,
         runReport: runReportInfo,
       },
@@ -589,7 +595,7 @@ class ArchiveService {
   async writeArchivePackage(
     run: Run,
     lines: InvoiceLine[],
-    options?: { exportXml?: string; exportCsv?: string; extraFiles?: Record<string, string>; preFilteredSerials?: PreFilteredSerialRow[]; issues?: Issue[] }
+    options?: { exportXml?: string; exportCsv?: string; extraFiles?: Record<string, string | Blob>; preFilteredSerials?: PreFilteredSerialRow[]; issues?: Issue[] }
   ): Promise<{ success: boolean; cleanedUp: boolean; folderName: string; failedFiles: string[] }> {
     const runId = run.id;
     const failedFiles: string[] = [];
@@ -662,7 +668,8 @@ class ArchiveService {
       for (const [name, content] of Object.entries(options.extraFiles)) {
         const ok = await fileSystemService.saveToArchive(folderName, name, content);
         if (ok) {
-          extraFileInfos.push({ name, size: content.length });
+          const size = content instanceof Blob ? content.size : content.length;
+          extraFileInfos.push({ name, size });
         } else {
           failedFiles.push(name);
         }
@@ -741,6 +748,7 @@ class ArchiveService {
         warenbegleitschein: null,
         exportXml: exportXmlInfo ?? extraFileInfos.find(f => f.name.endsWith('.xml')) ?? null,
         exportCsv: exportCsvInfo ?? extraFileInfos.find(f => f.name.endsWith('.csv')) ?? null,
+        exportXlsx: extraFileInfos.find(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls')) ?? null,
         artikelstamm: null,
         offeneBestellungen: null,
         serialData: serialDataInfo,

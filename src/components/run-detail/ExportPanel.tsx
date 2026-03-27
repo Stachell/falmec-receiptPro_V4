@@ -4,7 +4,7 @@ import { Download, CheckCircle2, AlertTriangle, FileCode, Copy, Check, ChevronsD
 import { Run } from '@/types';
 import { useRunStore } from '@/store/runStore';
 import { useExportConfigStore } from '@/store/exportConfigStore';
-import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { generateXML, generateCSV, getActiveColumns, buildExportFileName, type RunExportMeta } from '@/services/exportService';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
 import { Button } from '@/components/ui/button';
@@ -48,8 +48,11 @@ export function ExportPanel({ run }: ExportPanelProps) {
     bookingDate: run.stats.bookingDate ?? '',
   };
 
+  // PROJ-48: nur aktive Spalten im Export
+  const activeColumns = getActiveColumns(columnOrder);
+
   // Build XML preview for the copy/expand section (generated on render)
-  const xmlPreview = generateXML(invoiceLines, columnOrder, runMeta);
+  const xmlPreview = generateXML(invoiceLines, activeColumns, runMeta);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(xmlPreview);
@@ -76,8 +79,8 @@ export function ExportPanel({ run }: ExportPanelProps) {
     };
 
     const content = isXml
-      ? generateXML(invoiceLines, columnOrder, effectiveMeta)
-      : generateCSV(invoiceLines, columnOrder, effectiveMeta, csvDelimiter, csvIncludeHeader);
+      ? generateXML(invoiceLines, activeColumns, effectiveMeta)
+      : generateCSV(invoiceLines, activeColumns, effectiveMeta, csvDelimiter, csvIncludeHeader);
     const version = effectiveRun.stats.exportVersion ?? 0;
     const fileName = buildExportFileName(effectiveRun.id, format, version);
     const mimeType = isXml ? 'application/xml' : 'text/csv';

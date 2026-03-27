@@ -33,14 +33,15 @@ import {
 } from '@/components/ui/select';
 import type { Run, Issue } from '@/types';
 import type { PersistedRunSummary } from '@/services/runPersistenceService';
-import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { generateXLSX, getActiveColumns, buildExportFileName, type RunExportMeta } from '@/services/exportService';
 import { useExportConfigStore } from '@/store/exportConfigStore';
 import { toast } from 'sonner';
 
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 
-const FORMAT_TYPES: Array<'xml' | 'csv'> = ['xml', 'csv'];
+// PROJ-48: Dashboard bietet nur noch XLSX als Schnell-Download
+const FORMAT_TYPES: Array<'xlsx'> = ['xlsx'];
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
@@ -115,7 +116,7 @@ type StatusFilterValue = 'all' | Run['status'];
 
 const Index = () => {
   const { runs, issues, deleteRun, persistedRunSummaries, loadPersistedRunList, loadPersistedRun, invoiceLines: allInvoiceLines, setBookingDate, incrementExportVersion } = useRunStore();
-  const { columnOrder, csvDelimiter, csvIncludeHeader } = useExportConfigStore();
+  const { columnOrder, csvIncludeHeader, exportFormat } = useExportConfigStore();
   const navigate = useNavigate();
 
   const [selectedArchiveRun, setSelectedArchiveRun] = useState<ArchiveRun | null>(null);
@@ -153,7 +154,7 @@ const Index = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDownloadFormat = (run: Run, type: 'xml' | 'csv') => {
+  const handleDownloadFormat = (run: Run, _type: 'xlsx') => {
     const runLines = allInvoiceLines.filter(l => l.lineId.startsWith(`${run.id}-line-`));
     if (runLines.length === 0) {
       toast.info('Bitte laden Sie diesen Run zuerst, um den Export zu starten.');
@@ -172,13 +173,14 @@ const Index = () => {
       runId: effectiveRun.id,
       bookingDate: effectiveRun.stats.bookingDate ?? '',
     };
-    const content = type === 'xml'
-      ? generateXML(runLines, columnOrder, meta)
-      : generateCSV(runLines, columnOrder, meta, csvDelimiter, csvIncludeHeader);
-    const mimeType = type === 'xml' ? 'application/xml' : 'text/csv';
+    const activeColumns = getActiveColumns(columnOrder);
+    const xlsxData = generateXLSX(runLines, activeColumns, meta, csvIncludeHeader, exportFormat);
     const version = effectiveRun.stats.exportVersion ?? 0;
-    const fileName = buildExportFileName(effectiveRun.id, type, version);
-    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const fileName = buildExportFileName(effectiveRun.id, exportFormat, version);
+    const mimeType = exportFormat === 'xlsx'
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'application/vnd.ms-excel';
+    const blob = new Blob([xlsxData], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -375,6 +377,7 @@ const Index = () => {
                     {row.run ? (
                       <div className="flex items-center gap-1">
                         {FORMAT_TYPES.map(type => {
+                          const displayExt = exportFormat.toUpperCase();
                           const hoverKey = `${row.id}-${type}`;
                           const isHovered = hoveredFormat === hoverKey;
                           if (row.exportReady) {
@@ -389,17 +392,17 @@ const Index = () => {
                                   backgroundColor: isHovered ? HOVER_BG : undefined,
                                   color: isHovered ? HOVER_TEXT : undefined,
                                 }}
-                                title={`${type.toUpperCase()} herunterladen`}
+                                title={`${displayExt} herunterladen`}
                               >
                                 <span className={isHovered ? '' : 'bg-muted rounded px-1'}>
-                                  .{type.toUpperCase()}
+                                  .{displayExt}
                                 </span>
                               </button>
                             );
                           }
                           return (
                             <span key={type} className="font-mono text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground opacity-40">
-                              .{type.toUpperCase()}
+                              .{displayExt}
                             </span>
                           );
                         })}

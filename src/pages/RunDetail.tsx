@@ -28,7 +28,7 @@ import { ItemsTable } from '@/components/run-detail/ItemsTable';
 import { IssuesCenter } from '@/components/run-detail/IssuesCenter';
 import { WarehouseLocations } from '@/components/run-detail/WarehouseLocations';
 import { ExportPanel } from '@/components/run-detail/ExportPanel';
-import { generateXML, generateCSV, buildExportFileName, type RunExportMeta } from '@/services/exportService';
+import { generateXML, generateCSV, generateXLSX, getActiveColumns, buildExportFileName, type RunExportMeta } from '@/services/exportService';
 import { useExportConfigStore } from '@/store/exportConfigStore';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
@@ -91,7 +91,7 @@ export default function RunDetail() {
   const getStoreState = useRunStore.getState;
   const navigate = useNavigate();
   const { wrap, isLocked } = useClickLock();
-  const { columnOrder, csvDelimiter, csvIncludeHeader, setLastDiagnostics } = useExportConfigStore();
+  const { columnOrder, csvDelimiter, csvIncludeHeader, exportFormat, setLastDiagnostics } = useExportConfigStore();
 
   // --- PROJ-29: Double-Check-Logik ---------------------------------------------
   // Alle useMemo-Hooks müssen VOR dem ersten useEffect stehen (React Hook-Regeln)
@@ -346,41 +346,47 @@ export default function RunDetail() {
       bookingDate: effectiveRun.stats.bookingDate ?? new Date().toLocaleDateString('de-DE'),
     };
 
-    // 4. CSV generieren + Download (versionierter Dateiname)
-    const csvContent = generateCSV(currentRunLines, columnOrder, runMeta, csvDelimiter, csvIncludeHeader);
+    // 4. PROJ-48: XLSX generieren + Download (versionierter Dateiname)
+    const activeColumns = getActiveColumns(columnOrder);
+    const xlsxData = generateXLSX(currentRunLines, activeColumns, runMeta, csvIncludeHeader, exportFormat);
     const version = effectiveRun.stats.exportVersion ?? 0;
-    const csvFileName = buildExportFileName(effectiveRun.id, 'csv', version);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const xlsxFileName = buildExportFileName(effectiveRun.id, exportFormat, version);
+    const mimeType = exportFormat === 'xlsx'
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'application/vnd.ms-excel';
+    const blob = new Blob([xlsxData], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = csvFileName;
+    a.download = xlsxFileName;
     a.click();
     URL.revokeObjectURL(url);
 
     // 5. PROJ-27-ADDON-2: Finale Daten in bestehenden Archiv-Ordner
+    const xlsxBlob = new Blob([xlsxData], { type: mimeType });
     const archiveFolder = effectiveRun.archivePath;
     if (archiveFolder) {
       archiveService.appendToArchive(archiveFolder, effectiveRun, currentRunLines, {
-        extraFiles: { [csvFileName]: csvContent },
+        extraFiles: { [xlsxFileName]: xlsxBlob },
         preFilteredSerials: useRunStore.getState().preFilteredSerials,
         issues: useRunStore.getState().issues,
       }).catch(() => {});
     } else {
-      // Fallback: Kein Early Archive ? volles Paket (neuer Ordner)
+      // Fallback: Kein Early Archive → volles Paket (neuer Ordner)
       archiveService.writeArchivePackage(effectiveRun, currentRunLines, {
-        extraFiles: { [csvFileName]: csvContent },
+        extraFiles: { [xlsxFileName]: xlsxBlob },
       }).catch(() => {});
     }
 
     // 6. Log + Audit + Diagnostics
-    logService.info(`Export durchgefuehrt: ${csvFileName}`, {
+    const formatLabel = exportFormat.toUpperCase();
+    logService.info(`Export durchgefuehrt: ${xlsxFileName}`, {
       runId: effectiveRun.id,
       step: 'Export',
-      details: `Format: CSV, Positionen: ${currentRunLines.length}, Spalten: ${columnOrder.length}`,
+      details: `Format: ${formatLabel}, Positionen: ${currentRunLines.length}, Spalten: ${activeColumns.length}`,
     });
-    addAuditEntry({ runId: effectiveRun.id, action: 'export-download', details: `CSV: ${csvFileName}`, userId: 'system' });
-    setLastDiagnostics({ timestamp: new Date().toISOString(), fileName: csvFileName, lineCount: currentRunLines.length, status: 'success' });
+    addAuditEntry({ runId: effectiveRun.id, action: 'export-download', details: `${formatLabel}: ${xlsxFileName}`, userId: 'system' });
+    setLastDiagnostics({ timestamp: new Date().toISOString(), fileName: xlsxFileName, lineCount: currentRunLines.length, status: 'success' });
   };
 
   useEffect(() => {
@@ -787,7 +793,7 @@ export default function RunDetail() {
                     </span>
                   </div>
                   <span className="text-xs text-center mt-0.5 text-white opacity-80 transition-colors">
-                    CSV herunterladen
+                    {exportFormat.toUpperCase()} herunterladen
                   </span>
                 </>
               ) : (

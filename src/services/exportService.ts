@@ -5,7 +5,9 @@
  * No React dependencies, no side effects — fully testable.
  */
 
+import * as XLSX from 'xlsx';
 import type { InvoiceLine, ExportColumnMapping, ExportColumnKey } from '@/types';
+import type { ExportFormat } from '@/store/exportConfigStore';
 
 export interface RunExportMeta {
   fattura: string;
@@ -106,6 +108,37 @@ export function generateCSV(
   );
   const parts = includeHeader ? [header, ...rows] : rows;
   return bom + parts.join('\r\n');
+}
+
+/** PROJ-48: Filter active columns only, sorted by position */
+export function getActiveColumns(columnOrder: ExportColumnMapping[]): ExportColumnMapping[] {
+  return columnOrder
+    .filter(col => col.enabled !== false)
+    .sort((a, b) => a.position - b.position);
+}
+
+/** PROJ-48: Generate XLSX/XLS binary with optional header row */
+export function generateXLSX(
+  lines: InvoiceLine[],
+  columnOrder: ExportColumnMapping[],
+  meta: RunExportMeta,
+  includeHeader: boolean,
+  bookType: ExportFormat = 'xlsx',
+): Uint8Array {
+  const aoa: string[][] = [];
+
+  if (includeHeader) {
+    aoa.push(columnOrder.map(col => col.label));
+  }
+
+  for (const line of lines) {
+    aoa.push(columnOrder.map(col => resolveColumnValue(col.columnKey, line, meta).value));
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Wareneingang');
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType }));
 }
 
 /** Build the export file name: "{runId}-Wareneingang[_vN].{ext}"

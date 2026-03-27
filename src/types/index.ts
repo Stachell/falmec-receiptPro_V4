@@ -518,6 +518,7 @@ export interface ExportColumnMapping {
   position: number;           // 1–15
   columnKey: ExportColumnKey;
   label: string;              // Anzeigename (deutsch)
+  enabled?: boolean;          // PROJ-48: Feld aktiv/inaktiv (Default: true)
 }
 
 export interface ExportDiagnostics {
@@ -558,6 +559,7 @@ export interface ArchiveMetadata {
     warenbegleitschein: { name: string; size: number } | null;
     exportXml: { name: string; size: number } | null;
     exportCsv: { name: string; size: number } | null;
+    exportXlsx: { name: string; size: number } | null;
     artikelstamm: { name: string; size: number } | null;
     offeneBestellungen: { name: string; size: number } | null;
     // PROJ-20: Lean serial archive (JSON, not raw Excel)

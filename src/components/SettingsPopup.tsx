@@ -174,47 +174,70 @@ function DiagnosticsBlock({ diag }: { diag: StepDiagnostics | undefined }) {
 
 /** PROJ-35: Export column order configuration tab */
 function ExportConfigTab() {
-  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics, csvDelimiter, setCsvDelimiter, csvIncludeHeader, setCsvIncludeHeader } = useExportConfigStore();
+  const { columnOrder, isDirty, moveColumn, saveConfig, resetToDefault, lastDiagnostics, csvDelimiter, setCsvDelimiter, csvIncludeHeader, setCsvIncludeHeader, exportFormat, setExportFormat, toggleColumnEnabled } = useExportConfigStore();
 
   return (
     <TabsContent value="export" className="mt-0 space-y-3">
+      {/* PROJ-48: Standard-Exportformat */}
+      <div>
+        <Label className="text-xs font-semibold">Standard-Exportformat (Kachel 6)</Label>
+        <Select value={exportFormat} onValueChange={(v) => setExportFormat(v as 'xlsx' | 'xls')}>
+          <SelectTrigger className="mt-1 h-8 text-xs w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="xlsx">XLSX (Standard)</SelectItem>
+            <SelectItem value="xls">XLS (Legacy)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Export-Spaltenreihenfolge</div>
       <p className="text-xs text-muted-foreground">
-        Felder in die gewuenschte Reihenfolge bringen.
+        Felder in die gewuenschte Reihenfolge bringen. Inaktive Felder werden nicht exportiert.
       </p>
 
-      {/* Sortierbare Liste */}
+      {/* Sortierbare Liste mit Toggle */}
       <div className="space-y-1 border-t border-border pt-3">
-        {columnOrder.map((col, index) => (
-          <div
-            key={col.columnKey}
-            className="bg-white rounded-md border border-border px-3 py-1.5 flex items-center gap-3"
-          >
-            <GripVertical className="w-4 h-4 text-muted-foreground/40 flex-shrink-0" />
-            <span className="text-muted-foreground font-mono text-sm w-6 text-right flex-shrink-0">
-              {col.position}.
-            </span>
-            <span className="text-sm flex-1">{col.label}</span>
-            <button
-              type="button"
-              disabled={index === 0}
-              onClick={() => moveColumn(index, index - 1)}
-              className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-              aria-label={`${col.label} nach oben`}
+        {columnOrder.map((col, index) => {
+          const isEnabled = col.enabled !== false;
+          return (
+            <div
+              key={col.columnKey}
+              className={`bg-white rounded-md border border-border px-3 py-1.5 flex items-center gap-3 transition-opacity ${isEnabled ? '' : 'opacity-40'}`}
             >
-              <ChevronUp className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              disabled={index === columnOrder.length - 1}
-              onClick={() => moveColumn(index, index + 1)}
-              className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-              aria-label={`${col.label} nach unten`}
-            >
-              <ChevronDown className="w-4 h-4" />
-            </button>
-          </div>
-        ))}
+              <Switch
+                checked={isEnabled}
+                onCheckedChange={() => toggleColumnEnabled(col.columnKey)}
+                className="scale-75"
+                aria-label={`${col.label} ${isEnabled ? 'deaktivieren' : 'aktivieren'}`}
+              />
+              <GripVertical className="w-4 h-4 text-muted-foreground/40 flex-shrink-0" />
+              <span className="text-muted-foreground font-mono text-sm w-6 text-right flex-shrink-0">
+                {col.position}.
+              </span>
+              <span className="text-sm flex-1">{col.label}</span>
+              <button
+                type="button"
+                disabled={index === 0}
+                onClick={() => moveColumn(index, index - 1)}
+                className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                aria-label={`${col.label} nach oben`}
+              >
+                <ChevronUp className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                disabled={index === columnOrder.length - 1}
+                onClick={() => moveColumn(index, index + 1)}
+                className="p-0.5 rounded hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                aria-label={`${col.label} nach unten`}
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {/* Diagnose (letzter Export) */}
@@ -248,7 +271,7 @@ function ExportConfigTab() {
 
       {/* CSV-Trennzeichen */}
       <div className="border-t border-border pt-3">
-        <Label className="text-xs font-semibold">CSV-Trennzeichen</Label>
+        <Label className="text-xs font-semibold">CSV-Trennzeichen <span className="font-normal text-muted-foreground">(gilt nur fuer CSV-Export)</span></Label>
         <Select value={csvDelimiter} onValueChange={setCsvDelimiter}>
           <SelectTrigger className="mt-1 h-8 text-xs w-48">
             <SelectValue />
@@ -268,7 +291,7 @@ function ExportConfigTab() {
           <Switch checked={csvIncludeHeader} onCheckedChange={setCsvIncludeHeader} />
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Wenn aktiviert, wird eine Kopfzeile mit Spaltennamen in die CSV-Datei eingefuegt.
+          Wenn aktiviert, wird eine Kopfzeile mit Spaltennamen in die CSV- und XLSX-Datei eingefuegt.
         </p>
       </div>
 
@@ -334,6 +357,16 @@ export function SettingsPopup({
         .flat(),
     );
   }, [emailAddresses]);
+  // PROJ-48 Bug-Fix B1: isDirty zuruecksetzen wenn Dialog geschlossen wird
+  const { saveConfig: exportSaveConfig } = useExportConfigStore();
+  useEffect(() => {
+    if (!open) {
+      // Unsaved column order changes: auto-save on close
+      const { isDirty } = useExportConfigStore.getState();
+      if (isDirty) exportSaveConfig();
+    }
+  }, [open, exportSaveConfig]);
+
   const handleUpdateAddress = (index: number, value: string) => {
     setEmailAddresses(prev => {
       const next = [...prev];
