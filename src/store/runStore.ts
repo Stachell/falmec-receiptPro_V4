@@ -269,6 +269,10 @@ function checkIssueStillActive(issue: Issue, lines: InvoiceLine[]): boolean {
       // PROJ-46: Draft-Guard
       return related.some(l => l.matchStatus === 'no-match' || l.matchStatus === 'pending' || l.manualStatus === 'draft');
 
+    case 'supplier-missing':
+      // Resolves when all related lines have a valid 5-digit supplierId
+      return related.some(l => !l.supplierId || !/^\d{5}$/.test(l.supplierId));
+
     case 'serial-mismatch':
     case 'sn-insufficient-count':
       // PROJ-46: Draft-Guard

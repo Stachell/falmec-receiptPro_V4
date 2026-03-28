@@ -567,8 +567,8 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               );
             })()}
 
-            {/* PROJ-45-ADD-ON-round4: ArticleMatchForm — nur bei no-article-match / match-ambiguous */}
-            {(issue?.type === 'no-article-match' || issue?.type === 'match-artno-not-found' || issue?.type === 'match-ambiguous') && currentRun && (() => {
+            {/* PROJ-45-ADD-ON-round4: ArticleMatchForm — bei Artikel-/Lieferant-/Konflikt-Fehlern */}
+            {(issue?.type === 'no-article-match' || issue?.type === 'match-artno-not-found' || issue?.type === 'match-ambiguous' || issue?.type === 'match-conflict-id' || issue?.type === 'supplier-missing') && currentRun && (() => {
               const candidates = issue?.context?.candidates;
               const isAmbiguous = issue?.type === 'match-ambiguous' && candidates && candidates.length > 1;
               return (
@@ -732,8 +732,44 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
                 );
               })()}
 
+              {/* PROJ-48-ADD-ON: Lagerort-Auswahl — missing-storage-location */}
+              {issue.type === 'missing-storage-location' && affectedLines.length > 0 && (
+                <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-teal-800">Lagerort zuweisen</p>
+                  <p className="text-xs text-muted-foreground">
+                    Bitte einen Lagerort für die betroffene Position auswählen.
+                  </p>
+                  {affectedLines.map(line => (
+                    <div key={line.lineId} className="flex items-center gap-3 rounded border border-teal-300/50 bg-white/40 px-3 py-2">
+                      <span className="text-xs font-mono text-foreground shrink-0">
+                        Pos {line.positionIndex}: {line.falmecArticleNo ?? line.manufacturerArticleNo ?? '—'}
+                      </span>
+                      <Select
+                        value={line.storageLocation ?? ''}
+                        onValueChange={(val) => {
+                          const { updateInvoiceLine } = useRunStore.getState();
+                          updateInvoiceLine(line.lineId, {
+                            storageLocation: val,
+                            logicalStorageGroup: val.includes('KDD') ? 'KDD' : 'WE',
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs bg-white/60 w-48">
+                          <SelectValue placeholder="Lagerort wählen..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STORAGE_LOCATIONS.map(loc => (
+                            <SelectItem key={loc} value={loc} className="text-xs">{loc}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* PROJ-46: Readonly-Zusammenfassung — Artikel-Issues */}
-              {(issue.type === 'no-article-match' || issue.type === 'match-artno-not-found' || issue.type === 'match-ean-not-found') && affectedLines.length > 0 && (
+              {(issue.type === 'no-article-match' || issue.type === 'match-artno-not-found' || issue.type === 'match-ean-not-found' || issue.type === 'match-conflict-id' || issue.type === 'supplier-missing') && affectedLines.length > 0 && (
                 <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-2">
                   <p className="text-sm font-semibold text-teal-800">
                     Artikeldaten bestaetigen
@@ -777,7 +813,7 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
               )}
 
               {/* PROJ-46: Readonly-Zusammenfassung — Sonstige Issue-Types (generisch) */}
-              {!['price-mismatch', 'no-article-match', 'match-artno-not-found', 'match-ean-not-found'].includes(issue.type) && affectedLines.length > 0 && (
+              {!['price-mismatch', 'no-article-match', 'match-artno-not-found', 'match-ean-not-found', 'match-conflict-id', 'supplier-missing', 'missing-storage-location'].includes(issue.type) && affectedLines.length > 0 && (
                 <div className="rounded-lg border-2 border-teal-400/60 bg-teal-50/20 p-3 space-y-1">
                   <p className="text-sm font-semibold text-teal-800">Betroffene Positionen</p>
                   <pre className="text-xs font-mono bg-white/30 rounded p-2 whitespace-pre-wrap leading-relaxed">
@@ -800,19 +836,36 @@ export function IssueDialog({ issue, onClose }: IssueDialogProps) {
             </div>
 
             <div className="pt-2 shrink-0">
-              <Button
-                disabled={!affectedLines.some(l => l.manualStatus === 'draft')}
-                onClick={() => {
-                  if (!currentRun) return;
-                  // PROJ-46: confirmManualFix → draft→confirmed + resolve + refresh
-                  confirmManualFix(issue.id, resolutionNote || undefined);
-                  onClose();
-                }}
-                className="gap-1 text-xs bg-white text-orange-600 border border-orange-600 shadow-sm hover:bg-green-600 hover:text-white"
-              >
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Loesung anwenden
-              </Button>
+              {issue.type === 'missing-storage-location' ? (
+                <Button
+                  disabled={!affectedLines.every(l => !!l.storageLocation)}
+                  onClick={() => {
+                    if (!currentRun) return;
+                    // Direkt resolven — kein Draft-Flow nötig, Lagerort ist direkt gesetzt
+                    const { generateStep5Issues } = useRunStore.getState();
+                    generateStep5Issues(currentRun.id);
+                    onClose();
+                  }}
+                  className="gap-1 text-xs bg-white text-orange-600 border border-orange-600 shadow-sm hover:bg-green-600 hover:text-white"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Lagerort uebernehmen
+                </Button>
+              ) : (
+                <Button
+                  disabled={!affectedLines.some(l => l.manualStatus === 'draft')}
+                  onClick={() => {
+                    if (!currentRun) return;
+                    // PROJ-46: confirmManualFix → draft→confirmed + resolve + refresh
+                    confirmManualFix(issue.id, resolutionNote || undefined);
+                    onClose();
+                  }}
+                  className="gap-1 text-xs bg-white text-orange-600 border border-orange-600 shadow-sm hover:bg-green-600 hover:text-white"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Loesung anwenden
+                </Button>
+              )}
             </div>
             </div>
           </TabsContent>
