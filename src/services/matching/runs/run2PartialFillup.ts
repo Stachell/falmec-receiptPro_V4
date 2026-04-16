@@ -75,7 +75,7 @@ export function run2PartialFillup(
 
         // Find all matching pool entries (sorted oldest-first already)
         const matchingEntries = poolEntries.filter(entry => {
-          const opRef5 = entry.position.orderNumber.slice(-5);
+          const opRef5 = entry.position.orderNumber.replace(/\D/g, '').slice(-5);
           return opRef5 === ref5 && entry.remainingQty > 0;
         });
 

@@ -103,7 +103,7 @@ function stagePerfectMatch(
   for (const candidateRef of orderCandidates) {
     const ref5 = candidateRef.replace(/\D/g, '').slice(-5);
     const match = candidateOrders.find(op => {
-      const opRef5 = op.orderNumber.slice(-5);
+      const opRef5 = op.orderNumber.replace(/\D/g, '').slice(-5);
       return opRef5 === ref5 && tracker.remaining(op) === line.qty;
     });
 
@@ -141,7 +141,7 @@ function stageReferenceMatch(
 
     const ref5 = candidateRef.replace(/\D/g, '').slice(-5);
     const matchingOrders = candidateOrders
-      .filter(op => op.orderNumber.slice(-5) === ref5 && tracker.remaining(op) > 0)
+      .filter(op => op.orderNumber.replace(/\D/g, '').slice(-5) === ref5 && tracker.remaining(op) > 0)
       .sort((a, b) => {
         if (a.orderYear !== b.orderYear) return a.orderYear - b.orderYear;
         return a.belegnummer.localeCompare(b.belegnummer);

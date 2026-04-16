@@ -33,26 +33,33 @@ export function buildAutoSavePayload(runId: string) {
       descriptionIT: l.descriptionIT,
     }));
 
+  // PROJ-49 SSOT: Ownership-Guard — null-Fallback entfernt.
+  // owned ist nur true wenn currentParsedRunId exakt dieser runId entspricht.
+  // Verhindert, dass parsedPositions/parserWarnings eines fremden Runs
+  // unter dieser runId in IDB geschrieben werden.
+  const owned = current.currentParsedRunId === runId;
+
   return {
     id: runId,
+    currentParsedRunId: current.currentParsedRunId,  // PROJ-49: Ownership-Signal fuer saveRun() Overwrite-Schutz
     run,
     invoiceLines: runLines,
     issues: current.issues.filter(i => i.runId === runId),
     auditLog: current.auditLog.filter(a => a.runId === runId),
-    // Guard: Run-Isolierung — Positionen nur speichern wenn sie zu diesem Run gehören.
-    // BUGFIX: currentParsedRunId === null (Unmount-Flush nach setCurrentRun(null))
-    // → Daten trotzdem speichern, da sie noch im Speicher liegen und korrekt sind.
-    parsedPositions: (current.currentParsedRunId === runId || current.currentParsedRunId === null)
-      ? current.parsedPositions : [],
-    parserWarnings: (current.currentParsedRunId === runId || current.currentParsedRunId === null)
-      ? current.parserWarnings : [],
+    parsedPositions: owned ? current.parsedPositions : [],
+    parserWarnings: owned ? current.parserWarnings : [],
     parsedInvoiceResult: current.parsedInvoiceResult ?? null,
     serialDocument: current.serialDocument ?? null,
     preFilteredSerials: current.preFilteredSerials.length > 0
       ? current.preFilteredSerials : undefined,
-    uploadMetadata: current.uploadedFiles.map(f => ({
-      type: f.type, name: f.name, size: f.size, uploadedAt: f.uploadedAt,
-    })),
+    // PROJ-49 SSOT: uploadMetadata nur bauen wenn owned UND uploadedFiles nicht leer.
+    // SSOT-Runs haben uploadMetadata bereits via ingestAndPersistRunData() in IDB persistiert.
+    // Nach resetRunSensitiveState() ist uploadedFiles leer — leere Überschreibung würde
+    // die korrekt persistierten Phase-1-Daten zerstören. Der saveRun()-Merge-Schutz
+    // fängt das zusätzlich ab, aber dieser Guard verhindert es primär.
+    uploadMetadata: (owned && current.uploadedFiles.length > 0)
+      ? current.uploadedFiles.map(f => ({ type: f.type, name: f.name, size: f.size, uploadedAt: f.uploadedAt }))
+      : undefined,
     runLog: logService.getRunBuffer(runId),
   };
 }

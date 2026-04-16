@@ -20,6 +20,8 @@ import type {
   ParsedInvoiceLineExtended,
   InvoiceParserWarning,
   PreFilteredSerialRow,
+  ArticleMaster,
+  ParsedOrderPosition,
 } from '@/types';
 import type { ParsedInvoiceResult } from '@/services/parsers';
 import type { SerialDocument } from '@/services/matchers/types';
@@ -46,6 +48,15 @@ export interface PersistedRunData {
   uploadMetadata: PersistedUploadMeta[];             // Dateinamen + Typen der Uploads
   runLog?: LogEntry[];                           // PROJ-41: Run-Log für IndexedDB-Persistenz
   preFilteredSerials?: PreFilteredSerialRow[];   // PROJ-40: S/N-Rehydrierung
+  // ── PROJ-49 SSOT-Felder ──────────────────────────────────────────────────
+  ingestStatus?: {
+    pdf: 'ready' | 'invalid' | 'pending';
+    articleList: 'ready' | 'invalid' | 'pending';
+    serialList: 'ready' | 'not_provided' | 'invalid' | 'pending';
+    openWE: 'ready' | 'not_provided' | 'invalid' | 'pending';
+  };
+  parsedOrderPool?: ParsedOrderPosition[];       // aus parseOrderFile() — run-spezifisch
+  parsedArticlePool?: ArticleMaster[];           // aus parseMasterDataFile() — run-spezifisch
   savedAt: string;                               // ISO timestamp
   sizeEstimateBytes: number;                     // JSON.stringify(data).length * 2
 }
@@ -113,33 +124,154 @@ function openDatabase(): Promise<IDBDatabase> {
 
 // ── CRUD operations ────────────────────────────────────────────────────
 
-/** Save or update a run in IndexedDB. */
-async function saveRun(data: Omit<PersistedRunData, 'savedAt' | 'sizeEstimateBytes'>): Promise<boolean> {
+/** PROJ-49: Extended payload type — currentParsedRunId is a transient signal, not persisted. */
+type SaveRunPayload = Omit<PersistedRunData, 'savedAt' | 'sizeEstimateBytes'> & {
+  currentParsedRunId?: string | null;
+};
+
+/** Save or update a run in IndexedDB with PROJ-49 Overwrite-Schutz. */
+async function saveRun(data: SaveRunPayload): Promise<boolean> {
   try {
     const db = await openDatabase();
-    const savedAt = new Date().toISOString();
-    const serialized = JSON.stringify(data);
-    const sizeEstimateBytes = serialized.length * 2; // UTF-16 estimate
 
-    const persistedData: PersistedRunData = {
-      ...data,
-      savedAt,
-      sizeEstimateBytes,
-    };
+    // PROJ-49: Extract transient signal before persisting
+    const { currentParsedRunId, ...cleanData } = data;
+    const runId = cleanData.id;
 
     return new Promise((resolve, reject) => {
       const transaction = db.transaction([RUNS_STORE], 'readwrite');
       const store = transaction.objectStore(RUNS_STORE);
-      const request = store.put(persistedData);
 
-      request.onsuccess = () => {
-        console.debug(`[RunPersistence] Run saved: ${data.id} (${(sizeEstimateBytes / 1024).toFixed(1)} KB)`);
-        resolve(true);
+      // PROJ-49: Read existing entry in the same transaction for merge protection
+      const getRequest = store.get(runId);
+
+      getRequest.onsuccess = () => {
+        const existing = getRequest.result as PersistedRunData | undefined;
+        let mergedData = { ...cleanData };
+
+        if (existing) {
+          // PROJ-49: Overwrite-Schutz — sensible Felder nur ueberschreiben wenn legitimiert
+          const isOwnedByCurrentRun = currentParsedRunId === runId;
+
+          // parsedInvoiceResult: beibehalten wenn neuer Wert null UND nicht-owned
+          if (
+            mergedData.parsedInvoiceResult === null &&
+            existing.parsedInvoiceResult !== null &&
+            !isOwnedByCurrentRun
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: parsedInvoiceResult (runId=${runId}, currentParsedRunId=${currentParsedRunId})`);
+            mergedData.parsedInvoiceResult = existing.parsedInvoiceResult;
+          }
+
+          // parsedPositions: beibehalten wenn neuer Wert [] UND nicht-owned
+          if (
+            mergedData.parsedPositions.length === 0 &&
+            existing.parsedPositions.length > 0 &&
+            !isOwnedByCurrentRun
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: parsedPositions (runId=${runId}, currentParsedRunId=${currentParsedRunId})`);
+            mergedData.parsedPositions = existing.parsedPositions;
+          }
+
+          // preFilteredSerials: beibehalten wenn neuer Wert leer UND bestehend nicht-leer UND uploadMetadata hat serialList
+          const hasSerialUpload = (mergedData.uploadMetadata ?? existing.uploadMetadata)?.some(
+            m => m.type === 'serialList',
+          );
+          if (
+            (!mergedData.preFilteredSerials || mergedData.preFilteredSerials.length === 0) &&
+            existing.preFilteredSerials &&
+            existing.preFilteredSerials.length > 0 &&
+            hasSerialUpload
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: preFilteredSerials (runId=${runId})`);
+            mergedData.preFilteredSerials = existing.preFilteredSerials;
+          }
+
+          // serialDocument: beibehalten wenn neuer Wert null UND bestehend nicht-null UND serialList vorhanden
+          if (
+            mergedData.serialDocument === null &&
+            existing.serialDocument !== null &&
+            hasSerialUpload
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: serialDocument (runId=${runId})`);
+            mergedData.serialDocument = existing.serialDocument;
+          }
+
+          // PROJ-49: uploadMetadata — leere Überschreibung verhindern wenn nicht owned
+          if (
+            (!mergedData.uploadMetadata || mergedData.uploadMetadata.length === 0) &&
+            existing.uploadMetadata?.length > 0 &&
+            !isOwnedByCurrentRun
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: uploadMetadata (runId=${runId}, currentParsedRunId=${currentParsedRunId})`);
+            mergedData.uploadMetadata = existing.uploadMetadata;
+          }
+
+          // PROJ-49: parsedPositions — leere Überschreibung verhindern wenn nicht owned
+          if (
+            (!mergedData.parsedPositions || mergedData.parsedPositions.length === 0) &&
+            existing.parsedPositions?.length > 0 &&
+            !isOwnedByCurrentRun
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: parsedPositions (runId=${runId}, currentParsedRunId=${currentParsedRunId})`);
+            mergedData.parsedPositions = existing.parsedPositions;
+          }
+
+          // PROJ-49: parserWarnings — leere Überschreibung verhindern wenn nicht owned
+          if (
+            (!mergedData.parserWarnings || mergedData.parserWarnings.length === 0) &&
+            existing.parserWarnings?.length > 0 &&
+            !isOwnedByCurrentRun
+          ) {
+            console.debug(`[RunPersistence] Overwrite verhindert: parserWarnings (runId=${runId}, currentParsedRunId=${currentParsedRunId})`);
+            mergedData.parserWarnings = existing.parserWarnings;
+          }
+
+          // PROJ-49 SSOT: ingestStatus — nie durch Auto-Save löschen (Plan-Lücke-Fix)
+          // Auto-Save trägt dieses Feld nicht in der Payload — ohne Schutz geht es verloren.
+          if (!mergedData.ingestStatus && existing.ingestStatus) {
+            mergedData.ingestStatus = existing.ingestStatus;
+          }
+
+          // PROJ-49 SSOT: parsedArticlePool — nie durch Auto-Save löschen
+          if ((!mergedData.parsedArticlePool || mergedData.parsedArticlePool.length === 0) &&
+              existing.parsedArticlePool && existing.parsedArticlePool.length > 0) {
+            mergedData.parsedArticlePool = existing.parsedArticlePool;
+          }
+
+          // PROJ-49 SSOT: parsedOrderPool — nie durch Auto-Save löschen
+          if ((!mergedData.parsedOrderPool || mergedData.parsedOrderPool.length === 0) &&
+              existing.parsedOrderPool && existing.parsedOrderPool.length > 0) {
+            mergedData.parsedOrderPool = existing.parsedOrderPool;
+          }
+        }
+
+        const savedAt = new Date().toISOString();
+        const serialized = JSON.stringify(mergedData);
+        const sizeEstimateBytes = serialized.length * 2; // UTF-16 estimate
+
+        const persistedData: PersistedRunData = {
+          ...mergedData,
+          savedAt,
+          sizeEstimateBytes,
+        };
+
+        const putRequest = store.put(persistedData);
+
+        putRequest.onsuccess = () => {
+          console.debug(`[RunPersistence] Run saved: ${runId} (${(sizeEstimateBytes / 1024).toFixed(1)} KB)`);
+          resolve(true);
+        };
+
+        putRequest.onerror = () => {
+          console.error('[RunPersistence] Failed to save run:', putRequest.error);
+          reject(putRequest.error);
+        };
       };
 
-      request.onerror = () => {
-        console.error('[RunPersistence] Failed to save run:', request.error);
-        reject(request.error);
+      getRequest.onerror = () => {
+        console.error('[RunPersistence] Failed to read existing run for merge:', getRequest.error);
+        reject(getRequest.error);
       };
 
       transaction.oncomplete = () => db.close();

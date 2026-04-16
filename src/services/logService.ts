@@ -345,6 +345,17 @@ class LogService {
       }
     }
   }
+
+  /**
+   * PROJ-49: Entfernt Run-Log-Buffer (In-Memory) + localStorage-Key für Hard-Fail-Cleanup.
+   * Wird von cleanupFailedIngest() aufgerufen NACH dem set()-Aufruf (damit keine set()-Logs verloren gehen).
+   * WICHTIG: runId NICHT als options.runId an logService übergeben nach diesem Aufruf —
+   * das würde den gerade geleerten Log-Buffer sofort wieder anlegen.
+   */
+  clearRunLog(runId: string): void {
+    this.runBuffers.delete(runId);
+    localStorage.removeItem(`${RUN_LOG_PREFIX}${runId}`);
+  }
 }
 
 // Export singleton instance

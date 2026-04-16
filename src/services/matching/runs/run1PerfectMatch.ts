@@ -74,7 +74,7 @@ export function run1PerfectMatch(
       // Find matching pool entry: ref matches AND remaining === qty
       // Pool entries are sorted oldest-first, so first match = oldest year
       const matchEntry = poolEntries.find(entry => {
-        const opRef5 = entry.position.orderNumber.slice(-5);
+        const opRef5 = entry.position.orderNumber.replace(/\D/g, '').slice(-5);
         return opRef5 === ref5 && entry.remainingQty === line.qty;
       });
 

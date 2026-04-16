@@ -33,7 +33,7 @@ const DEFAULT_PROFILE: OrderParserProfile = {
     belegnummer: ['BELEGNUMMER', 'BELEG-NR', 'ORDER-NO', 'BESTELLUNG'],
     vorgang: ['VORGANG', 'VORGANGSNUMMER', 'VORGANG-NR', 'VORGANGS-NR'],
   },
-  orderNumberRegex: '^1\\d{4}$',
+  orderNumberRegex: '^[12]\\d\\.?\\d{3}$',
   orderYearRegex: '^\\d{4}$',
   orderNumberTieBreakPriority: ['BELEGNUMMER'],
 };

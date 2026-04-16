@@ -116,7 +116,7 @@ export const FALMEC_SCHEMA: SchemaDefinition = {
       fieldId: 'storageLocation',
       label: 'Lagerort',
       aliases: ['Lagerort', 'Storage Location', 'Magazzino', 'Hauptlagerplatz', 'Hauptlager'],
-      required: false,
+      required: true,
     },
     {
       fieldId: 'supplierId',
@@ -125,7 +125,7 @@ export const FALMEC_SCHEMA: SchemaDefinition = {
         'Lieferant', 'Supplier', 'Fornitore', 'Hauptlieferant',
         'Hersteller', 'Lieferantennummer', 'Lieferanten-Nr.', 'Lieferantennr.', 'fornitore',
       ],
-      required: false,
+      required: true,
     },
     {
       fieldId: 'descriptionDE',

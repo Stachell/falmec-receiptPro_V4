@@ -33,6 +33,7 @@ export interface MasterDataParseResult {
   columnMap: Record<string, string>; // fieldId → winning Excel column header
   collisions: Array<{ fieldId: string; winner: string; loser: string }>;
   warnings: string[];
+  missingRequiredFields: string[];  // fieldIds mit required:true die in der Excel fehlen
 }
 
 // ── Alias lookup ──────────────────────────────────────────────────────────────
@@ -205,10 +206,12 @@ export async function parseMasterDataFile(
     }
   }
 
-  // Warn about missing required fields
+  // Collect missing required fields — strukturiert fuer Hard-Fail in Phase 1
   const requiredFields = FALMEC_SCHEMA.fields.filter(f => f.required).map(f => f.fieldId);
+  const missingRequiredFields: string[] = [];
   for (const fid of requiredFields) {
     if (!elected.has(fid)) {
+      missingRequiredFields.push(fid);
       warnings.push(`Pflichtfeld '${fid}' (${FALMEC_SCHEMA.fields.find(f => f.fieldId === fid)?.label}) nicht in der Excel-Datei gefunden.`);
     }
   }
@@ -273,5 +276,6 @@ export async function parseMasterDataFile(
     columnMap,
     collisions,
     warnings,
+    missingRequiredFields,
   };
 }

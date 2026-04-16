@@ -14,7 +14,7 @@ import {
   resolveOrderParserProfile,
 } from './orderParserProfiles';
 
-const FALLBACK_ORDER_NUMBER_REGEX = /^1\d{4}$/;
+const FALLBACK_ORDER_NUMBER_REGEX = /^[12]\d\.?\d{3}$/;
 const FALLBACK_ORDER_YEAR_REGEX = /^\d{4}$/;
 
 interface ColumnMapping {
@@ -143,8 +143,6 @@ function parseRegex(pattern: string | undefined, fallback: RegExp): RegExp {
 function extractOrderNumber(value: string): string {
   const raw = value.trim();
   if (!raw) return '';
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length >= 5) return digits.slice(-5);
   return raw;
 }
 

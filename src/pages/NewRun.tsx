@@ -22,21 +22,34 @@ import {
 
 export default function NewRun() {
   const navigate = useNavigate();
-  const { uploadedFiles, addUploadedFile, removeUploadedFile, createNewRunWithParsing, loadStoredFiles, clearUploadedFiles } = useRunStore();
+  const {
+    uploadedFiles,
+    addUploadedFile,
+    removeUploadedFile,
+    loadStoredFiles,
+    clearUploadedFiles,
+    createRunSkeleton,
+    parseInvoiceForIngest,
+    ingestAndPersistRunData,
+    startWorkflowPhase2,
+    cleanupFailedIngest,
+  } = useRunStore();
   const { wrap, isLocked } = useClickLock();
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [isDirectoryConfigured, setIsDirectoryConfigured] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+  const [ingestErrors, setIngestErrors] = useState<string[] | null>(null);
 
   const invoiceFile = uploadedFiles.find(f => f.type === 'invoice');
   const openWEFile = uploadedFiles.find(f => f.type === 'openWE');
   const serialListFile = uploadedFiles.find(f => f.type === 'serialList');
   const articleListFile = uploadedFiles.find(f => f.type === 'articleList');
 
-  const allFilesUploaded = invoiceFile && openWEFile && serialListFile && articleListFile;
+  // Pflicht: invoice + articleList + openWE. Optional: serialList (UX: Ersatzteilbestellungen)
+  const requiredFilesUploaded = invoiceFile && articleListFile && openWEFile;
   // Also check fileSystemService directly – the folder might have been
   // configured via the AppFooter after this page mounted.
-  const canStartProcessing = allFilesUploaded && (isDirectoryConfigured || !!fileSystemService.getDataPath());
+  const canStartProcessing = requiredFilesUploaded && (isDirectoryConfigured || !!fileSystemService.getDataPath());
 
   // Load stored files and check directory configuration on mount
   useEffect(() => {
@@ -53,7 +66,35 @@ export default function NewRun() {
     initialize();
   }, [loadStoredFiles]);
 
-  const handleStartProcessing = () => {
+  // PROJ-49 SSOT: 4-Phasen-Ablauf — fileSnapshot VOR createRunSkeleton() erstellen
+  const startNewRun = async () => {
+    const fileSnapshot = {
+      invoice:     uploadedFiles.find(f => f.type === 'invoice'),
+      articleList: uploadedFiles.find(f => f.type === 'articleList'),
+      serialList:  uploadedFiles.find(f => f.type === 'serialList'),
+      openWE:      uploadedFiles.find(f => f.type === 'openWE'),
+    };
+
+    let currentRunId: string | null = null;
+    try {
+      currentRunId = await createRunSkeleton();
+      const finalRunId = await parseInvoiceForIngest(currentRunId, fileSnapshot);
+      currentRunId = finalRunId;
+      const ingestResult = await ingestAndPersistRunData(finalRunId, fileSnapshot);
+      if (!ingestResult.allReady) {
+        await cleanupFailedIngest(finalRunId);
+        setIngestErrors(ingestResult.failedSources);
+        return;
+      }
+      await startWorkflowPhase2(finalRunId);
+      navigate(`/run/${encodeURIComponent(finalRunId)}`);
+    } catch (error) {
+      if (currentRunId) await cleanupFailedIngest(currentRunId);
+      setIngestErrors([`Unerwarteter Fehler: ${error instanceof Error ? error.message : String(error)}`]);
+    }
+  };
+
+  const handleStartProcessing = async () => {
     // Re-check directory configuration from service (not stale React state).
     // The user may have configured the folder via the AppFooter since mount.
     const dirConfigured = isDirectoryConfigured || !!fileSystemService.getDataPath();
@@ -78,17 +119,7 @@ export default function NewRun() {
         );
       });
 
-    // Start parsing – navigate immediately, parsing continues in background
-    const parsingPromise = createNewRunWithParsing();
-    const initialRun = useRunStore.getState().currentRun;
-    if (initialRun) {
-      navigate(`/run/${encodeURIComponent(initialRun.id)}`);
-      parsingPromise.then(finalRun => {
-        if (finalRun && finalRun.id !== initialRun.id) {
-          navigate(`/run/${encodeURIComponent(finalRun.id)}`, { replace: true });
-        }
-      });
-    }
+    await startNewRun();
   };
 
   const handleSelectDirectory = async () => {
@@ -96,17 +127,7 @@ export default function NewRun() {
     if (result.success) {
       setIsDirectoryConfigured(true);
       setShowFolderDialog(false);
-      // Start parsing – navigate immediately, parsing continues in background
-      const parsingPromise = createNewRunWithParsing();
-      const initialRun = useRunStore.getState().currentRun;
-      if (initialRun) {
-        navigate(`/run/${encodeURIComponent(initialRun.id)}`);
-        parsingPromise.then(finalRun => {
-          if (finalRun && finalRun.id !== initialRun.id) {
-            navigate(`/run/${encodeURIComponent(finalRun.id)}`, { replace: true });
-          }
-        });
-      }
+      await startNewRun();
     }
   };
 
@@ -174,8 +195,8 @@ export default function NewRun() {
               required
             />
             <FileUploadZone
-              label="Warenbegleitschein / Seriennummernliste (XLS)"
-              description="Datenauszug zur Rechnung aus Italien (ndmatricolek...)"
+              label="Warenbegleitschein / Seriennummernliste (XLS) — optional"
+              description="Datenauszug zur Rechnung aus Italien (ndmatricolek...) — kann spaeter ueber Fehler-Management ergaenzt werden"
               accept={{
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
@@ -184,7 +205,6 @@ export default function NewRun() {
               onFileAccepted={(file) => addUploadedFile(file)}
               onFileRemoved={() => removeUploadedFile('serialList')}
               currentFile={serialListFile}
-              required
             />
             <FileUploadZone
               label="aktuelle Artikelliste - Sage (XLSX/XML)"
@@ -205,12 +225,12 @@ export default function NewRun() {
           {/* Box Footer with Hint and Action Button */}
           <div className="flex items-center justify-between pt-4 border-t border-border">
             <div className="flex flex-col gap-1">
-              {!allFilesUploaded && (
+              {!requiredFilesUploaded && (
                 <p className="text-sm text-muted-foreground">
-                  Bitte laden Sie alle erforderlichen Dateien hoch
+                  Bitte laden Sie die 3 Pflichtdateien hoch (Rechnung, Artikelliste, offene WE)
                 </p>
               )}
-              {allFilesUploaded && !canStartProcessing && (
+              {requiredFilesUploaded && !canStartProcessing && (
                 <p className="text-sm text-yellow-600 flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4" />
                   Bitte waehlen Sie ein Datenverzeichnis im Footer
@@ -233,7 +253,7 @@ export default function NewRun() {
                 type="button"
                 size="lg"
                 className="gap-2"
-                disabled={!allFilesUploaded || isLocked('start')}
+                disabled={!requiredFilesUploaded || isLocked('start')}
                 onClick={wrap('start', handleStartProcessing)}
               >
                 <Play className="w-4 h-4" />
@@ -243,6 +263,33 @@ export default function NewRun() {
           </div>
         </div>
       </div>
+
+      {/* Ingest Error Dialog */}
+      <AlertDialog open={!!ingestErrors} onOpenChange={(open) => { if (!open) setIngestErrors(null); }}>
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              Fehler beim Einlesen der Dateien
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p className="mb-2">Die Verarbeitung konnte nicht gestartet werden:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {ingestErrors?.map((err, i) => (
+                    <li key={i} className="text-sm text-red-700">{err}</li>
+                  ))}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setIngestErrors(null)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Folder Selection Dialog */}
       <AlertDialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
