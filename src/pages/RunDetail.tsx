@@ -36,6 +36,16 @@ import { OverviewPanel } from '@/components/run-detail/OverviewPanel';
 import { InvoicePreview } from '@/components/run-detail/InvoicePreview';
 import { RunLogTab } from '@/components/run-detail/RunLogTab';
 
+// --- PROJ-46 Fix 3: Render-/Action-Guard (Defense-in-Depth) ------------------
+function withRunGuard<T>(decodedId: string | undefined, fn: () => T): T | void {
+  const cr = useRunStore.getState().currentRun;
+  if (!decodedId || cr?.id !== decodedId) {
+    console.warn(`[RunDetail] Aktion abgelehnt: currentRun=${cr?.id} != decoded=${decodedId}`);
+    return;
+  }
+  return fn();
+}
+
 // --- PROJ-29 Add-On 2: Checkpoint-Meldungen ----------------------------------
 const CHECKPOINT_MESSAGES: { id: number; label: string; description: string }[] = [
   { id: 1, label: 'PDF-Parsing', description: 'Rechnungspositionen und Rechnungssumme erfolgreich geparst.' },
@@ -389,27 +399,38 @@ export default function RunDetail() {
     setLastDiagnostics({ timestamp: new Date().toISOString(), fileName: xlsxFileName, lineCount: currentRunLines.length, status: 'success' });
   };
 
-  useEffect(() => {
-    // Find run by ID - first search in store runs (real runs), then fallback to mock data
-    const run = runs.find(r => r.id === decodedRunId) || mockRuns.find(r => r.id === decodedRunId);
-    if (run) {
-      setCurrentRun(run);
-    }
-    return () => setCurrentRun(null);
-  }, [decodedRunId, runs, setCurrentRun]);
-
-  // --- PROJ-40 6B / PROJ-49 SSOT: IndexedDB-Nachladen — immer aufrufen,
-  //     damit globale Felder (parsedArticlePool etc.) aus IDB-Snapshot befüllt werden.
+  // --- PROJ-46 Fix 2: v2.2-konformer Lifecycle — einheitlicher Mount-Effekt.
+  //     Dependency: NUR decodedRunId. KEIN destruktiver Unmount. KEIN runs-Abo.
+  // --- PROJ-40 6B / PROJ-49 SSOT: IndexedDB-Nachladen — nicht blind, nur wenn nötig.
   const [loadingPersisted, setLoadingPersisted] = useState(false);
   useEffect(() => {
     if (!decodedRunId) return;
+    let isSubscribed = true; // A16: Abort-Pattern für Async-Loads
 
-    setLoadingPersisted(true);
-    useRunStore.getState().loadPersistedRun(decodedRunId)
-      .then((found) => {
-        if (!found) console.warn(`[RunDetail] Run ${decodedRunId} weder in Memory noch IndexedDB`);
-      })
-      .finally(() => setLoadingPersisted(false));
+    const s = useRunStore.getState();
+    const inStore = s.runs.find(r => r.id === decodedRunId)
+                 || mockRuns.find(r => r.id === decodedRunId);
+    const phase2Active = s.currentRun?.id === decodedRunId
+                      && s.currentRun?.steps.some(st => st.status === 'running');
+
+    if (inStore) {
+      s.setCurrentRun(inStore);
+    }
+
+    // A15/A16: loadPersistedRun NICHT blind.
+    if (!(inStore && phase2Active)) {
+      setLoadingPersisted(true);
+      s.loadPersistedRun(decodedRunId)
+        .then((found) => {
+          if (!isSubscribed) return; // Stale-Promise Guard
+          if (!found) console.warn(`[RunDetail] Run ${decodedRunId} weder in Memory noch IndexedDB`);
+        })
+        .finally(() => {
+          if (isSubscribed) setLoadingPersisted(false);
+        });
+    }
+
+    return () => { isSubscribed = false; }; // Clean-Up für Async-Guard
   }, [decodedRunId]);
 
   // --- PROJ-29 Add-On 2: Parse-Error Toast (nur noch für Fehlerfälle) ---------
@@ -675,7 +696,7 @@ export default function RunDetail() {
                   ? { backgroundColor: '#FD7C6E', borderColor: '#FD7C6E', color: 'white' }
                   : undefined
               }
-              onClick={() => isPaused ? resumeRun(currentRun.id) : pauseRun(currentRun.id)}
+              onClick={() => withRunGuard(decodedRunId, () => isPaused ? useRunStore.getState().resumeRun(decodedRunId!) : useRunStore.getState().pauseRun(decodedRunId!))}
             >
               {isPaused && canPause ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
               {isPaused && canPause ? 'Fortfahren' : 'Pause'}
@@ -686,7 +707,7 @@ export default function RunDetail() {
               className="gap-2 border bg-[#c9c3b6] text-[#666666] border-[#666666] hover:bg-[#008C99] hover:text-[#E3E0CF] hover:border-[#008C99] transition-colors"
               disabled={isProcessing || isLocked('reprocess')}
               onClick={wrap('reprocess', () => {
-                reprocessCurrentRun(currentRun.id);
+                withRunGuard(decodedRunId, () => useRunStore.getState().reprocessCurrentRun(decodedRunId!));
               })}
             >
               <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
@@ -769,7 +790,7 @@ export default function RunDetail() {
                 setActiveTab('export');
               } else if (currentRun && hasFailedStep && nextStep) {
                 // HOTFIX-2: Dedicated retry action for failed steps
-                retryStep(currentRun.id, nextStep.stepNo);
+                withRunGuard(decodedRunId, () => useRunStore.getState().retryStep(decodedRunId!, nextStep.stepNo));
               } else if (currentRun) {
                 advanceToNextStep(currentRun.id);
               }

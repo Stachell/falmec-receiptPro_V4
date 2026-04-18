@@ -21,6 +21,7 @@ import {
   mockIssues,
   mockAuditLog,
 } from '@/data/mockData';
+import { runStepCore } from '@/store/internal/stepRunner';
 import { useMasterDataStore } from '@/store/masterDataStore';
 import { parseMasterDataFile } from '@/services/masterDataParser';
 import { logService } from '@/services/logService';
@@ -722,7 +723,8 @@ function buildGuardInput(state: RunState): StepGuardInput {
  * Runs the full guard cycle: validate → repair if needed → return result.
  * Used in advanceToNextStep, retryStep, and reprocessCurrentRun.
  */
-async function runStepGuard(
+// PROJ-46 AP2: Exportiert für stepRunner.ts — ermöglicht Guard-Execute-Kern-Reuse.
+export async function runStepGuard(
   stepNo: number,
   runId: string,
   get: () => RunState,
@@ -983,6 +985,11 @@ export const useRunStore = create<RunState>((set, get) => ({
 
   // Actions
   setCurrentRun: (run) => {
+    const prevId = get().currentRun?.id ?? null;
+    const nextId = run?.id ?? null;
+    // PROJ-46 R1 / INVARIANTS A13: Reset NUR bei echtem Identitätswechsel.
+    if (prevId === nextId) return; // Idempotenter Skip (verhindert Re-Renders)
+
     // PROJ-49 SSOT: resetRunSensitiveState leert alle run-sensitiven Felder inkl. Timer
     resetRunSensitiveState(get, set);
     // Danach currentRun setzen — loadPersistedRun() wird durch Aufrufer nachgezogen
@@ -2422,26 +2429,31 @@ export const useRunStore = create<RunState>((set, get) => ({
       }
 
       // Auto-execute Step 3 (Serial Extraction via Matcher Module) after Step 2 completes
+      // PROJ-46 AP2: Guard-Execute-Kern via runStepCore; Trigger-Postlude (Legacy-Advance bei Skip — A16!) bleibt am Call-Site.
       if (nextStep.stepNo === 3) {
         void (async () => {
           try {
-            if (get().isPaused) return; // Check 1
-            const guard = await runStepGuard(3, runId, get, set);
-            if (get().isPaused) return; // Check 2 (KRITISCH nach async Guard!)
-            if (guard.blockReason) {
-              logService.error(`[StepGuard] Step 3 blockiert: ${guard.blockReason}`, { runId, step: 'Seriennummer anfuegen' });
+            const r = await runStepCore(
+              3, runId, get, set,
+              () => get().isPaused,
+              () => {
+                logService.info('Auto-Start: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+                get().executeMatcherSerialExtract();
+                // Self-Advance liegt IN executeMatcherSerialExtract → hier kein Advance-Aufruf
+              },
+            );
+            if (r.kind === 'blocked' && r.reason === '__paused__') return;
+            if (r.kind === 'blocked') {
+              logService.error(`[StepGuard] Step 3 blockiert: ${r.reason}`, { runId, step: 'Seriennummer anfuegen' });
               get().updateStepStatus(runId, 3, 'failed');
               return;
             }
-            if (guard.skipReason) {
-              logService.info(`[StepGuard] Step 3 uebersprungen: ${guard.skipReason}`, { runId, step: 'Seriennummer anfuegen' });
+            if (r.kind === 'skipped') {
+              logService.info(`[StepGuard] Step 3 uebersprungen: ${r.reason}`, { runId, step: 'Seriennummer anfuegen' });
               get().updateStepStatus(runId, 3, 'ok');
               get().advanceToNextStep(runId); // Legacy Mode — kein Waiting-Point-Check für Skip-Pfad
               return;
             }
-            logService.info('Auto-Start: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
-            get().executeMatcherSerialExtract();
-            // Self-Advance liegt IN executeMatcherSerialExtract → hier kein Advance-Aufruf
           } catch (err) {
             console.error('[advanceToNextStep] Step 3 wrapper failed:', err);
             get().updateStepStatus(runId, 3, 'failed');
@@ -2535,25 +2547,32 @@ export const useRunStore = create<RunState>((set, get) => ({
         })();
         break;
       case 3:
+        // PROJ-46 AP2: Guard-Execute-Kern via runStepCore.
+        // v1.3 BIT-IDENTISCH: KEIN Pause-Check (pauseCheck = () => false) — entspricht heutigem Verhalten
+        // (runStore.ts:2087 historisch). Pause-in-Retry-Härtung ist separater Vorschlag (Sektion B, INVARIANTS), NICHT Iteration 1.
         void (async () => {
           try {
-            const guard = await runStepGuard(3, runId, get, set);
-            if (guard.blockReason) {
-              logService.error(`[StepGuard] Retry Step 3 blockiert: ${guard.blockReason}`, { runId, step: 'Seriennummer anfuegen' });
+            const r = await runStepCore(
+              3, runId, get, set,
+              () => false,
+              () => get().executeMatcherSerialExtract(),
+              // Self-Advance liegt IN executeMatcherSerialExtract
+            );
+            if (r.kind === 'blocked') {
+              logService.error(`[StepGuard] Retry Step 3 blockiert: ${r.reason}`, { runId, step: 'Seriennummer anfuegen' });
               get().updateStepStatus(runId, 3, 'failed');
               return;
             }
-            if (guard.skipReason) {
-              logService.info(`[StepGuard] Retry Step 3 uebersprungen: ${guard.skipReason}`, { runId, step: 'Seriennummer anfuegen' });
+            if (r.kind === 'skipped') {
+              logService.info(`[StepGuard] Retry Step 3 uebersprungen: ${r.reason}`, { runId, step: 'Seriennummer anfuegen' });
               get().updateStepStatus(runId, 3, 'ok');
               // Phase 5 Bugfix: Skip-Pfad hatte keinen Advance → Workflow blieb hängen
+              // TARGETED-Advance — Waiting-Point greift (unverändert).
               if (!get().isPaused) {
                 get().advanceToNextStep(runId, 3);
               }
               return;
             }
-            get().executeMatcherSerialExtract();
-            // Self-Advance liegt IN executeMatcherSerialExtract
           } catch (err) {
             console.error('[retryStep] Step 3 wrapper failed:', err);
             get().updateStepStatus(runId, 3, 'failed');
@@ -2840,39 +2859,48 @@ export const useRunStore = create<RunState>((set, get) => ({
     const runningStep = run.steps.find(s => s.status === 'running');
     if (!runningStep) return;
 
+    // PROJ-46 AP2: Guard-Execute-Kern via runStepCore. Trigger-Prelude (isPaused=false, status=running)
+    // bleibt oben am Call-Site; Postlude (Skip-Targeted-Advance bei Step 3) bleibt hier explizit.
+    const stepNo = runningStep.stepNo as 2 | 3 | 4;
+    if (stepNo !== 2 && stepNo !== 3 && stepNo !== 4) return; // Steps 1 und 5 haben keine Re-Trigger-Logik
+    const dispatchExecute = () => {
+      if (stepNo === 2) {
+        logService.info('Resume: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
+        get().executeMatcherCrossMatch();
+        // Self-Advance liegt IN executeMatcherCrossMatch
+      } else if (stepNo === 3) {
+        logService.info('Resume: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+        get().executeMatcherSerialExtract();
+        // Self-Advance liegt IN executeMatcherSerialExtract
+      } else if (stepNo === 4) {
+        return executeStep4Orchestration(runId, get, set);
+        // Self-Advance liegt IN executeStep4Orchestration (skip-Pfade) und IN executeOrderMapping
+      }
+    };
     void (async () => {
       try {
-        const guard = await runStepGuard(runningStep.stepNo, runId, get, set);
-        if (get().isPaused) return;
-        if (guard.blockReason) {
-          logService.error(`[StepGuard] Resume Step ${runningStep.stepNo} blockiert: ${guard.blockReason}`, { runId, step: runningStep.name });
-          get().updateStepStatus(runId, runningStep.stepNo, 'failed');
+        const r = await runStepCore(
+          stepNo, runId, get, set,
+          () => get().isPaused,
+          () => dispatchExecute(),
+        );
+        if (r.kind === 'blocked' && r.reason === '__paused__') return;
+        if (r.kind === 'blocked') {
+          logService.error(`[StepGuard] Resume Step ${stepNo} blockiert: ${r.reason}`, { runId, step: runningStep.name });
+          get().updateStepStatus(runId, stepNo, 'failed');
           return;
         }
-        if (runningStep.stepNo === 2) {
-          logService.info('Resume: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
-          get().executeMatcherCrossMatch();
-          // Self-Advance liegt IN executeMatcherCrossMatch
-        } else if (runningStep.stepNo === 3) {
-          if (guard.skipReason) {
-            logService.info(`Resume Step 3 uebersprungen: ${guard.skipReason}`, { runId, step: 'Seriennummer anfuegen' });
-            get().updateStepStatus(runId, 3, 'ok');
-            if (!get().isPaused) {
-              get().advanceToNextStep(runId, 3);
-            }
-            return;
+        if (r.kind === 'skipped' && stepNo === 3) {
+          logService.info(`Resume Step 3 uebersprungen: ${r.reason}`, { runId, step: 'Seriennummer anfuegen' });
+          get().updateStepStatus(runId, 3, 'ok');
+          if (!get().isPaused) {
+            get().advanceToNextStep(runId, 3);
           }
-          logService.info('Resume: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
-          get().executeMatcherSerialExtract();
-          // Self-Advance liegt IN executeMatcherSerialExtract
-        } else if (runningStep.stepNo === 4) {
-          await executeStep4Orchestration(runId, get, set);
-          // Self-Advance liegt IN executeStep4Orchestration (skip-Pfade) und IN executeOrderMapping
+          return;
         }
-        // Steps 1 und 5 haben keine Re-Trigger-Logik
       } catch (err) {
         console.error('[resumeRun] wrapper failed:', err);
-        get().updateStepStatus(runId, runningStep.stepNo, 'failed');
+        get().updateStepStatus(runId, stepNo, 'failed');
       }
     })();
   },

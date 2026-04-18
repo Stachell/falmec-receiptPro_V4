@@ -1,0 +1,771 @@
+# PROJ-44 ADD-ON Round 12: Race-Condition Kill — Self-Advance-Pattern
+
+**Status:** PLAN (noch keine Code-Aenderungen)
+**Datum:** 2026-04-01
+**Scope:** `src/store/runStore.ts`, `src/services/stepGuard.ts`
+**Ausloeser:** Round 9 Diagnostic — Timer-basierte Race-Conditions in Auto-Advance-Logik
+
+---
+
+## 1. Problemanalyse
+
+### 1.1 Die drei Gefahren
+
+**Gefahr A — Timer-Race (Workflow-Stall):**
+`executeMatcherCrossMatch()` hat eine sync Signatur, feuert aber intern `runAsyncStep2()` (async IDB-Read + Matcher-Logik). Der 100ms-Advance-Timer (`t2adv`, Zeile 2226) feuert 100ms nach dem sync Return von `executeMatcherCrossMatch()`. Wenn die async IDB-Operation > 100ms dauert, sieht der Timer Step 2 noch als `running` → Bedingung `status === 'ok'` ist false → **advanceToNextStep wird nie aufgerufen → Workflow haengt.**
+
+**Gefahr B — Blinder Advance (Step-Skip):**
+`advanceToNextStep(runId)` (Zeile 2174) sucht den aktuell `running` Step und setzt ihn auf `ok`. Wenn ein verspaeteter Timer-Callback feuert waehrend der naechste Step schon laeuft, wird der FALSCHE Step auf `ok` gesetzt und uebersprungen.
+
+**Gefahr C — Step-3-Guard-Luecke:**
+`runStepGuard()` (Zeile 732) ruft `validateStepPrerequisites()` auf, die fuer Step 3 den **synchronen** `validateStep3()` (Zeile 201) dispatcht. Die SSOT-sichere **asynchrone** Variante `validateStep3Async()` (Zeile 118) existiert in `stepGuard.ts`, wird aber nie von `runStepGuard` aufgerufen. Der sync-Fallback kann keinen IDB-Check machen und liefert fuer SSOT-Runs unzuverlaessige Ergebnisse.
+
+### 1.2 Timer-Inventar (zu entfernen)
+
+| Location | Zeile | Variable | Zweck | Problem |
+|---|---|---|---|---|
+| advanceToNextStep → Step 2 | 2212 | `t2` | Outer: Guard + Execute | 100ms Verzoegerung ohne Grund |
+| advanceToNextStep → Step 2 | 2226 | `t2adv` | Inner: Advance nach Match | Race mit async executeMatcherCrossMatch |
+| advanceToNextStep → Step 3 | 2244 | `t3` | Outer: Guard + Execute | 100ms Verzoegerung ohne Grund |
+| advanceToNextStep → Step 3 | 2264 | `t3adv` | Inner: Advance nach Serial | Race mit async executeMatcherSerialExtract |
+| advanceToNextStep → Step 4 | 2293 | `t4` | Outer: Guard + Execute | 100ms Verzoegerung ohne Grund |
+| advanceToNextStep → Step 4 | 2316,2333,2466,2488,2504 | `t4ssotSkip`,`t4ssotMap`,`t4adv1`,`t4adv2`,`t4legacy` | Inner: Advance nach Order | Race mit async OrderParser |
+| advanceToNextStep → Step 5 | 2527 | `t5` | Auto-Complete | Unnoetig — Step 5 ist sync |
+| retryStep → Step 2 | 2570 | — | Execute | 50ms Verzoegerung |
+| retryStep → Step 3 | 2581 | — | Execute | 50ms Verzoegerung |
+| retryStep → Step 4 | 2597 | — | Execute | 50ms Verzoegerung |
+| resumeRun → Step 2 | 3024,3030 | `t2`,`t2adv` | Execute + Advance | Dupliziert advanceToNextStep-Logik |
+| resumeRun → Step 3 | 3048,3054 | `t3`,`t3adv` | Execute + Advance | Dupliziert advanceToNextStep-Logik |
+| resumeRun → Step 4 | 3072,3088,3105,3220,3240,3255 | `t4`,`t4ssot*`,`t4adv*`,`t4legacy` | Execute + Advance | Dupliziert advanceToNextStep-Logik |
+
+**Summe: ~28 setTimeout-Aufrufe in 3 Funktionen, die durch 0 ersetzt werden.**
+
+---
+
+## 2. Fix 1 — `advanceToNextStep` zielgerichtet machen (Sicherheitsschloss)
+
+### 2.1 Signatur-Aenderung
+
+**Datei:** `src/store/runStore.ts`
+
+**VORHER (Zeile 590):**
+```typescript
+advanceToNextStep: (runId: string) => void;
+```
+
+**NACHHER:**
+```typescript
+advanceToNextStep: (runId: string, completedStepNo?: number) => void;
+```
+
+### 2.2 Implementierung — Zwei Modi
+
+**Datei:** `src/store/runStore.ts`, Funktion `advanceToNextStep` (ab Zeile 2174)
+
+**VORHER (gekuerzt):**
+```typescript
+advanceToNextStep: (runId: string) => {
+  if (get().isPaused) return;
+  const state = get();
+  const run = state.runs.find(r => r.id === runId);
+  if (!run) return;
+
+  // Find current running step
+  const runningStep = run.steps.find(s => s.status === 'running');
+  if (runningStep) {
+    // Block-Guard ...
+    // Set current step to 'ok'
+    get().updateStepStatus(runId, runningStep.stepNo, 'ok');
+  }
+
+  // Find next 'not-started' step
+  const nextStep = run.steps.find(s => s.status === 'not-started');
+  if (nextStep) {
+    get().updateStepStatus(runId, nextStep.stepNo, 'running');
+    // ... 350 Zeilen setTimeout-Kaskaden ...
+  } else {
+    get().updateRunStatus(runId, 'ok');
+    // cleanup ...
+  }
+},
+```
+
+**NACHHER (komplette neue Implementierung):**
+```typescript
+advanceToNextStep: (runId: string, completedStepNo?: number) => {
+  if (get().isPaused) return;
+
+  const state = get();
+  const run = state.runs.find(r => r.id === runId);
+  if (!run) return;
+
+  if (completedStepNo !== undefined) {
+    // ── TARGETED MODE (Self-Advance von Execute-Funktionen) ──
+    const completedStep = run.steps.find(s => s.stepNo === completedStepNo);
+    if (!completedStep) return;
+
+    // Nur weiter wenn Step erfolgreich abgeschlossen
+    if (completedStep.status !== 'ok' && completedStep.status !== 'soft-fail') return;
+
+    // Block-Guard (Defense-in-Depth)
+    const { globalConfig, issues } = get();
+    const effectiveConfig = run.config ?? globalConfig;
+    const blockingIssues = issues.filter(
+      i => i.runId === runId && isIssueBlockingStep(i, completedStepNo, effectiveConfig as RunConfig),
+    );
+    if (blockingIssues.length > 0) {
+      logService.warn(
+        `Block-Guard: Step ${completedStepNo} hat blockierende Issues — Advance gestoppt`,
+        { runId, step: 'System' },
+      );
+      return;
+    }
+
+    // Idempotenz-Guard: Wenn bereits ein Step laeuft, nicht nochmal advancen
+    const alreadyRunning = run.steps.some(s => s.status === 'running');
+    if (alreadyRunning) return;
+
+  } else {
+    // ── LEGACY MODE (Step 1 Completion, Step 5 Auto-Complete, proceedStep4FromWaiting, reprocess) ──
+    const runningStep = run.steps.find(s => s.status === 'running');
+    if (runningStep) {
+      const { globalConfig, issues } = get();
+      const effectiveConfig = run.config ?? globalConfig;
+      const blockingIssues = issues.filter(
+        i => i.runId === runId && isIssueBlockingStep(i, runningStep.stepNo, effectiveConfig as RunConfig),
+      );
+      if (blockingIssues.length > 0) {
+        logService.warn(
+          `Block-Guard: Step ${runningStep.stepNo} blockiert (${blockingIssues.length} blockierende Issues)`,
+          { runId, step: 'System' },
+        );
+        return;
+      }
+      get().updateStepStatus(runId, runningStep.stepNo, 'ok');
+    }
+  }
+
+  // ── COMMON: Naechsten Step finden und starten ──
+  const freshRun = get().runs.find(r => r.id === runId);
+  if (!freshRun) return;
+  const nextStep = freshRun.steps.find(s => s.status === 'not-started');
+
+  if (nextStep) {
+    get().updateStepStatus(runId, nextStep.stepNo, 'running');
+
+    // ── Step 2: Artikel extrahieren ──
+    if (nextStep.stepNo === 2) {
+      void (async () => {
+        if (get().isPaused) return;
+        const guard = await runStepGuard(2, runId, get, set);
+        if (guard.blockReason) {
+          logService.error(`[StepGuard] Step 2 blockiert: ${guard.blockReason}`, { runId, step: 'Artikel extrahieren' });
+          get().updateStepStatus(runId, 2, 'failed');
+          return;
+        }
+        logService.info('Auto-Start: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
+        get().executeMatcherCrossMatch();
+        // Self-Advance geschieht am Ende von executeMatcherCrossMatch
+      })();
+    }
+
+    // ── Step 3: Seriennummer anfuegen ──
+    if (nextStep.stepNo === 3) {
+      void (async () => {
+        if (get().isPaused) return;
+        const guard = await runStepGuard(3, runId, get, set);
+        if (guard.blockReason) {
+          logService.error(`[StepGuard] Step 3 blockiert: ${guard.blockReason}`, { runId, step: 'Seriennummer anfuegen' });
+          get().updateStepStatus(runId, 3, 'failed');
+          return;
+        }
+        if (guard.skipReason) {
+          logService.info(`[StepGuard] Step 3 uebersprungen: ${guard.skipReason}`, { runId, step: 'Seriennummer anfuegen' });
+          get().updateStepStatus(runId, 3, 'ok');
+          get().advanceToNextStep(runId, 3);
+          return;
+        }
+        logService.info('Auto-Start: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+        await get().executeMatcherSerialExtract();
+        // Self-Advance geschieht am Ende von executeMatcherSerialExtract
+      })();
+    }
+
+    // ── Step 4: Bestellungen mappen ──
+    if (nextStep.stepNo === 4) {
+      // PROJ-44: Step 4 Waiting Point Guard (VOR dem async Block pruefen)
+      const effectiveConfig = freshRun.config ?? get().globalConfig;
+      if (!((effectiveConfig as typeof get().globalConfig).autoStartStep4 ?? true)) {
+        logService.info('Step 4 Waiting Point: Workflow angehalten', { runId, step: 'System' });
+        set({
+          isWaitingBeforeStep4: true,
+          waitingStep4RunId: runId,
+          showStep4WaitingDialog: true,
+        });
+        return; // NICHT starten — User entscheidet via proceedStep4FromWaiting
+      }
+
+      void (async () => {
+        if (get().isPaused) return;
+        const guard = await runStepGuard(4, runId, get, set);
+        if (guard.blockReason) {
+          logService.error(`[StepGuard] Step 4 blockiert: ${guard.blockReason}`, { runId, step: 'Bestellungen mappen' });
+          get().updateStepStatus(runId, 4, 'failed');
+          return;
+        }
+
+        const activeMapper = get().globalConfig.activeOrderMapperId;
+        logService.info(`Auto-Start: Order-Mapping (Step 4, mapper=${activeMapper})`, { runId, step: 'Bestellungen mappen' });
+
+        if (activeMapper === 'engine-proj-23') {
+          const idbData = await runPersistenceService.loadRun(runId);
+          const isSSoTRun = !!idbData?.ingestStatus;
+
+          if (isSSoTRun) {
+            const openWEStatus = idbData!.ingestStatus!.openWE;
+            if (openWEStatus === 'not_provided') {
+              logService.info('SSOT: Keine Bestell-Datei (not_provided) — Step 4 uebersprungen', { runId, step: 'Bestellungen mappen' });
+              get().updateStepStatus(runId, 4, 'ok');
+              get().advanceToNextStep(runId, 4);
+              return;
+            }
+            if (openWEStatus === 'ready') {
+              if (!idbData!.parsedOrderPool?.length) {
+                logService.error('[Step4] SSOT-Run: ingestStatus.openWE=ready aber kein parsedOrderPool', { runId, step: 'Bestellungen mappen' });
+                get().updateStepStatus(runId, 4, 'failed');
+                return;
+              }
+              get().executeOrderMapping(idbData!.parsedOrderPool, idbData);
+              // Self-Advance geschieht am Ende von executeOrderMapping
+              return;
+            }
+            logService.error(`[Step4] SSOT-Run: openWE-Status '${openWEStatus}' — Blocker`, { runId, step: 'Bestellungen mappen' });
+            get().updateStepStatus(runId, 4, 'failed');
+            return;
+          }
+
+          // Legacy path: OpenWE File parsen
+          const openWEFile = get().uploadedFiles.find(f => f.type === 'openWE');
+          if (openWEFile?.file) {
+            try {
+              const { parseOrderFile } = await import('@/services/matching/orderParser');
+              const runConfig = get().currentRun?.config ?? get().globalConfig;
+              const parseResult = await parseOrderFile(openWEFile.file, {
+                profileId: runConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID,
+                overrides: runConfig.orderParserProfileOverrides,
+              });
+
+              // Warnings + Issues loggen
+              for (const w of parseResult.warnings) {
+                logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });
+              }
+              if (parseResult.issues?.length) {
+                set((state) => ({
+                  issues: [
+                    ...state.issues.filter(i => !(i.runId === runId && i.stepNo === 4 && i.type === 'parser-error')),
+                    ...parseResult.issues!.map(issue => ({ ...issue, runId })),
+                  ],
+                }));
+              }
+              set({ lastOrderParserDiagnostics: parseResult.diagnostics ?? null });
+              if (parseResult.diagnostics) {
+                get().setStepDiagnostics(4, {
+                  stepNo: 4,
+                  moduleName: parseResult.diagnostics.profileId,
+                  confidence: parseResult.diagnostics.confidence,
+                  summary: `${parseResult.positions.length} Bestellpositionen, Spalte: ${parseResult.diagnostics.selectedHeader || 'n/a'}`,
+                  timestamp: new Date().toISOString(),
+                });
+              }
+
+              // Validierungsfehler oder leere/low-confidence Ergebnisse → Step 4 failed
+              if (parseResult.validationError) {
+                const parserIssue = buildOrderParserFailureIssue(runId, parseResult.diagnostics, `Datei-Validierung fehlgeschlagen: ${parseResult.validationError}`);
+                set((state) => { /* ... setze Run auf soft-fail, Step 4 auf failed, issue hinzufuegen ... */ });
+                logService.error(`[OrderParser] Validierungsfehler blockiert Step 4: ${parseResult.validationError}`, { runId, step: 'Bestellungen mappen' });
+                return;
+              }
+              const lowConfidence = parseResult.diagnostics?.confidence === 'low';
+              if (parseResult.positions.length === 0 || lowConfidence) {
+                const parserIssue = buildOrderParserFailureIssue(runId, parseResult.diagnostics, /* ... */);
+                set((state) => { /* ... setze Run auf soft-fail, Step 4 auf failed ... */ });
+                return;
+              }
+
+              get().executeOrderMapping(parseResult.positions);
+              // Self-Advance geschieht am Ende von executeOrderMapping
+            } catch (err) {
+              logService.error(`OrderParser fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Bestellungen mappen' });
+              get().updateStepStatus(runId, 4, 'failed');
+            }
+          } else {
+            // Keine Bestell-Datei → Step 4 uebersprungen
+            logService.info('Keine Bestell-Datei geladen — Step 4 wird uebersprungen', { runId, step: 'Bestellungen mappen' });
+            get().updateStepStatus(runId, 4, 'ok');
+            get().advanceToNextStep(runId, 4);
+          }
+        } else {
+          // Legacy OrderMatcher
+          logService.info('Legacy OrderMatcher (3 Regeln) — manueller Start erforderlich', { runId, step: 'Bestellungen mappen' });
+          get().updateStepStatus(runId, 4, 'ok');
+          get().advanceToNextStep(runId, 4);
+        }
+      })();
+    }
+
+    // ── Step 5: Export ──
+    if (nextStep.stepNo === 5) {
+      const guard5 = validateStepPrerequisites(5, runId, buildGuardInput(get()));
+      if (guard5.blockReason) {
+        logService.error(`[StepGuard] Step 5 blockiert: ${guard5.blockReason}`, { runId, step: 'Export' });
+        get().updateStepStatus(runId, 5, 'failed');
+        return;
+      }
+      get().generateStep5Issues(runId);
+      logService.info('Auto-Complete: Step 5 (Export bereit)', { runId, step: 'Export' });
+      // Step 5 hat keine async Arbeit — direkt mit Legacy-Mode abschliessen
+      get().advanceToNextStep(runId);
+    }
+
+  } else {
+    // ── Alle Steps fertig → Run abschliessen ──
+    get().updateRunStatus(runId, 'ok');
+    logService.info('Run abgeschlossen – alle Schritte fertig', { runId, step: 'System' });
+    archiveService.cleanupBrowserData(runId).catch(err =>
+      logService.warn(`Browser-Cleanup fehlgeschlagen: ${err instanceof Error ? err.message : err}`, { runId, step: 'Archiv' })
+    );
+  }
+},
+```
+
+### 2.3 Idempotenz-Garantie (Erklaerung)
+
+Der **Idempotenz-Guard** (`alreadyRunning`) verhindert Double-Advance:
+
+| Szenario | Ergebnis |
+|---|---|
+| 1. Aufruf: Step 2 `ok`, kein Step `running` | Startet Step 3 → Step 3 wird `running` |
+| 2. Aufruf (verspaetet): Step 2 `ok`, Step 3 ist `running` | `alreadyRunning = true` → **Bail out** (Idempotent) |
+| Execute-Funktion setzt Step auf `failed` | `completedStep.status !== 'ok'` → **Bail out** (kein Advance) |
+
+---
+
+## 3. Fix 2 — Self-Advance-Pattern in Execute-Funktionen
+
+### 3.1 `executeMatcherCrossMatch` (Step 2)
+
+**Datei:** `src/store/runStore.ts`, Funktion `executeMatcherCrossMatch` (ab Zeile 4615)
+
+**Aenderung:** Am Ende von `runAsyncStep2()`, nach dem `set()` und den Diagnostics, VOR dem `for (const w of result.warnings)` Block (ca. Zeile 4878):
+
+```typescript
+      // ... bestehender Code: set(), logService.info(), setStepDiagnostics() ...
+
+      // ── SELF-ADVANCE: Step 2 fertig, naechsten Step anschieben ──
+      const step2Final = get().runs.find(r => r.id === runId)?.steps.find(s => s.stepNo === 2);
+      if (step2Final && (step2Final.status === 'ok' || step2Final.status === 'soft-fail')) {
+        get().advanceToNextStep(runId, 2);
+      }
+
+      for (const w of result.warnings) { // bestehender Code
+```
+
+**WICHTIG:** Der Self-Advance wird NICHT im catch-Block aufgerufen. Bei `step2Status === 'failed'` (noMatchCount > 0) ist die Bedingung `status === 'ok' || status === 'soft-fail'` bereits false — kein Advance.
+
+### 3.2 `executeMatcherSerialExtract` (Step 3)
+
+**Datei:** `src/store/runStore.ts`, Funktion `executeMatcherSerialExtract` (ab Zeile 4901)
+
+**Aenderung 1 — PreFiltered-Pfad:** Nach dem Hard-Checkpoint und den Diagnostics (ca. Zeile 5077), am Ende des `if (preFilteredSerials.length > 0)` Blocks, VOR dem `return;`:
+
+```typescript
+      // ... bestehender Code: Hard-Checkpoint, logService.info(), setStepDiagnostics() ...
+
+      // ── SELF-ADVANCE: Step 3 fertig, naechsten Step anschieben ──
+      const step3Final = get().runs.find(r => r.id === runId)?.steps.find(s => s.stepNo === 3);
+      if (step3Final && (step3Final.status === 'ok' || step3Final.status === 'soft-fail')) {
+        get().advanceToNextStep(runId, 3);
+      }
+
+      return; // bestehender return
+```
+
+**Aenderung 2 — Legacy-Pfad (Matcher serialExtract):** Nach den Diagnostics und Warnings (ca. Zeile 5185), VOR dem `} catch`:
+
+```typescript
+      // ... bestehender Code: Hard-Checkpoint, logService.info(), setStepDiagnostics(), warnings ...
+
+      // ── SELF-ADVANCE: Step 3 fertig, naechsten Step anschieben ──
+      const step3FinalLegacy = get().runs.find(r => r.id === runId)?.steps.find(s => s.stepNo === 3);
+      if (step3FinalLegacy && (step3FinalLegacy.status === 'ok' || step3FinalLegacy.status === 'soft-fail')) {
+        get().advanceToNextStep(runId, 3);
+      }
+
+    } catch (error) { // bestehender catch
+```
+
+### 3.3 `executeOrderMapping` (Step 4)
+
+**Datei:** `src/store/runStore.ts`, Funktion `executeOrderMapping` (ab Zeile 4299)
+
+**Aenderung:** Nach dem `logService.info()` mit den MatchingEngine-Stats (ca. Zeile 4446), VOR dem `} catch`:
+
+```typescript
+      // ... bestehender Code: set(), logService.info() ...
+
+      // ── SELF-ADVANCE: Step 4 fertig, naechsten Step anschieben ──
+      const step4Final = get().runs.find(r => r.id === runId)?.steps.find(s => s.stepNo === 4);
+      if (step4Final && (step4Final.status === 'ok' || step4Final.status === 'soft-fail')) {
+        get().advanceToNextStep(runId, 4);
+      }
+
+    } catch (error) { // bestehender catch
+```
+
+**HINWEIS zu Empty-Pool-Guard (Zeile 4347-4393):** Dieser Block setzt Step 4 auf `failed` und hat ein `return;`. Kein Self-Advance noetig — der return beendet die Funktion vor dem Self-Advance-Code.
+
+### 3.4 Step-3 Waiting-Point-Guard (Sonderfall)
+
+Der bestehende Waiting-Point-Guard fuer Step 4 (Zeile 2270-2279) prueft nach Step-3-Abschluss ob `autoStartStep4 === false`. **Dieser Guard wandert NICHT in `executeMatcherSerialExtract`**, sondern bleibt zentral in `advanceToNextStep` — siehe Fix 1 Code (Step 4 Block, vor dem `void (async () => { ... })()`). So gilt der Guard auch fuer Skip-Pfade und Retry/Resume.
+
+---
+
+## 4. Fix 3 — Step-3-Guard auf async Variante verdrahten
+
+### 4.1 Export in stepGuard.ts
+
+**Datei:** `src/services/stepGuard.ts`
+
+**VORHER (Zeile 118):**
+```typescript
+async function validateStep3Async(runId: string, state: StepGuardInput): Promise<StepGuardResult> {
+```
+
+**NACHHER:**
+```typescript
+export async function validateStep3Async(runId: string, state: StepGuardInput): Promise<StepGuardResult> {
+```
+
+### 4.2 Import und Verwendung in runStepGuard
+
+**Datei:** `src/store/runStore.ts`
+
+**Import-Zeile anpassen (bestehender Import erweitern):**
+```typescript
+import {
+  validateStepPrerequisites,
+  validateStep3Async,       // NEU
+  applyStepRepairs,
+  buildGuardInput,          // falls nicht schon importiert
+} from '@/services/stepGuard';
+```
+
+**VORHER (`runStepGuard`, Zeile 732-753):**
+```typescript
+async function runStepGuard(
+  stepNo: number,
+  runId: string,
+  get: () => RunState,
+  set: (partial: Partial<RunState>) => void,
+): Promise<StepGuardResult> {
+  const state = get();
+  const guardInput = buildGuardInput(state);
+  const result = validateStepPrerequisites(stepNo, runId, guardInput);
+
+  if (result.canProceed || result.skipReason) return result;
+
+  const repaired = await applyStepRepairs(result, stepNo, runId, guardInput, ...);
+  return repaired;
+}
+```
+
+**NACHHER:**
+```typescript
+async function runStepGuard(
+  stepNo: number,
+  runId: string,
+  get: () => RunState,
+  set: (partial: Partial<RunState>) => void,
+): Promise<StepGuardResult> {
+  const state = get();
+  const guardInput = buildGuardInput(state);
+
+  // Step 3: Async-Variante mit IDB-Check fuer SSOT-Runs
+  const result = stepNo === 3
+    ? await validateStep3Async(runId, guardInput)
+    : validateStepPrerequisites(stepNo, runId, guardInput);
+
+  if (result.canProceed || result.skipReason) return result;
+
+  const repaired = await applyStepRepairs(result, stepNo, runId, guardInput,
+    (partial) => set(partial as unknown as Partial<RunState>),
+  );
+  return repaired;
+}
+```
+
+### 4.3 Sync-Wrapper behalten
+
+`validateStep3()` (Zeile 201) bleibt als Fallback fuer `validateStepPrerequisites()` bestehen. Externe Aufrufer die NICHT ueber `runStepGuard` gehen (z.B. UI-Anzeigen die sync sein muessen) nutzen weiterhin den sync-Pfad. Der kritische Workflow-Pfad laeuft jetzt aber ueber die async-Variante.
+
+---
+
+## 5. Architektur-Gegencheck: Seiteneinstiege
+
+### 5.1 `retryStep` (Zeile 2553)
+
+**Aktuell:** ~50 Zeilen mit 3 setTimeout-Bloecken, KEIN Advance nach Retry (bewusst — User soll Ergebnis pruefen).
+
+**NEU mit Self-Advance:** `retryStep` feuert Guard + Execute-Funktion. Die Execute-Funktion ruft am Ende `advanceToNextStep(runId, stepNo)` auf. **Aenderung:** Workflow laeuft nach erfolgreichem Retry automatisch weiter (Steps 3→4→5 kaskadieren). Dies ist das gewuenschte Verhalten — ein erfolgreicher Retry soll den Workflow fortsetzen, nicht haengen bleiben.
+
+**Vereinfachter retryStep:**
+```typescript
+retryStep: (runId: string, stepNo: number) => {
+  const run = get().runs.find(r => r.id === runId);
+  if (!run) return;
+  const step = run.steps.find(s => s.stepNo === stepNo);
+  if (!step || step.status !== 'failed') return;
+
+  logService.info(`Retry: Step ${stepNo} (${step.name})`, { runId, step: step.name });
+  get().updateStepStatus(runId, stepNo, 'running');
+  get().updateRunStatus(runId, 'running');
+
+  void (async () => {
+    const guard = await runStepGuard(stepNo, runId, get, set);
+    if (guard.blockReason) {
+      logService.error(`[StepGuard] Retry Step ${stepNo} blockiert: ${guard.blockReason}`, { runId, step: step.name });
+      get().updateStepStatus(runId, stepNo, 'failed');
+      return;
+    }
+    if (guard.skipReason) {
+      logService.info(`[StepGuard] Retry Step ${stepNo} uebersprungen: ${guard.skipReason}`, { runId, step: step.name });
+      get().updateStepStatus(runId, stepNo, 'ok');
+      get().advanceToNextStep(runId, stepNo);
+      return;
+    }
+
+    // Step 4 hat Sonderlogik (SSOT/Legacy/OpenWE) — Dispatch ueber advanceToNextStep
+    if (stepNo === 4) {
+      // Step ist bereits 'running' gesetzt — advanceToNextStep im Legacy-Mode
+      // wuerde ihn auf 'ok' setzen und Step 5 starten. Stattdessen:
+      // Die Step-4-Orchestrierungslogik aus advanceToNextStep extrahieren.
+      // ALTERNATIVE: Step-4 Ausfuehrung direkt hier einbetten (wie bisher).
+      // → Siehe Abschnitt 5.4 fuer Step-4-Retry-Sonderbehandlung.
+    } else {
+      switch (stepNo) {
+        case 2: get().executeMatcherCrossMatch(); break;
+        case 3: await get().executeMatcherSerialExtract(); break;
+      }
+    }
+    // Self-Advance geschieht am Ende der Execute-Funktionen
+  })();
+},
+```
+
+### 5.2 `resumeRun` (Zeile 3011)
+
+**Aktuell:** ~250 Zeilen — komplette Kopie der advanceToNextStep-Timer-Logik fuer Step 2/3/4.
+
+**NEU mit Self-Advance:** Dramatisch vereinfacht. `resumeRun` findet den `running` Step und feuert dessen Execute-Funktion. Self-Advance kaskadiert automatisch.
+
+**Vereinfachter resumeRun:**
+```typescript
+resumeRun: (runId) => {
+  set({ isPaused: false });
+  get().updateRunStatus(runId, 'running');
+  logService.info('Run fortgesetzt', { runId, step: 'System' });
+
+  const run = get().runs.find(r => r.id === runId);
+  if (!run) return;
+  const runningStep = run.steps.find(s => s.status === 'running');
+  if (!runningStep) return;
+
+  // Step 5 hat keine Execute-Funktion → direkt abschliessen
+  if (runningStep.stepNo === 5) {
+    get().generateStep5Issues(runId);
+    get().advanceToNextStep(runId);
+    return;
+  }
+
+  // Steps 2-4: Guard + Execute → Self-Advance kaskadiert
+  void (async () => {
+    const guard = await runStepGuard(runningStep.stepNo, runId, get, set);
+    if (guard.blockReason) {
+      logService.error(`[StepGuard] Resume Step ${runningStep.stepNo} blockiert: ${guard.blockReason}`, { runId, step: runningStep.name });
+      get().updateStepStatus(runId, runningStep.stepNo, 'failed');
+      return;
+    }
+    if (guard.skipReason) {
+      logService.info(`[StepGuard] Resume Step ${runningStep.stepNo} uebersprungen: ${guard.skipReason}`, { runId, step: runningStep.name });
+      get().updateStepStatus(runId, runningStep.stepNo, 'ok');
+      get().advanceToNextStep(runId, runningStep.stepNo);
+      return;
+    }
+
+    switch (runningStep.stepNo) {
+      case 2:
+        logService.info('Resume: Matcher Cross-Match (Step 2)', { runId, step: 'Artikel extrahieren' });
+        get().executeMatcherCrossMatch();
+        break;
+      case 3:
+        logService.info('Resume: Matcher Serial-Extraktion (Step 3)', { runId, step: 'Seriennummer anfuegen' });
+        await get().executeMatcherSerialExtract();
+        break;
+      case 4:
+        // Step 4 Sonderlogik: identisch zu advanceToNextStep Step-4-Block
+        // → SSOT/Legacy/OpenWE Orchestrierung (siehe 5.4)
+        break;
+    }
+    // Self-Advance geschieht am Ende der Execute-Funktionen
+  })();
+},
+```
+
+**Reduktion: ~250 Zeilen → ~40 Zeilen.**
+
+### 5.3 `proceedStep4FromWaiting` (Zeile 3278)
+
+**Aktuell:**
+```typescript
+proceedStep4FromWaiting: () => {
+  const runId = get().waitingStep4RunId;
+  set({ isWaitingBeforeStep4: false, waitingStep4RunId: null, showStep4WaitingDialog: false });
+  if (runId) {
+    logService.info('Step 4 Waiting Point: DURCHFUEHREN', { runId, step: 'System' });
+    get().advanceToNextStep(runId);
+  }
+},
+```
+
+**Analyse:** Step 4 ist `not-started` (Waiting Point stoppt VOR Step-4-Start). `advanceToNextStep(runId)` im Legacy-Mode findet keinen `running` Step (Step 3 ist `ok`), dann findet es Step 4 als `not-started` und startet ihn. **Funktioniert unveraendert.** Keine Aenderung noetig.
+
+### 5.4 Step-4 Retry-Sonderbehandlung
+
+Step 4 hat komplexe Orchestrierungslogik (SSOT vs. Legacy, IDB-Check, OpenWE-Parsing). Diese Logik lebt primaer im Step-4-Block von `advanceToNextStep`.
+
+**Fuer retryStep und resumeRun bei Step 4:** Die Step-4-Orchestrierungslogik muss dupliziert werden ODER in eine gemeinsame Hilfsfunktion extrahiert werden:
+
+```typescript
+// Neue Hilfsfunktion (oberhalb von useRunStore):
+async function executeStep4Orchestration(
+  runId: string,
+  get: () => RunState,
+  set: (partial: Partial<RunState>) => void,
+): Promise<void> {
+  // Exakt die Step-4-async-Logik aus advanceToNextStep:
+  // SSOT check, Legacy check, OpenWE parsing, executeOrderMapping ...
+}
+```
+
+**Vorteil:** `advanceToNextStep`, `retryStep` und `resumeRun` rufen alle `executeStep4Orchestration()` auf — EINE Quelle der Wahrheit fuer Step-4-Ablauf.
+
+### 5.5 `reprocessCurrentRun` (Zeile ~2810)
+
+**Aktuell (Zeile 2880):**
+```typescript
+get().advanceToNextStep(runId);
+```
+
+**Analyse:** Ruft `advanceToNextStep(runId)` im Legacy-Mode auf. Steps 2-5 sind `not-started`, Step 1 ist `ok`. Kein `running` Step vorhanden. Legacy-Mode findet Step 2 als naechsten `not-started` Step und startet ihn. **Funktioniert unveraendert** — Self-Advance kaskadiert von dort automatisch durch Step 2→3→4→5.
+
+---
+
+## 6. Zusammenfassung der Aenderungen
+
+### Dateien und Aenderungsumfang
+
+| Datei | Aenderung | Umfang |
+|---|---|---|
+| `src/store/runStore.ts` | `advanceToNextStep` Signatur + Implementierung | ~400 Zeilen entfernt, ~120 Zeilen neu |
+| `src/store/runStore.ts` | Self-Advance in `executeMatcherCrossMatch` | +5 Zeilen |
+| `src/store/runStore.ts` | Self-Advance in `executeMatcherSerialExtract` (2 Pfade) | +10 Zeilen |
+| `src/store/runStore.ts` | Self-Advance in `executeOrderMapping` | +5 Zeilen |
+| `src/store/runStore.ts` | `retryStep` vereinfacht | ~50 Zeilen → ~30 Zeilen |
+| `src/store/runStore.ts` | `resumeRun` vereinfacht | ~250 Zeilen → ~40 Zeilen |
+| `src/store/runStore.ts` | `runStepGuard` async Step-3-Dispatch | +3 Zeilen |
+| `src/store/runStore.ts` | Import `validateStep3Async` | +1 Zeile |
+| `src/services/stepGuard.ts` | Export `validateStep3Async` | 1 Wort geaendert |
+| `src/store/runStore.ts` | Optional: `executeStep4Orchestration` Hilfsfunktion | +60 Zeilen (DRY) |
+
+**Netto-Reduktion: ca. -500 Zeilen** (28 setTimeout entfernt, 250 Zeilen resumeRun-Duplikation eliminiert).
+
+### Nicht betroffene Aufrufer
+
+| Aufrufer | Aufruf-Muster | Aenderung noetig? |
+|---|---|---|
+| `proceedStep4FromWaiting` (Zeile 3284) | `advanceToNextStep(runId)` — Legacy-Mode | NEIN |
+| `reprocessCurrentRun` (Zeile 2880) | `advanceToNextStep(runId)` — Legacy-Mode | NEIN |
+| Step-1-Completion (Zeile 1793) | `advanceToNextStep(runId)` — Legacy-Mode | NEIN |
+| `autoAdvanceTimer` State-Feld (Zeile 547) | Obsolet — kann entfernt werden | Optional Cleanup |
+
+---
+
+## 7. Risikobewertung
+
+| Risiko | Wahrscheinlichkeit | Mitigation |
+|---|---|---|
+| Self-Advance feuert nicht (Execute-Funktion Exit-Pfad verpasst) | Niedrig | Jeder Exit-Pfad in Execute-Funktionen endet entweder mit Self-Advance (Erfolg) oder `updateStepStatus('failed')` (Fehler) |
+| Double-Advance (zweimaliger Self-Advance-Aufruf) | Niedrig | Idempotenz-Guard (`alreadyRunning`) in `advanceToNextStep` |
+| Step-4-Orchestrierung divergiert zwischen advanceToNextStep/retryStep/resumeRun | Mittel | `executeStep4Orchestration` Hilfsfunktion als DRY-Loesung |
+| `void (async () => { ... })()` verschluckt Fehler | Niedrig | Jeder async Block hat eigenes try/catch + updateStepStatus('failed') |
+
+---
+
+## 8. Implementierungs-Reihenfolge
+
+1. **Fix 1:** `advanceToNextStep` Signatur erweitern + Targeted Mode implementieren
+2. **Fix 3:** `validateStep3Async` exportieren + `runStepGuard` async Dispatch
+3. **Fix 2a:** Self-Advance in alle 3 Execute-Funktionen einbauen
+4. **Fix 2b:** Timer aus `advanceToNextStep` Step-Bloecken entfernen, durch `void (async () => { ... })()` ersetzen
+5. **Fix 2c:** `retryStep` vereinfachen (Timer entfernen, Self-Advance uebernimmt)
+6. **Fix 2d:** `resumeRun` vereinfachen (250-Zeilen-Duplikation eliminieren)
+7. **Cleanup:** `autoAdvanceTimer` State-Feld entfernen (optional)
+8. **Test:** Manueller Durchlauf mit SSOT-Run (Steps 1→2→3→4→5) + Retry + Resume + Pause/Resume
+
+---
+
+*Erstellt: 2026-04-01 | Scope: Chirurgische Race-Condition-Elimination | Status: PLAN — bereit zur Implementierung*
+
+---
+
+## 9. Zu verifizierende Circuit-Verdrahtungen (Temporärer Parkplatz)
+
+> Aus CIRCUIT.md Sektion B entfernt am 2026-04-02. Zur späteren Verifikation geparkt.
+
+**B1. executeMatcherCrossMatch → Status-Setzung ohne updateStepStatus am Erfolgsende**
+`CONFI: MID` — executeMatcherCrossMatch setzt bei Fehler updateStepStatus(2, 'failed'), aber bei Erfolg setzt die AUFRUFENDE Stelle in advanceToNextStep den Status. Die Funktion selbst hat keinen expliziten 'ok'-Aufruf am Ende.
+`QUELLE:` CIRCUIT-Scan 2026-04-02
+```
+executeMatcherCrossMatch()
+  ├─ Fehler-Pfade: updateStepStatus(runId, 2, 'failed') → intern ✓
+  └─ Erfolg-Pfad: KEIN updateStepStatus(runId, 2, 'ok') → 
+     Caller (advanceToNextStep/retryStep) muss 'ok' setzen + advance triggern
+     → Asymmetrisch zu executeOrderMapping (setzt 'ok' selbst bei Empty-Lines)
+```
+
+**B4. Step-3-Guard: Sync-Wrapper vs Async-Variante**
+`CONFI: MID` — validateStepPrerequisites ruft validateStep3 (sync), aber runStepGuard für Step 3 in advanceToNextStep nutzt den sync-Pfad. Die async-Variante validateStep3Async existiert in stepGuard.ts, wird aber von advanceToNextStep NICHT direkt aufgerufen — der IDB-Check passiert stattdessen implizit über applyStepRepairs.
+`QUELLE:` CIRCUIT-Scan 2026-04-02
+```
+Step 3 Guard-Pfad:
+  runStepGuard(3, ...)
+    → validateStepPrerequisites(3, ...) → validateStep3 (SYNC, kein IDB)
+    → [!canProceed] → applyStepRepairs → serialData-Reparatur aus IDB
+  
+  validateStep3Async existiert ABER wird nirgends aufgerufen
+  → Dead Code oder geplanter Umbau?
+```
+
+**B6. executeOrderMapping → Interne Status-Setzung (gemischt)**
+`CONFI: MID` — executeOrderMapping setzt Status direkt via set() UND via updateStepStatus, abhängig vom Pfad. Bei Empty-Pool wird status in einem atomaren set() gesetzt, bei Normal-Erfolg in einem separaten set(). Der Status wird NIE via updateStepStatus('ok') am Ende gesetzt — nur via step-Status im runs-Update.
+`QUELLE:` CIRCUIT-Scan 2026-04-02
+```
+executeOrderMapping():
+  ├─ Empty-Lines:    updateStepStatus(runId, 4, 'ok') → return
+  ├─ SSOT no-pool:   updateStepStatus(runId, 4, 'failed') → return
+  ├─ Empty-Pool:     direktes set() mit status='failed' in Run-Objekt
+  ├─ Engine-Erfolg:  direktes set() mit status='ok'|'soft-fail' in Run-Objekt
+  └─ catch:          updateStepStatus(runId, 4, 'failed')
+
+  → Zwei verschiedene Mechanismen für Status-Updates (updateStepStatus vs set)
+```
