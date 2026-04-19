@@ -22,7 +22,6 @@
 | `isWaitingBeforeStep4`, `waitingStep4RunId`, `showStep4WaitingDialog` | `advanceToNextStep`-Targeted | `proceedStep4FromWaiting`, `dismissStep4WaitingDialog`, `reset` | **workflowSlice** | Waiting-Point-Semantik (A16) gehört zum Workflow |
 | `isPaused` | `pauseRun`/`resumeRun` | `startWorkflowPhase2` (Init-Clear) | **workflowSlice** | Init-Clear via workflowSlice-interner Action |
 | `latestDiagnostics` | `runStepGuard` / Execute-Funktionen | `reset` | **workflowSlice** | Step-Diagnostik gehört zu Workflow-Fortschritt |
-| `lastOrderParserDiagnostics` *(deprecated)* | — | — | entfernt in AP5 | — |
 
 ---
 

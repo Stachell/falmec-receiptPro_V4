@@ -48,7 +48,7 @@ export function buildAutoSavePayload(runId: string) {
     auditLog: current.auditLog.filter(a => a.runId === runId),
     parsedPositions: owned ? current.parsedPositions : [],
     parserWarnings: owned ? current.parserWarnings : [],
-    parsedInvoiceResult: current.parsedInvoiceResult ?? null,
+    parsedInvoiceResult: owned ? (current.parsedInvoiceResult ?? null) : null,
     serialDocument: current.serialDocument ?? null,
     preFilteredSerials: current.preFilteredSerials.length > 0
       ? current.preFilteredSerials : undefined,

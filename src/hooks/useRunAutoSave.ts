@@ -45,13 +45,21 @@ export function useRunAutoSave(): void {
       lastRunIdRef.current = state.currentRun.id;
 
       // Skip if nothing relevant changed
+      // PROJ-46 M3.5 Leak-Patch: 4 neue Felder — 2 echte Lecks (currentParsedRunId,
+      // parsedPositions) + 2 Sicherheitsnetze (parserWarnings, preFilteredSerials).
+      // Payload-Kongruenz-Regel (I.md B-XX): jedes Payload-Feld muss direkt
+      // beobachtet oder verlässlich aus beobachtetem Feld abgeleitet sein.
       if (
         state.currentRun === prev.currentRun &&
         state.invoiceLines === prev.invoiceLines &&
         state.issues === prev.issues &&
         state.auditLog === prev.auditLog &&
         state.parsedInvoiceResult === prev.parsedInvoiceResult &&
-        state.serialDocument === prev.serialDocument
+        state.serialDocument === prev.serialDocument &&
+        state.currentParsedRunId === prev.currentParsedRunId &&
+        state.parsedPositions === prev.parsedPositions &&
+        state.parserWarnings === prev.parserWarnings &&
+        state.preFilteredSerials === prev.preFilteredSerials
       ) {
         return;
       }
