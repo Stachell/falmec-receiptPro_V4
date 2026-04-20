@@ -38,11 +38,24 @@ export function useRunAutoSave(): void {
     }
 
     const unsubscribe = useRunStore.subscribe((state, prev) => {
-      // Only save if there's an active run
       if (!state.currentRun) return;
 
-      // Track last known Run-ID for Unmount-Flush
-      lastRunIdRef.current = state.currentRun.id;
+      const currentRunId = state.currentRun.id;
+
+      // PROJ-46 M4 AP10: Run-Wechsel im Debounce-Fenster → Flush pending für old run
+      if (timerRef.current && lastRunIdRef.current && lastRunIdRef.current !== currentRunId) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+        const staleRunId = lastRunIdRef.current;
+        const stalePayload = buildAutoSavePayload(staleRunId);
+        if (stalePayload) {
+          runPersistenceService.saveRun(stalePayload).catch(err => {
+            console.error('[AutoSave] Run-switch flush failed:', err);
+          });
+        }
+      }
+
+      lastRunIdRef.current = currentRunId;
 
       // Skip if nothing relevant changed
       // PROJ-46 M3.5 Leak-Patch: 4 neue Felder — 2 echte Lecks (currentParsedRunId,
@@ -64,17 +77,13 @@ export function useRunAutoSave(): void {
         return;
       }
 
-      // Clear previous debounce timer
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
 
-      // Debounce the save
       timerRef.current = setTimeout(() => {
-        const current = useRunStore.getState();
-        if (!current.currentRun) return;
-
-        const payload = buildAutoSavePayload(current.currentRun.id);
+        // Captured currentRunId aus Closure (nicht live state)
+        const payload = buildAutoSavePayload(currentRunId);
         if (payload) {
           runPersistenceService.saveRun(payload).catch(err => {
             console.error('[AutoSave] Failed to save run:', err);
@@ -90,8 +99,10 @@ export function useRunAutoSave(): void {
         timerRef.current = null;
 
         // PROJ-40 ADD-ON-3: Flush — pending Save sofort ausfuehren
+        // PROJ-46 M4 AP10 V5: Consume-Guard gegen Doppel-Flush beim Tab-Close.
         const runId = lastRunIdRef.current;
         if (runId) {
+          lastRunIdRef.current = null;
           const payload = buildAutoSavePayload(runId);
           if (payload) {
             runPersistenceService.saveRun(payload).catch(err => {
@@ -100,6 +111,32 @@ export function useRunAutoSave(): void {
           }
         }
       }
+    };
+  }, []);
+
+  // PROJ-46 M4 AP10 — Tab-Close-Flush via pagehide (modern, iOS-safe).
+  // V4: Consume-Pattern — Ref wird nach Capture genullt, damit der
+  // nachfolgende React-Unmount-Cleanup bei Tab-Close nicht denselben Payload
+  // ein zweites Mal in IDB schreibt.
+  useEffect(() => {
+    const flushOnHide = () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      const runId = lastRunIdRef.current;
+      if (!runId) return;
+      lastRunIdRef.current = null;
+      const payload = buildAutoSavePayload(runId);
+      if (payload) {
+        runPersistenceService.saveRun(payload).catch(err => {
+          console.error('[AutoSave] pagehide flush failed:', err);
+        });
+      }
+    };
+    window.addEventListener('pagehide', flushOnHide);
+    return () => {
+      window.removeEventListener('pagehide', flushOnHide);
     };
   }, []);
 }

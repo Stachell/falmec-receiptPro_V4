@@ -1,11 +1,11 @@
-# INVARIANTS.md — Architektur-Gesetze (runStore & Workflow-Engine)
+## INVARIANTS.md — Architektur-Gesetze (Store Slices & Workflow-Engine)
 
 > **Was ist das hier?** Strukturelle Wahrheiten über die Codebasis.
 > Keine Werte, keine Zeilennummern — nur Regeln die gelten solange die Architektur existiert.
 > **Wer muss das lesen?** Jeder Agent (Opus, Sonnet, Codex) BEVOR er plant oder codet.
 > **Zusammenspiel:** INVARIANTS.md (Gesetze) + CIRCUIT.md (Verdrahtung) + STANDARDS.md (Design/UI).
 > **Wichtig:** Nur Regeln in Sektion A sind aktiv. Sektion B enthält Vorschläge die noch geprüft werden.
-> **Version:** 1.5
+> **Version:** 1.7 (Nach Slice-Split M3 & M3.5)
 
 ---
 
@@ -178,15 +178,20 @@ run-sensitiven Store-Feldern wie `parsedPositions`, `preFilteredSerials`,
 Felder bereits beim Eintritt. Ein unkoordinierter Reset in diesem Zeitfenster führt zu
 stillen Fallback-/Skip-/Blockerpfaden statt zu einer lauten Exception.
 
-**A17: Die 6 unantastbaren Entry-Points der Engine**
+### A17. Die 6 unantastbaren Entry-Points der Engine
 
 Es gibt exakt 6 Eintrittspunkte in die State-Machine: `startWorkflowPhase2`, `advanceToNextStep`, `retryStep`, `resumeRun`, `proceedStep4FromWaiting`, `reprocessCurrentRun`. Wer einen anfasst, muss die anderen auf Konsistenz prüfen.
 *AUSNAHME-KLAUSEL:* Diese Liste ist fest. Sollte für einen Bugfix oder ein Feature eine Änderung zwingend notwendig sein, gilt HARTER STOPP. Erkläre dem User (Dom) die technische Notwendigkeit und warte auf explizite Freigabe. Keine eigenmächtigen Umbauten!
 
-**A18: Der 5-Familien-Action-Guard (Defense-in-Depth)**
+### A18. Der 5-Familien-Action-Guard (Defense-in-Depth)
 
 Mutationen werden streng nach ihrer Signatur-Familie abgesichert (1. lineId-basiert, 2. explizit runId, 3. dual parametrisiert, 4. positionIndex-only, 5. issueId-basiert).
 *AUSNAHME-KLAUSEL:* Diese Guard-Struktur ist unser fixes Sicherheitsnetz. Sollte eine Komponente oder Action sich absolut nicht in dieses Schema pressen lassen, gilt HARTER STOPP. Lösungsvorschlag erarbeiten, Dom fragen, auf Freigabe warten.
+
+### A19. Entkopplung von UI-Interaktion und Workflow-Logik
+
+UI-Komponenten rufen fachliche Actions auf, anstatt Workflow-Status-Übergänge direkt zu steuern. Die Engine entscheidet autonom basierend auf dem Resultat einer Action über den Folgezustand. Dies sichert die Architektur gegen unvorhergesehene State-Sprünge aus der View-Ebene ab.
+
 
 ---
 
@@ -205,6 +210,12 @@ Mutationen werden streng nach ihrer Signatur-Familie abgesichert (1. lineId-basi
 > `QUELLE:` [Ticket/Projektdatei]
 > [Beschreibung der Regel]
 
-*(Aktuell keine offenen Vorschläge) 
+> **B1. Wachhund-Payload-Kongruenz-Regel**
+> `CONFI: HIGH` — Der `Zustand.subscribe`-Skip-Diff eines AutoSave-Hooks MUSS in einer der folgenden Formen jedes Feld abdecken, das der zugehörige Payload-Builder in die IDB schreibt:
+> (a) **direkte Beobachtung:** Das Payload-Feld wird mit `===`-Referenzvergleich verglichen.
+> (b) **Ableitungs-Abdeckung:** Das Payload-Feld ist eine direkte, verlässliche Projektion eines anderen beobachteten Feldes (z.B. ist `uploadMetadata` eine `.map()`-Projektion von `uploadedFiles`).
+> Umgekehrt: Ein Feld, das weder Payload-Mitglied noch Ableitungsquelle eines Payload-Feldes ist, hat im Wachhund-Diff nichts zu suchen (Dead-Trigger-Verbot).
+> `QUELLE:` PROJ-46 M3.5 Leak-Patch
 
-*Letzte Aktualisierung: 2026-04-16 | Version 1.6*
+---
+*Letzte Aktualisierung: 2026-04-20 | Version 1.7*

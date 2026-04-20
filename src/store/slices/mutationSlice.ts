@@ -15,6 +15,8 @@ import {
   autoResolveIssues,
   computeMatchStats,
   computeOrderStats,
+  recalculateRunStats,
+  recalculateRunAfterMutation,
 } from '@/store/internal/helpers';
 
 export type MutationSlice = Pick<
@@ -37,30 +39,13 @@ export type MutationSlice = Pick<
 
 export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> = (set, get) => ({
   updateInvoiceLine: (lineId, updates) => {
+    const cr = get().currentRun; if (!cr || !lineId.startsWith(`${cr.id}-line-`)) return;
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
         line.lineId === lineId ? { ...line, ...updates } : line
       ),
     }));
-    // PROJ-21: Auto-resolve issues after manual line update
-    const { currentRun, invoiceLines, issues } = get();
-    if (currentRun) {
-      const resolved = autoResolveIssues(issues, invoiceLines, currentRun.id);
-      if (resolved !== issues) set({ issues: resolved });
-      // Recompute stats so KPI tiles reflect manual corrections (price, match, etc.)
-      const runPrefix = `${currentRun.id}-line-`;
-      const runLines = invoiceLines.filter(l => l.lineId.startsWith(runPrefix));
-      const matchStats = computeMatchStats(runLines);
-      const orderStats = computeOrderStats(runLines);
-      set((state) => ({
-        runs: state.runs.map(r =>
-          r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...matchStats, ...orderStats } } : r
-        ),
-        currentRun: state.currentRun?.id === currentRun.id
-          ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats, ...orderStats } }
-          : state.currentRun,
-      }));
-    }
+    recalculateRunAfterMutation(cr.id, get, set);
   },
 
   // PROJ-20: Cascade updates from aggregated position to all expanded lines
@@ -75,31 +60,13 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
           : line
       ),
     }));
-    // Recompute stats after bulk update
-    const { invoiceLines, issues } = get();
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(runPrefix));
-    const matchStats = computeMatchStats(runLines);
-    const orderStats = computeOrderStats(runLines);
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...matchStats, ...orderStats } } : r
-      ),
-      currentRun: state.currentRun?.id === currentRun.id
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats, ...orderStats } }
-        : state.currentRun,
-    }));
-    // PROJ-21: Auto-resolve issues after position update
-    const resolved = autoResolveIssues(issues, invoiceLines, currentRun.id);
-    if (resolved !== issues) set({ issues: resolved });
+    recalculateRunAfterMutation(currentRun.id, get, set);
   },
 
   // PROJ-43: Refresh issues — auto-resolve and re-generate Step-5 issues
   refreshIssues: (runId) => {
-    const { invoiceLines, issues } = get();
-    const lines = invoiceLines.filter(l => l.lineId.startsWith(runId));
-    const resolved = autoResolveIssues(issues, lines, runId);
-    if (resolved !== issues) set({ issues: resolved });
-    get().generateStep5Issues(runId);
+    const cr = get().currentRun; if (!cr || runId !== cr.id) return;
+    recalculateRunAfterMutation(runId, get, set);
     logService.info('Issues aktualisiert', { runId, step: 'Issues' });
   },
 
@@ -107,6 +74,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
   reopenIssue: (issueId) => {
     const issueToReopen = get().issues.find(i => i.id === issueId);
     if (!issueToReopen) return;
+    const cr = get().currentRun; if (!cr || issueToReopen.runId !== cr.id) return;
 
     set((state) => {
       let updatedLines = state.invoiceLines;
@@ -169,25 +137,9 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       logService.info(`Issue reaktiviert: ${issueId}`, { runId, step: 'Issues' });
       get().addAuditEntry({ runId, action: 'reopenIssue', details: `issueId=${issueId}`, userId: 'system' });
 
-      // PROJ-44-R10: Price-Stats aktualisieren nach Line-Reset
-      if (issueToReopen.type === 'price-mismatch') {
-        const { invoiceLines } = get();
-        const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId));
-        const priceStats = {
-          priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
-          priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
-          priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
-          priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
-        };
-        set((state) => ({
-          runs: state.runs.map(r =>
-            r.id === runId ? { ...r, stats: { ...r.stats, ...priceStats } } : r
-          ),
-          currentRun: state.currentRun?.id === runId
-            ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
-            : state.currentRun,
-        }));
-      }
+      // PROJ-46 M4 AP8 Row 4: Stats-Only Recalc — Full-Hub würde das re-opened
+      // Issue via autoResolveIssues sofort wieder schließen (siehe Phase V.2.e).
+      recalculateRunStats(runId, get, set);
     }
   },
 
@@ -197,6 +149,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
     if (!issue) return;
     const runId = issue.runId ?? get().currentRun?.id;
     if (!runId) return;
+    const cr = get().currentRun; if (runId !== cr?.id) return;
 
     // 1. Alle betroffenen Positionen ermitteln (relatedLineIds → positionIndex)
     const allLines = get().invoiceLines;
@@ -232,6 +185,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
 
   // ─── PROJ-46: Bulk-Bestätigung mit 3-stufiger Validierung ───
   bulkConfirmDraftIssues: (runId) => {
+    const cr = get().currentRun; if (!cr || runId !== cr.id) return { success: false, message: 'Run nicht aktiv.' };
     const { issues, invoiceLines, globalConfig } = get();
     const runIssues = issues.filter(i => i.runId === runId && i.status === 'open');
     const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId + '-line-'));
@@ -307,6 +261,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
   },
 
   setManualPrice: (lineId, price) => {
+    const cr = get().currentRun; if (!cr || !lineId.startsWith(`${cr.id}-line-`)) return;
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
         line.lineId === lineId
@@ -320,35 +275,16 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       ),
     }));
 
-    const runId = get().currentRun?.id;
-    if (runId) {
-      logService.info(`Manueller Preis: ${price}`, { runId, step: 'Artikel extrahieren', details: `lineId=${lineId}` });
-      get().addAuditEntry({ runId, action: 'setManualPrice', details: `lineId=${lineId}, price=${price}`, userId: 'system' });
-    }
+    const runId = cr.id;
+    logService.info(`Manueller Preis: ${price}`, { runId, step: 'Artikel extrahieren', details: `lineId=${lineId}` });
+    get().addAuditEntry({ runId, action: 'setManualPrice', details: `lineId=${lineId}, price=${price}`, userId: 'system' });
 
-    // Update price stats for the current run
-    const { invoiceLines, currentRun, runs } = get();
-    if (!currentRun) return;
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
-    const priceStats = {
-      priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
-      priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
-      priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
-      priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
-    };
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...priceStats } } : r
-      ),
-      currentRun: state.currentRun?.id === currentRun.id
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
-        : state.currentRun,
-    }));
-
+    recalculateRunAfterMutation(cr.id, get, set);
   },
 
   // ─── PROJ-45: Bulk-Preis auf alle expandierten Zeilen einer Position ──
   setManualPriceByPosition: (positionIndex, price, runId) => {
+    const cr = get().currentRun; if (!cr || runId !== cr.id) return;
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
         line.positionIndex === positionIndex && line.lineId.startsWith(runId + '-line-')
@@ -373,30 +309,12 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       userId: 'system',
     });
 
-    // Update price stats for the run
-    const { invoiceLines, currentRun, runs } = get();
-    const targetRun = runs.find(r => r.id === runId) ?? currentRun;
-    if (!targetRun) return;
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(runId));
-    const priceStats = {
-      priceOkCount: runLines.filter(l => l.priceCheckStatus === 'ok').length,
-      priceMismatchCount: runLines.filter(l => l.priceCheckStatus === 'mismatch').length,
-      priceMissingCount: runLines.filter(l => l.priceCheckStatus === 'missing').length,
-      priceCustomCount: runLines.filter(l => l.priceCheckStatus === 'custom').length,
-    };
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === runId ? { ...r, stats: { ...r.stats, ...priceStats } } : r
-      ),
-      currentRun: state.currentRun?.id === runId
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...priceStats } }
-        : state.currentRun,
-    }));
-
+    recalculateRunAfterMutation(runId, get, set);
   },
 
   // ─── PROJ-45-ADD-ON-round4: Manuellen Artikel-Fix auf alle expandierten Zeilen einer Position ───
   setManualArticleByPosition: (positionIndex, data, runId) => {
+    const cr = get().currentRun; if (!cr || runId !== cr.id) return;
     // 0. Stammdaten-Lookup — prüfen ob falmecArticleNo im Stamm vorhanden
     const masterArticles = useMasterDataStore.getState().articles;
     const matched = masterArticles.find(a => a.falmecArticleNo === data.falmecArticleNo);
@@ -487,7 +405,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
     });
 
     // Match-Stats + Step2-Status re-evaluieren
-    const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(runId));
+    const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(`${runId}-line-`));
     const matchStats = computeMatchStats(runLines);
     const noMatchCount = matchStats.noMatchCount ?? 0;
     const newStep2Status: StepStatus = noMatchCount > 0 ? 'failed' : 'ok';
@@ -511,10 +429,12 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
         : state.currentRun,
     }));
 
+    recalculateRunAfterMutation(runId, get, set);
   },
 
   // ─── PROJ-44-R11: Chirurgischer Artikel-Fix für einzelne ausgerollte Zeile ───
   setManualArticleByLine: (lineId, data, runId) => {
+    const cr = get().currentRun; if (!cr || runId !== cr.id || !lineId.startsWith(`${runId}-line-`)) return;
     const masterArticles = useMasterDataStore.getState().articles;
     const matched = masterArticles.find(a => a.falmecArticleNo === data.falmecArticleNo);
 
@@ -600,23 +520,14 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       userId: 'system',
     });
 
-    // Match-Stats re-evaluieren (KEIN refreshIssues, KEIN auto-advance!)
-    const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(runId));
-    const matchStats = computeMatchStats(runLines);
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === runId ? { ...r, stats: { ...r.stats, ...matchStats } } : r
-      ),
-      currentRun: state.currentRun?.id === runId
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats } }
-        : state.currentRun,
-    }));
+    recalculateRunAfterMutation(runId, get, set);
   },
 
   updateLineSerialData: (positionIndex, serialRequired, serialNumbers, runId?) => {
     const { currentRun, invoiceLines } = get();
     const targetRunId = runId ?? currentRun?.id;
     if (!targetRunId) return;
+    const cr = get().currentRun; if (!cr || targetRunId !== cr.id) return;
 
     const linePrefix = `${targetRunId}-line-`;
     const updatedLines = invoiceLines.map(line => {
@@ -687,6 +598,7 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
   },
 
   setManualOrder: (lineId, orderYear, orderCode) => {
+    const cr = get().currentRun; if (!cr || !lineId.startsWith(`${cr.id}-line-`)) return;
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
         line.lineId === lineId
@@ -701,26 +613,15 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       ),
     }));
 
-    // Update order stats
-    const { invoiceLines, currentRun } = get();
-    if (!currentRun) return;
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
-    const orderStats = computeOrderStats(runLines);
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...orderStats } } : r
-      ),
-      currentRun: state.currentRun?.id === currentRun.id
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
-        : state.currentRun,
-    }));
+    recalculateRunAfterMutation(cr.id, get, set);
 
-    const runId = currentRun.id;
+    const runId = cr.id;
     logService.info(`Manuelle Bestellung: ${orderYear}-${orderCode}`, { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}` });
     get().addAuditEntry({ runId, action: 'setManualOrder', details: `lineId=${lineId}, order=${orderYear}-${orderCode}`, userId: 'system' });
   },
 
   confirmNoOrder: (lineId) => {
+    const cr = get().currentRun; if (!cr || !lineId.startsWith(`${cr.id}-line-`)) return;
     set((state) => ({
       invoiceLines: state.invoiceLines.map(line =>
         line.lineId === lineId
@@ -732,21 +633,9 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       ),
     }));
 
-    // Update order stats
-    const { invoiceLines, currentRun } = get();
-    if (!currentRun) return;
-    const runLines = invoiceLines.filter(l => l.lineId.startsWith(currentRun.id));
-    const orderStats = computeOrderStats(runLines);
-    set((state) => ({
-      runs: state.runs.map(r =>
-        r.id === currentRun.id ? { ...r, stats: { ...r.stats, ...orderStats } } : r
-      ),
-      currentRun: state.currentRun?.id === currentRun.id
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
-        : state.currentRun,
-    }));
+    recalculateRunAfterMutation(cr.id, get, set);
 
-    const runId = currentRun.id;
+    const runId = cr.id;
     logService.info('Keine Bestellung bestätigt', { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}` });
     get().addAuditEntry({ runId, action: 'confirmNoOrder', details: `lineId=${lineId}`, userId: 'system' });
   },
@@ -758,6 +647,10 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
       return;
     }
     const runId = currentRun.id;
+    if (!lineId.startsWith(`${runId}-line-`)) {
+      console.warn('[RunStore] reassignOrder: lineId prefix mismatch');
+      return;
+    }
     const line = invoiceLines.find(l => l.lineId === lineId);
     if (!line) {
       console.warn(`[RunStore] reassignOrder: line ${lineId} not found`);
@@ -820,22 +713,14 @@ export const createMutationSlice: StateCreator<RunState, [], [], MutationSlice> 
     // Step d: Auto-resolve issues that are no longer active
     const resolvedIssues = autoResolveIssues(issues, updatedLines, runId);
 
-    // Update order stats
-    const runLines = updatedLines.filter(l => l.lineId.startsWith(runId));
-    const orderStats = computeOrderStats(runLines);
-
-    set((state) => ({
+    set(() => ({
       invoiceLines: updatedLines,
       issues: resolvedIssues,
       // Spread pool to trigger Zustand reactivity after in-place mutations
       orderPool: orderPool ? { ...orderPool } : null,
-      runs: state.runs.map(r =>
-        r.id === runId ? { ...r, stats: { ...r.stats, ...orderStats } } : r
-      ),
-      currentRun: state.currentRun?.id === runId
-        ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...orderStats } }
-        : state.currentRun,
     }));
+
+    recalculateRunAfterMutation(runId, get, set);
 
     logService.info(`Bestellung umgewiesen`, { runId, step: 'Bestellungen mappen', details: `lineId=${lineId}, target=${newOrderPositionId ?? freeText ?? 'none'}` });
     get().addAuditEntry({ runId, action: 'reassignOrder', details: `lineId=${lineId}, target=${newOrderPositionId ?? freeText ?? 'none'}`, userId: 'system' });

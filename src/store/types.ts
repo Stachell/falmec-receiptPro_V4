@@ -241,4 +241,9 @@ export interface RunState {
   // NICHT direkt per `set({ currentParsedRunId })`, sondern rufen diese Action.
   // Implementierung: runCrudSlice.assignParsedRunId → `set({ currentParsedRunId })`.
   assignParsedRunId: (runId: string | null) => void;
+
+  // PROJ-46 M4 AP6 — Atomare Identitäts-Migration (runs, currentRun, invoiceLines,
+  // issues inkl. relatedLineIds/affectedLineIds, auditLog, currentParsedRunId) in
+  // einem set() + IDB-Ghost-Cleanup via runPersistenceService.deleteRun.
+  renameRun: (oldId: string, newId: string) => void;
 }

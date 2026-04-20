@@ -9,6 +9,7 @@ import type { RunState } from '@/store/types';
 import type { Run, StepStatus } from '@/types';
 import { logService } from '@/services/logService';
 import { archiveService } from '@/services/archiveService';
+import { runPersistenceService } from '@/services/runPersistenceService';
 import { useMasterDataStore } from '@/store/masterDataStore';
 import { parseMasterDataFile } from '@/services/masterDataParser';
 import {
@@ -59,6 +60,7 @@ export type RunCrudSlice = Pick<
   | 'incrementExportVersion'
   | 'addAuditEntry'
   | 'assignParsedRunId'
+  | 'renameRun'
 >;
 
 export const createRunCrudSlice: StateCreator<RunState, [], [], RunCrudSlice> = (set, get) => ({
@@ -358,31 +360,8 @@ export const createRunCrudSlice: StateCreator<RunState, [], [], RunCrudSlice> = 
           // Generate proper run ID with fattura number
           const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
 
-          // Update run ID + rename invoiceLine lineIds to match new runId
-          set((state) => {
-            const updatedRun = state.runs.find(r => r.id === runId);
-            if (updatedRun) {
-              const finalRun = { ...updatedRun, id: newRunId };
-              const oldPrefix = `${runId}-line-`;
-              const newPrefix = `${newRunId}-line-`;
-              return {
-                runs: state.runs.map(r => r.id === runId ? finalRun : r),
-                currentRun: finalRun,
-                invoiceLines: state.invoiceLines.map(l =>
-                  l.lineId.startsWith(oldPrefix)
-                    ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) }
-                    : l
-                ),
-                issues: state.issues.map(issue =>
-                  issue.runId === runId ? { ...issue, runId: newRunId } : issue
-                ),
-              };
-            }
-            return state;
-          });
-
-          // Rename log buffer to match new runId
-          logService.renameRunBuffer(runId, newRunId);
+          // PROJ-46 M4 AP6: Atomarer Rename via runCrudSlice.renameRun.
+          get().renameRun(runId, newRunId);
           runId = newRunId;
 
           // PROJ-27-ADDON-2 BUGFIX: fire-and-forget — kein await verhindert Race-Condition
@@ -421,29 +400,8 @@ export const createRunCrudSlice: StateCreator<RunState, [], [], RunCrudSlice> = 
           // If we have a fattura number, use it for the run ID
           if (parsedInvoiceResult.header.fatturaNumber) {
             const newRunId = generateRunId(parsedInvoiceResult.header.fatturaNumber);
-            set((state) => {
-              const updatedRun = state.runs.find(r => r.id === runId);
-              if (updatedRun) {
-                const finalRun = { ...updatedRun, id: newRunId };
-                const oldPrefix = `${runId}-line-`;
-                const newPrefix = `${newRunId}-line-`;
-                return {
-                  runs: state.runs.map(r => r.id === runId ? finalRun : r),
-                  currentRun: finalRun,
-                  invoiceLines: state.invoiceLines.map(l =>
-                    l.lineId.startsWith(oldPrefix)
-                      ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) }
-                      : l
-                  ),
-                  issues: state.issues.map(issue =>
-                    issue.runId === runId ? { ...issue, runId: newRunId } : issue
-                  ),
-                };
-              }
-              return state;
-            });
-            // Rename log buffer to match new runId
-            logService.renameRunBuffer(runId, newRunId);
+            // PROJ-46 M4 AP6: Atomarer Rename via runCrudSlice.renameRun.
+            get().renameRun(runId, newRunId);
             runId = newRunId;
 
             // PROJ-27-ADDON-2 BUGFIX: fire-and-forget — kein await verhindert Race-Condition
@@ -824,4 +782,64 @@ export const createRunCrudSlice: StateCreator<RunState, [], [], RunCrudSlice> = 
   // NICHT direkt per set() schreiben, sondern ruft diese Action über get().
   // Kein verdeckter Zusatz-Effekt — 1:1-Ersatz für `set({ currentParsedRunId })`.
   assignParsedRunId: (runId) => set({ currentParsedRunId: runId }),
+
+  // PROJ-46 M4 AP6 — Atomare Identitäts-Migration (Speicher + IDB-Cleanup).
+  // Schreibpfad für ALLE ID-führenden Felder in EINEM set(). Fire-and-forget
+  // IDB-Delete für Ghost-Records unter der alten ID (idempotent).
+  renameRun: (oldId, newId) => {
+    if (oldId === newId) return;
+    const present = get().runs.some(r => r.id === oldId);
+    if (!present) return;
+
+    const oldPrefix = `${oldId}-line-`;
+    const newPrefix = `${newId}-line-`;
+    const parsedRunIdShouldFollow = get().currentParsedRunId === oldId;
+
+    set((state) => {
+      const updatedRun = state.runs.find(r => r.id === oldId);
+      if (!updatedRun) return state;
+      const finalRun = { ...updatedRun, id: newId };
+      return {
+        runs: state.runs.map(r => r.id === oldId ? finalRun : r),
+        currentRun: state.currentRun?.id === oldId ? finalRun : state.currentRun,
+        invoiceLines: state.invoiceLines.map(l =>
+          l.lineId.startsWith(oldPrefix)
+            ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) }
+            : l
+        ),
+        // V3 Audit-Finding #1: Issue-interne Line-Referenzen mitmigrieren.
+        issues: state.issues.map(issue =>
+          issue.runId === oldId
+            ? {
+                ...issue,
+                runId: newId,
+                relatedLineIds: issue.relatedLineIds.map(id =>
+                  id.startsWith(oldPrefix) ? id.replace(oldPrefix, newPrefix) : id
+                ),
+                affectedLineIds: issue.affectedLineIds.map(id =>
+                  id.startsWith(oldPrefix) ? id.replace(oldPrefix, newPrefix) : id
+                ),
+              }
+            : issue
+        ),
+        // V2 Audit-Finding #3: auditLog mitmigrieren.
+        auditLog: state.auditLog.map(e =>
+          e.runId === oldId ? { ...e, runId: newId } : e
+        ),
+      };
+    });
+
+    if (parsedRunIdShouldFollow) {
+      get().assignParsedRunId(newId);
+    }
+
+    logService.renameRunBuffer(oldId, newId);
+
+    // V2 Audit-Finding #3: IDB-Ghost entfernen. Fire-and-forget.
+    if (runPersistenceService.isAvailable()) {
+      runPersistenceService.deleteRun(oldId).catch(err => {
+        console.warn('[RunStore] renameRun: IDB-Ghost-Cleanup fehlgeschlagen:', err);
+      });
+    }
+  },
 });

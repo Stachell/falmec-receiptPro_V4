@@ -376,6 +376,46 @@ export function computeOrderStats(lines: InvoiceLine[]): Partial<RunStats> {
 }
 
 /**
+ * PROJ-46 M4 AP7 — Stats-Only Recalc (für Mutationen, die autoResolve/Step5
+ * NICHT triggern dürfen — z.B. reopenIssue). Aggregiert matchStats + orderStats
+ * und schreibt run.stats + currentRun.stats in EINEM set().
+ */
+export function recalculateRunStats(
+  runId: string,
+  get: () => RunState,
+  set: (partial: Partial<RunState> | ((s: RunState) => Partial<RunState>)) => void,
+): void {
+  const runLines = get().invoiceLines.filter(l => l.lineId.startsWith(`${runId}-line-`));
+  const matchStats = computeMatchStats(runLines);
+  const orderStats = computeOrderStats(runLines);
+  set((state) => ({
+    runs: state.runs.map(r =>
+      r.id === runId ? { ...r, stats: { ...r.stats, ...matchStats, ...orderStats } } : r
+    ),
+    currentRun: state.currentRun?.id === runId
+      ? { ...state.currentRun, stats: { ...state.currentRun.stats, ...matchStats, ...orderStats } }
+      : state.currentRun,
+  }));
+}
+
+/**
+ * PROJ-46 M4 AP7 — Fix-Hub: Stats + AutoResolve + Step-5 Issue-Regen.
+ * KEIN Step-Status-Wechsel, KEIN advanceToNextStep.
+ * NICHT aufrufen aus reopenIssue (würde re-opened Issue sofort schließen).
+ */
+export function recalculateRunAfterMutation(
+  runId: string,
+  get: () => RunState,
+  set: (partial: Partial<RunState> | ((s: RunState) => Partial<RunState>)) => void,
+): void {
+  recalculateRunStats(runId, get, set);
+  const { issues, invoiceLines } = get();
+  const resolved = autoResolveIssues(issues, invoiceLines, runId);
+  if (resolved !== issues) set({ issues: resolved });
+  get().generateStep5Issues(runId);
+}
+
+/**
  * Build blocking issues for no-match articles (Step 2).
  */
 export function buildArticleMatchIssues(runId: string, lines: InvoiceLine[]): Issue[] {
@@ -543,6 +583,7 @@ export async function executeStep4Orchestration(
   if (activeMapper === 'engine-proj-23') {
     // PROJ-49 SSOT 12a: parsedOrders aus IDB für SSOT-Runs
     const idbData = await runPersistenceService.loadRun(runId);
+    if (get().isPaused) return;                   // PROJ-46 M4 AP9 — Pause-Check nach await
     const isSSoTRun = !!idbData?.ingestStatus;
 
     if (isSSoTRun) {
@@ -578,6 +619,7 @@ export async function executeStep4Orchestration(
         profileId: runConfig.activeOrderParserProfileId ?? DEFAULT_ORDER_PARSER_PROFILE_ID,
         overrides: runConfig.orderParserProfileOverrides,
       });
+      if (get().isPaused) return;                 // PROJ-46 M4 AP9 — Pause-Check nach await
 
       for (const w of parseResult.warnings) {
         logService.warn(`[OrderParser] ${w}`, { runId, step: 'Bestellungen mappen' });

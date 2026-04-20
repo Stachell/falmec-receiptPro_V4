@@ -251,6 +251,10 @@ export const createWorkflowSlice: StateCreator<RunState, [], [], WorkflowSlice> 
 
   // HOTFIX-2: Dedicated retry action for failed steps
   retryStep: (runId: string, stepNo: number) => {
+    if (get().isPaused) {
+      logService.warn(`Retry abgelehnt: Run ist pausiert`, { runId, step: 'System' });
+      return;
+    }
     const state = get();
     const run = state.runs.find(r => r.id === runId);
     if (!run) return;
@@ -270,7 +274,9 @@ export const createWorkflowSlice: StateCreator<RunState, [], [], WorkflowSlice> 
       case 2:
         void (async () => {
           try {
+            if (get().isPaused) return;
             const guard = await runStepGuard(2, runId, get, set);
+            if (get().isPaused) return;
             if (guard.blockReason) {
               logService.error(`[StepGuard] Retry Step 2 blockiert: ${guard.blockReason}`, { runId, step: 'Artikel extrahieren' });
               get().updateStepStatus(runId, 2, 'failed');
@@ -285,14 +291,14 @@ export const createWorkflowSlice: StateCreator<RunState, [], [], WorkflowSlice> 
         })();
         break;
       case 3:
-        // PROJ-46 AP2: Guard-Execute-Kern via runStepCore.
-        // v1.3 BIT-IDENTISCH: KEIN Pause-Check (pauseCheck = () => false) — entspricht heutigem Verhalten
-        // (runStore.ts:2087 historisch). Pause-in-Retry-Härtung ist separater Vorschlag (Sektion B, INVARIANTS), NICHT Iteration 1.
+        // PROJ-46 M4 AP9: Guard-Execute-Kern via runStepCore MIT Pause-Check —
+        // symmetrisch zum advanceToNextStep-Pfad. Verhindert, dass ein pausierter
+        // Run durch UI-Retry-Klick unbemerkt weiterläuft.
         void (async () => {
           try {
             const r = await runStepCore(
               3, runId, get, set,
-              () => false,
+              () => get().isPaused,
               () => get().executeMatcherSerialExtract(),
               // Self-Advance liegt IN executeMatcherSerialExtract
             );
@@ -320,7 +326,9 @@ export const createWorkflowSlice: StateCreator<RunState, [], [], WorkflowSlice> 
       case 4:
         void (async () => {
           try {
+            if (get().isPaused) return;
             const guard = await runStepGuard(4, runId, get, set);
+            if (get().isPaused) return;
             if (guard.blockReason) {
               logService.error(`[StepGuard] Retry Step 4 blockiert: ${guard.blockReason}`, { runId, step: 'Bestellungen mappen' });
               get().updateStepStatus(runId, 4, 'failed');

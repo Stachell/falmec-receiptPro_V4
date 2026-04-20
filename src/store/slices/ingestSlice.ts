@@ -306,30 +306,10 @@ export const createIngestSlice: StateCreator<RunState, [], [], IngestSlice> = (s
     let finalRunId = runId;
     if (result.header.fatturaNumber) {
       const newRunId = generateRunId(result.header.fatturaNumber);
-      // PROJ-46 AP4c / R8: currentParsedRunId gehört runCrudSlice — Cross-Slice
-      // Write über assignParsedRunId. Vor dem atomaren Rename lesen, danach
-      // setzen, damit der owned-Guard in buildAutoSavePayload durchgängig
-      // die neue ID sieht (Rename-Atomarität wird final in AP6 adressiert).
-      const parsedRunIdShouldFollow = get().currentParsedRunId === runId;
-      set((state) => {
-        const updatedRun = state.runs.find(r => r.id === runId);
-        if (!updatedRun) return state;
-        const finalRun = { ...updatedRun, id: newRunId };
-        const oldPrefix = `${runId}-line-`;
-        const newPrefix = `${newRunId}-line-`;
-        return {
-          runs: state.runs.map(r => r.id === runId ? finalRun : r),
-          currentRun: finalRun,
-          invoiceLines: state.invoiceLines.map(l =>
-            l.lineId.startsWith(oldPrefix) ? { ...l, lineId: l.lineId.replace(oldPrefix, newPrefix) } : l
-          ),
-          issues: state.issues.map(i => i.runId === runId ? { ...i, runId: newRunId } : i),
-        };
-      });
-      if (parsedRunIdShouldFollow) {
-        get().assignParsedRunId(newRunId);
-      }
-      logService.renameRunBuffer(runId, newRunId);
+      // PROJ-46 M4 AP6: Atomarer Rename via runCrudSlice.renameRun — ID-Migration
+      // (runs, currentRun, invoiceLines, issues, auditLog, currentParsedRunId,
+      // log-buffer) in EINEM set() + IDB-Ghost-Cleanup. R8 gewahrt.
+      get().renameRun(runId, newRunId);
       finalRunId = newRunId;
     }
 

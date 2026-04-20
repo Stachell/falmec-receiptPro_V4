@@ -5,7 +5,7 @@
 > **Wer muss das lesen?** Jeder Agent (Opus, Sonnet, Codex) BEVOR er plant oder codet.
 > **Zusammenspiel:** INVARIANTS.md (Gesetze) + CIRCUIT.md (Verdrahtung) + STANDARDS.md (Design/UI).
 > **Wichtig:** Nur Verbindungen in Sektion A sind bestätigt. Sektion B enthält Vorschläge.
-> **Version:** 1.7
+> **Version:** 1.8 (Nach Slice-Split M3 & Leak-Patch M3.5)
 
 ---
 
@@ -213,46 +213,38 @@ Alle drei Guards MÜSSEN bestehen bevor der nächste Step startet.
 Reihenfolge ist relevant — Status vor Running vor Issues.
 ```
 
-### A7. Import-Verdrahtung: runStore → Services
+### A7. Import-Verdrahtung: Store Slices & Helpers → Services
 
-```
-runStore.ts Imports (verbindlich):
+Seit dem Slice-Split (M3) ist `runStore.ts` nur noch der Aggregator. Die echten Importe aus den Services finden in den Slices (`src/store/slices/`) und in `internal/helpers.ts` statt:
+
   ├─ @/services/stepGuard
-  │    → validateStepPrerequisites(stepNo, runId, guardInput)  // sync, read-only
-  │    → applyStepRepairs(result, stepNo, runId, guardInput, set)  // async, side effects
+  │    → validateStepPrerequisites (sync) / validateStep3Async (async)
+  │    → applyStepRepairs (async, Side-Effects)
   │
   ├─ @/services/matching/matchingEngine
-  │    → executeMatchingEngine(runLines, pool, parsedPositions, runId)  // Step 4 Kern
+  │    → executeMatchingEngine  // Aufgerufen aus workflowSlice (Step 4)
   │
   ├─ @/services/matching/orderPool
-  │    → buildOrderPool(parsedOrders, runLines, masterArticles, runId)  // Step 4 Pool-Aufbau
-  │    → consumeFromPool / returnToPool  // manuelle Reassignment
+  │    → buildOrderPool         // Aufgerufen aus ingestSlice / workflowSlice
+  │    → consumeFromPool / returnToPool  // Aufgerufen aus mutationSlice
   │
   ├─ @/services/matching/orderParser
-  │    → parseOrderFile(file, config)  // Legacy-Pfad: dynamischer Import in Step 4
-  │
-  ├─ @/services/matchers
-  │    → getMatcher(matcherId)  // Step 2: Matcher-Modul-Lookup
-  │    → matcher.crossMatch(lines, articles, config, runId)  // Step 2: Kern-Matching
-  │
-  ├─ @/services/serialFinder
-  │    → validateAgainstInvoice(preFilteredSerials, invoiceNumber)  // Step 3
+  │    → parseOrderFile         // Aufgerufen aus helpers.ts (Legacy Step 4)
   │
   ├─ @/services/runPersistenceService
-  │    → loadRun(runId) / saveRun(payload)  // IDB Read/Write in Guards + Executes
+  │    → loadRun / saveRun      // Aufgerufen aus persistenceSlice & helpers.ts
   │
   ├─ @/hooks/buildAutoSavePayload
-  │    → buildAutoSavePayload(runId)  // reprocessCurrentRun → IDB persist
+  │    → buildAutoSavePayload   // SSOT für IDB-Payload (vernetzt mit useRunAutoSave)
   │
   └─ @/store/masterDataStore
-       → useMasterDataStore.getState().articles  // Legacy-Fallback Artikelstamm
-       → useMasterDataStore.getState().load()     // Guard-Repair: masterData nachladen
+       → useMasterDataStore.getState().articles  // Legacy-Fallback ArtikelstammState().load()     // Guard-Repair: masterData nachladen
 ```
 
 ### A8. runStepGuard-Kette (interne Verdrahtung)
 
 ```
-runStepGuard(stepNo, runId, get, set)     // runStore-interne Hilfsfunktion
+runStepGuard(stepNo, runId, get, set)     // internal/helpers.ts (exportiert an stepRunner)
   → buildGuardInput(state)                 // extrahiert 7 Felder aus RunState
   → validateStepPrerequisites(stepNo, runId, guardInput)   // stepGuard.ts, sync
     ├─ Step 2: validateStep2 → prüft parsedInvoiceResult, invoiceLines, masterArticles
@@ -569,6 +561,21 @@ UI-Komponenten rufen fachliche Actions auf, anstatt Workflow-Status-Übergänge 
 
 überführt: A12 überschrieben, A14–A17 neu angelegt.)*
 
+
+> **B1. AutoSave-Payload ↔ Wachhund-Diff-Verdrahtung**
+> `CONFI: HIGH` — Der Payload-Builder (`buildAutoSavePayload`) und der AutoSave-Trigger (`useRunAutoSave`-Subscribe-Diff) bilden ein verdrahtetes Paar. Jedes Payload-Feld MUSS im Zustand-Diff entweder direkt beobachtet (`===`) oder nachweislich aus einem beobachteten Feld abgeleitet sein (z.B. `uploadMetadata` wird nur indirekt über co-mutierende Ingest-Felder abgedeckt).
+> `QUELLE:` PROJ-46 M3.5 Leak-Patch, V4-Audit
+> ```
+> NICHT im Payload / NICHT im Wachhund (Run-Control):
+>   orderPool, isPaused, isWaitingBeforeStep4, waitingStep4RunId, showStep4WaitingDialog
+> 
+> WICHTIG: Die Erweiterung der IDB-Persistenz auf diese flüchtigen Run-Control-Felder 
+> ist exklusiver Architektur-Scope ab M4.
+
+
+> ```
+
+
 ---
 
-*Letzte Aktualisierung: 2026-04-05 | Quelle: PROJ-46-STATE-RACE Audit + Red-Team-Review*
+*Letzte Aktualisierung: 2026-04-20 | Quelle: Audit_M3.5_Execution.md*
