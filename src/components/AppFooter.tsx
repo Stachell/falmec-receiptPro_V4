@@ -10,7 +10,7 @@ import { parserRegistryService, type ParserRegistryModule } from '@/services/par
 import { matcherRegistryService, type MatcherRegistryModule } from '@/services/matcherRegistryService';
 import { getParser } from '@/services/parsers';
 import { getMatcher } from '@/services/matchers';
-import { SettingsPopup } from '@/components/SettingsPopup';
+import { SettingsPopup, type SettingsTabKey } from '@/components/SettingsPopup';
 import { IconGuidePopup } from '@/components/IconGuidePopup';
 import { logService } from '@/services/logService';
 
@@ -20,7 +20,6 @@ const DEFAULT_DATA_PATH = 'nicht gewaehlt';
 const HOVER_BG = '#008C99';
 const HOVER_TEXT = '#FFFFFF';
 const HOVER_BORDER = '#D8E6E7';
-type SettingsTabKey = 'general' | 'errorhandling' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview' | 'misc';
 
 export function AppFooter() {
   const [isOpen, setIsOpen] = useState(false);

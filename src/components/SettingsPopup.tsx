@@ -9,7 +9,7 @@
  * - Logfile-Button moved here from AppFooter
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -39,7 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive, Settings, AlertTriangle, FileText, Search, Fingerprint, PackageOpen, Download } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive, Settings, AlertTriangle, FileText, Search, Fingerprint, PackageOpen, Download, FlaskConical } from 'lucide-react';
 import { runPersistenceService } from '@/services/runPersistenceService';
 import type { PersistedRunData } from '@/services/runPersistenceService';
 import { fileSystemService } from '@/services/fileSystemService';
@@ -64,6 +64,8 @@ import {
   saveEmailAddresses,
   isValidEmail,
 } from '@/lib/errorHandlingConfig';
+import { qaSamplesService, type QaSampleSummary } from '@/services/qaSamplesService';
+import { useQaSamples } from '@/hooks/useQaSamples';
 
 interface SettingsPopupProps {
   open: boolean;
@@ -83,7 +85,10 @@ interface SettingsPopupProps {
   };
 }
 
-type SettingsTabKey = 'general' | 'errorhandling' | 'parser' | 'matcher' | 'serial' | 'ordermapper' | 'export' | 'overview';
+export type SettingsTabKey =
+  | 'general' | 'errorhandling' | 'parser' | 'matcher'
+  | 'serial'  | 'ordermapper'   | 'export' | 'overview'
+  | 'testarena';
 
 /** Hover-style helper button (matching app design) */
 function FooterButton({
@@ -115,6 +120,39 @@ function FooterButton({
     >
       {children}
     </button>
+  );
+}
+
+// PROJ-50 Test-Arena helpers
+function formatQaBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx++;
+  }
+  return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function QaSampleCard({ sample }: { sample: QaSampleSummary }) {
+  return (
+    <div className="rounded border border-border/70 bg-white/70 p-2 space-y-1">
+      <div className="text-xs font-semibold break-all">{sample.folderName}</div>
+      <div className="flex flex-wrap gap-1">
+        {sample.fileMeta.map((f) => (
+          <span
+            key={f.name}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-[#c9c3b6] border border-border/50 text-[#333]"
+            title={f.name}
+          >
+            {f.kind} · {formatQaBytes(f.size)}
+          </span>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground break-words">{sample.description}</p>
+    </div>
   );
 }
 
@@ -333,6 +371,86 @@ export function SettingsPopup({
   const [importedFileName, setImportedFileName] = useState('');
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // PROJ-50 Test-Arena ------------------------------------------------------
+  const fsApiAvailable = useMemo(
+    () => typeof window !== 'undefined' && 'showDirectoryPicker' in window,
+    [],
+  );
+  const [qaBusy, setQaBusy] = useState(false);
+  const [clearQaConfirmOpen, setClearQaConfirmOpen] = useState(false);
+  const {
+    samples: qaSamples,
+    totalBytes: qaTotalBytes,
+    reload: reloadQaSamples,
+  } = useQaSamples({ enabled: open && activeTab === 'testarena' });
+
+  // True-Unmount defense only (SettingsPopup bleibt via AppFooter dauerhaft gemountet).
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  // Rev 6: generischer Mount-Guard — jeder Post-Await-Side-Effect läuft durch ifMounted.
+  const ifMounted = useCallback((fn: () => void) => {
+    if (isMountedRef.current) fn();
+  }, []);
+
+  const handleUploadSamples = async () => {
+    ifMounted(() => setQaBusy(true));
+    try {
+      const picker = window as unknown as {
+        showDirectoryPicker: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
+      };
+      const dir = await picker.showDirectoryPicker({ mode: 'read' });
+      const result = await qaSamplesService.ingestDirectory(dir);
+      ifMounted(() => {
+        toast.success(
+          `${result.saved} Samples gespeichert, ${result.skipped} übersprungen`,
+        );
+        if (result.errors.length > 0) {
+          toast.warning(`${result.errors.length} Fehler — siehe Konsole`);
+          console.warn('[QaSamples] Ingest errors:', result.errors);
+        }
+        reloadQaSamples();
+      });
+    } catch (e: unknown) {
+      const err = e as { name?: string; message?: string } | null;
+      ifMounted(() => {
+        if (err?.name === 'AbortError') toast.info('Abgebrochen');
+        else if (err?.name === 'SecurityError')
+          toast.error('HTTPS oder localhost erforderlich');
+        else
+          toast.error(`Upload fehlgeschlagen: ${err?.message ?? 'Unbekannt'}`);
+      });
+    } finally {
+      ifMounted(() => setQaBusy(false));
+    }
+  };
+
+  const handleClearQa = async () => {
+    ifMounted(() => setQaBusy(true));
+    try {
+      await qaSamplesService.clearAll();
+      ifMounted(() => {
+        toast.success('Test-Arena geleert');
+        reloadQaSamples();
+      });
+    } catch (e: unknown) {
+      const err = e as { message?: string } | null;
+      ifMounted(() =>
+        toast.error(`Leeren fehlgeschlagen: ${err?.message ?? 'Unbekannt'}`),
+      );
+    } finally {
+      ifMounted(() => {
+        setClearQaConfirmOpen(false);
+        setQaBusy(false);
+      });
+    }
+  };
+  // -------------------------------------------------------------------------
 
   // PROJ-39-ADDON: Fehlerhandling email addresses (10 fixed slots)
   const [emailSaved, setEmailSaved] = useState(false);
@@ -856,7 +974,7 @@ export function SettingsPopup({
             className="flex flex-col mt-2 h-[65vh] max-h-[800px]"
           >
             <TabsList
-              className="flex flex-row h-fit bg-[#c9c3b6] border border-border tab-bar-raised p-1 gap-1 rounded-md mb-3 shrink-0"
+              className="flex flex-row flex-wrap h-fit bg-[#c9c3b6] border border-border tab-bar-raised p-1 gap-1 rounded-md mb-3 shrink-0"
             >
               <TabsTrigger value="general"       className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Settings className="w-3 h-3" />Allgemein</TabsTrigger>
               <TabsTrigger value="errorhandling" className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><AlertTriangle className="w-3 h-3" />Fehler</TabsTrigger>
@@ -866,6 +984,7 @@ export function SettingsPopup({
               <TabsTrigger value="ordermapper"   className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><PackageOpen className="w-3 h-3" />Bestellung</TabsTrigger>
               <TabsTrigger value="export"        className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Download className="w-3 h-3" />Export</TabsTrigger>
               <TabsTrigger value="overview"      className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><Archive className="w-3 h-3" />Speicher</TabsTrigger>
+              <TabsTrigger value="testarena"     className="text-xs px-3 py-1.5 gap-1 tab-trigger-pressed data-[state=active]:bg-[#666666] data-[state=active]:text-white hover:bg-[#008C99] hover:text-[#E3E0CF] transition-colors"><FlaskConical className="w-3 h-3" />Test-Arena</TabsTrigger>
             </TabsList>
 
             <div className="flex-1 overflow-y-auto min-h-0">
@@ -1399,6 +1518,59 @@ export function SettingsPopup({
               {/* PROJ-35: Tab 7 — Export-Konfiguration */}
               <ExportConfigTab />
 
+              {/* PROJ-50: Test-Arena (Giftküche) */}
+              <TabsContent value="testarena" className="mt-0 space-y-3">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  Test-Arena
+                </div>
+
+                {/* Sektion 1 — Interner Testspeicher */}
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Interner Testspeicher</Label>
+                  <div className="flex items-center gap-2">
+                    <FooterButton
+                      onClick={handleUploadSamples}
+                      disabled={qaBusy || !fsApiAvailable}
+                    >
+                      <Upload className="w-4 h-4" />
+                      {qaBusy ? 'Läuft...' : 'Upload'}
+                    </FooterButton>
+                    <FooterButton
+                      danger
+                      onClick={() => setClearQaConfirmOpen(true)}
+                      disabled={qaBusy || qaSamples.length === 0}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Leeren
+                    </FooterButton>
+                  </div>
+                  {!fsApiAvailable && (
+                    <p className="text-xs text-muted-foreground">
+                      File System Access API — nur Chrome/Edge auf HTTPS oder localhost.
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {qaSamples.length} Samples · {formatQaBytes(qaTotalBytes)}
+                  </p>
+
+                  <div className="rounded-md border border-border bg-white/50 p-2 space-y-2 overflow-y-auto max-h-[260px]">
+                    {qaSamples.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Keine Samples geladen.</p>
+                    ) : (
+                      qaSamples.map((s) => <QaSampleCard key={s.sampleId} sample={s} />)
+                    )}
+                  </div>
+                </div>
+
+                {/* Sektion 2 — Testdaten schicken (Platzhalter) */}
+                <div className="border-t border-border pt-3 space-y-2">
+                  <Label className="text-sm font-semibold">Testdaten schicken</Label>
+                  <div className="rounded-md border border-dashed border-border bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">Folgt in nächster Version.</p>
+                  </div>
+                </div>
+              </TabsContent>
+
             </div>
           </Tabs>
 
@@ -1505,6 +1677,29 @@ export function SettingsPopup({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Archivieren &amp; löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PROJ-50: Test-Arena — Leeren bestätigen */}
+      <AlertDialog open={clearQaConfirmOpen} onOpenChange={setClearQaConfirmOpen}>
+        <AlertDialogContent style={{ backgroundColor: '#D8E6E7' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Test-Arena leeren?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Alle gespeicherten Test-Samples werden unwiderruflich aus dem internen
+              Speicher entfernt. Produktivdaten bleiben unberührt.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={qaBusy}>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearQa}
+              disabled={qaBusy}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Leeren
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
