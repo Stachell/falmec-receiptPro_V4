@@ -287,7 +287,7 @@ export const createIngestSlice: StateCreator<RunState, [], [], IngestSlice> = (s
    * autoAdvance=false unterdrückt den 500ms-Timer in updateRunWithParsedData.
    * Gibt finalRunId zurück (nach Rename aus Rechnungsnummer).
    */
-  parseInvoiceForIngest: async (runId, fileSnapshot) => {
+  parseInvoiceForIngest: async (runId, fileSnapshot, customRunTitle) => {
     if (!fileSnapshot.invoice?.file) {
       throw new Error('Keine Rechnung hochgeladen (PDF fehlt)');
     }
@@ -313,7 +313,34 @@ export const createIngestSlice: StateCreator<RunState, [], [], IngestSlice> = (s
       finalRunId = newRunId;
     }
 
-    logService.info(`[Phase1] PDF geparst: ${result.lines.length} Positionen, finalRunId=${finalRunId}`, {
+    // PROJ-50-DEV C.3: customRunTitle-Präfix NACH renameRun — sonst Zielscheibe verloren.
+    // Rd15: Präfix wird vom Caller als SSOT-Konstante übergeben
+    // (`qaRunPrefix = \`QA-${sampleId.trim().split(' ').join('_')}\``).
+    // Hier in ingestSlice.ts nehmen wir den Wert WIE ÜBERGEBEN entgegen und konkatenieren
+    // ihn ohne Separator vor r.invoice.fattura. Keine Sanitization hier — sie passiert
+    // einmal und genau einmal am Konstruktionsort (SettingsPopup.handleStartSampleTestRun).
+    const trimmedTitle = customRunTitle?.trim() ?? '';
+    if (trimmedTitle.length > 0) {
+      set((state) => ({
+        runs: state.runs.map((r) =>
+          r.id === finalRunId
+            ? { ...r, invoice: { ...r.invoice, fattura: `${trimmedTitle}${r.invoice.fattura}` } }
+            : r,
+        ),
+        currentRun:
+          state.currentRun?.id === finalRunId
+            ? {
+                ...state.currentRun,
+                invoice: {
+                  ...state.currentRun.invoice,
+                  fattura: `${trimmedTitle}${state.currentRun.invoice.fattura}`,
+                },
+              }
+            : state.currentRun,
+      }));
+    }
+
+    logService.info(`[Phase1] PDF geparst: ${result.lines.length} Positionen, finalRunId=${finalRunId}${trimmedTitle ? `, customTitle='${trimmedTitle}'` : ''}`, {
       runId: finalRunId,
       step: 'Rechnung auslesen',
     });
@@ -586,24 +613,100 @@ export const createIngestSlice: StateCreator<RunState, [], [], IngestSlice> = (s
     //    WICHTIG: runId NICHT als options.runId übergeben — erzeugt sonst neuen Log-Rest
     logService.clearRunLog(runId);
 
-    // 4. IDB-Löschung mit Retry (IDB-Fehler sind oft transient)
+    // 4. UI-Flags entschärfen BEVOR wir IDB anfassen — keine Race mit React-Renders
     set({ isProcessing: false, parsingProgress: '' });
-    let idbDeleted = await get().deletePersistedRun(runId);
 
-    if (!idbDeleted) {
-      await new Promise(r => setTimeout(r, 500));
+    // 5. PROJ-50 FINAL-FIX P2 — Mark-First-Then-Delete.
+    //    Zuerst überschreiben wir den Record atomar mit einem Tombstone
+    //    (status='failed', ingestStatus alle-invalid). Damit ist der Record
+    //    bereits als nicht-produktiv markiert, auch wenn der anschließende
+    //    Delete später scheitert. Das eliminiert das Ghost-Run-Risiko auf
+    //    IDB-Ebene bis auf den Double-Failure-Fall (Tombstone-Write UND
+    //    Delete scheitern beide).
+    //    Template-Shape aus createRunSkeleton (siehe oben Z. 237-265).
+    const { globalConfig } = get();
+    const nowIso = new Date().toISOString();
+    const tombstoneRun: Run = {
+      id: runId,
+      createdAt: nowIso,
+      status: 'failed',
+      config: globalConfig,
+      invoice: {
+        fattura: '',
+        invoiceDate: nowIso.split('T')[0],
+        deliveryDate: null,
+      },
+      stats: {
+        parsedInvoiceLines: 0, matchedOrders: 0, notOrderedCount: 0, serialMatchedCount: 0,
+        mismatchedGroupsCount: 0, articleMatchedCount: 0, inactiveArticlesCount: 0,
+        priceOkCount: 0, priceMismatchCount: 0, exportReady: false, expandedLineCount: 0,
+        fullMatchCount: 0, codeItOnlyCount: 0, eanOnlyCount: 0, noMatchCount: 0,
+        serialRequiredCount: 0, priceMissingCount: 0, priceCustomCount: 0,
+        manualOkOrderCount: 0, perfectMatchCount: 0, referenceMatchCount: 0,
+        smartQtyMatchCount: 0, fifoFallbackCount: 0,
+      },
+      steps: [],
+      isExpanded: false,
+      orphanSerials: [],
+    };
+
+    let tombstoneWritten = false;
+    try {
+      tombstoneWritten = await runPersistenceService.saveRun({
+        id: runId,
+        run: tombstoneRun,
+        invoiceLines: [],
+        issues: [],
+        auditLog: [],
+        parsedPositions: [],
+        parserWarnings: [],
+        parsedInvoiceResult: null,
+        serialDocument: null,
+        uploadMetadata: [],
+        ingestStatus: {
+          pdf: 'invalid',
+          articleList: 'invalid',
+          serialList: 'invalid',
+          openWE: 'invalid',
+        },
+      });
+    } catch (markErr) {
+      logService.error(`[cleanupFailedIngest] Tombstone-Write warf Exception für Run ${runId}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
+      tombstoneWritten = false;
+    }
+
+    // 6. Physischen Delete mit Retry ausführen — nur NACH dem Tombstone.
+    let idbDeleted = false;
+    try {
       idbDeleted = await get().deletePersistedRun(runId);
+      if (!idbDeleted) {
+        await new Promise(r => setTimeout(r, 500));
+        idbDeleted = await get().deletePersistedRun(runId);
+      }
+    } catch (delErr) {
+      logService.error(`[cleanupFailedIngest] deletePersistedRun warf Exception für Run ${runId}: ${delErr instanceof Error ? delErr.message : String(delErr)}`);
+      idbDeleted = false;
     }
 
-    if (!idbDeleted) {
-      // Endgültiger Fehlschlag — Ghost-Run-Verteidigung (Änderung 14b blockt Laden)
-      // KEIN { runId } in den Options — sonst wird localStorage falmec-run-log-{runId} neu angelegt!
-      logService.error(`[cleanupFailedIngest] IDB-Löschung nach Retry fehlgeschlagen für Run ${runId} — Ghost-Run möglich`);
-      // persistedRunSummaries defensiv bereinigen (damit Ghost-Run nicht in Session-Liste erscheint)
-      set(state => ({
-        persistedRunSummaries: state.persistedRunSummaries.filter(s => s.id !== runId),
-      }));
+    // 7. 4-Fall-Diagnostik — ehrliche Logs für alle Kombinationen.
+    if (tombstoneWritten && idbDeleted) {
+      // Best-Case: Record atomar markiert + danach sauber physisch entfernt.
+      logService.info(`[cleanupFailedIngest] Run ${runId} sauber entfernt (Tombstone→Delete).`, { step: 'System' });
+    } else if (tombstoneWritten && !idbDeleted) {
+      // Record bleibt in IDB, ist aber als Tombstone markiert — kein Ghost-Run.
+      logService.error(`[cleanupFailedIngest] Run ${runId}: Tombstone geschrieben, physischer Delete scheiterte nach Retry. Record bleibt, ist aber via isTombstoneRecord ausgefiltert.`);
+    } else if (!tombstoneWritten && idbDeleted) {
+      // Tombstone-Write scheiterte, aber der nachgelagerte Delete lief durch — Netto: Record weg, alles gut.
+      logService.error(`[cleanupFailedIngest] Run ${runId}: Tombstone-Write scheiterte, physischer Delete war jedoch erfolgreich. Record entfernt.`);
+    } else {
+      // Double-Failure: Tombstone UND Delete scheitern — echter Ghost-Run möglich.
+      logService.error(`[cleanupFailedIngest] Run ${runId}: IDB-Infrastrukturproblem — Tombstone-Write UND Delete scheiterten. Ghost-Run möglich, IndexedDB 'falmec-receiptpro-runs' ggf. manuell prüfen.`);
     }
+
+    // 8. persistedRunSummaries defensiv bereinigen (damit Ghost-Run nicht in Session-Liste erscheint)
+    set(state => ({
+      persistedRunSummaries: state.persistedRunSummaries.filter(s => s.id !== runId),
+    }));
   },
 
   // Parse invoice from uploaded file with timeout

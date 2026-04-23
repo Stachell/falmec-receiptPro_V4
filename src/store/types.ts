@@ -229,7 +229,11 @@ export interface RunState {
 
   // PROJ-49 SSOT: Phase-1-Ingest-Funktionen
   createRunSkeleton: () => Promise<string>;
-  parseInvoiceForIngest: (runId: string, fileSnapshot: FileSnapshot) => Promise<string>;
+  parseInvoiceForIngest: (
+    runId: string,
+    fileSnapshot: FileSnapshot,
+    customRunTitle?: string,
+  ) => Promise<string>;
   ingestAndPersistRunData: (runId: string, fileSnapshot: FileSnapshot) => Promise<IngestResult>;
   startWorkflowPhase2: (runId: string) => Promise<void>;
   cleanupFailedIngest: (runId: string) => Promise<void>;

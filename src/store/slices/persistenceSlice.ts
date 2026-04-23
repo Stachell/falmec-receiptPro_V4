@@ -8,7 +8,7 @@ import type { Run } from '@/types';
 // Bring in every value-import the moved action bodies use.
 import { archiveService } from '@/services/archiveService';
 import { logService } from '@/services/logService';
-import { runPersistenceService } from '@/services/runPersistenceService';
+import { runPersistenceService, isTombstoneRecord } from '@/services/runPersistenceService';
 
 export type PersistenceSlice = Pick<
   RunState,
@@ -141,17 +141,26 @@ export const createPersistenceSlice: StateCreator<RunState, [], [], PersistenceS
         return false;
       }
 
-      // PROJ-49: Änderung 14b — Ghost-Run-Erkennung für fehlgeschlagene Ingests
-      // Ein SSOT-Run mit unvollständigem Ingest (pdf/articleList != ready) ist ein Ghost-Run.
-      // WICHTIG: runId NICHT als options.runId — sonst wird localStorage falmec-run-log-{runId} angelegt!
+      // PROJ-50 FINAL-FIX: Tombstone-Erkennung via Record-SSOT-Helper.
+      //   Löst die alte 2-Feld-Heuristik (pdf/articleList) durch die zentrale
+      //   6-fach-konjunktive Logik ab — kein Drift mehr zwischen Call-Sites.
+      if (isTombstoneRecord(data)) {
+        logService.error(`[loadPersistedRun] Tombstone-Run ${runId} erkannt — auto-delete`);
+        const deleted = await get().deletePersistedRun(runId);
+        if (!deleted) {
+          logService.error(`[loadPersistedRun] Auto-Delete Tombstone ${runId} fehlgeschlagen — IDB-Infrastrukturproblem`);
+        }
+        return false;
+      }
+      // PROJ-49: Änderung 14b-Legacy — Ghost-Run-Erkennung für halb-gelungene Ingests,
+      //   die NICHT als Tombstone markiert sind (pdf/articleList müssen 'ready' sein,
+      //   sonst ist der Record nicht produktiv nutzbar).
       if (data.ingestStatus) {
         const { pdf, articleList } = data.ingestStatus;
         if (pdf !== 'ready' || articleList !== 'ready') {
           logService.error(`[loadPersistedRun] SSOT-Run ${runId} mit unvollständigem Ingest erkannt — auto-delete`);
           const deleted = await get().deletePersistedRun(runId);
           if (!deleted) {
-            // Bewusste Abbruchkante: kein Retry. Persistenter IDB-Fehler = Infrastruktur-Problem.
-            // Ghost-Run bleibt in IDB, wird aber bei JEDEM Lade-Versuch erneut abgewiesen.
             logService.error(`[loadPersistedRun] Auto-Delete Ghost-Run ${runId} fehlgeschlagen — IDB-Infrastrukturproblem`);
           }
           return false;
@@ -225,6 +234,9 @@ export const createPersistenceSlice: StateCreator<RunState, [], [], PersistenceS
 
   loadPersistedRunList: async () => {
     try {
+      // PROJ-50 FINAL-FIX: Tombstones werden bereits im Service
+      //   (runPersistenceService.loadRunList) via Record-basiertem SSOT-Filter
+      //   isTombstoneRecord unterdrückt — hier nur noch übernehmen.
       const summaries = await runPersistenceService.loadRunList();
       set({ persistedRunSummaries: summaries });
       console.log(`[RunStore] Loaded ${summaries.length} persisted run summaries`);

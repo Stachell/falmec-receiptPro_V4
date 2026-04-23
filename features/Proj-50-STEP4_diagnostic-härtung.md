@@ -173,50 +173,14 @@ Kanonische Form (neu, korrekt): ``${runId}-line-`` — so z. B. in `persistenceS
 - **Prüfen:** Welche systemweiten Meta-Events (Store-Init, IDB-Bulk-Cleanups, Settings-Änderungen, Auth-States) fehlen aktuell im Global-Log?
 - **Fix:** Globales Logfile um Meta-Events erweitern. Strikte Trennung wahren: Run-spezifische Aktionen bleiben ausschließlich im Run-eigenen `auditLog`. Das globale Log protokolliert maximal übergeordnete Meilensteine (z. B. "Run 123 gestartet / archiviert / gelöscht").
 
-
-## Block 7 — ERROR-RESOLVER-STADIUM (DYNAMISCHE FEHLER-HÄRTUNG)
-
-### 7.0 Darstellung der Fehler-Bodys im Tab-Reiter "Fehler":
-Die Fenster, bzw. Bodys sind mit am unteren Rand mit dem "ausklappen"-Pfeil abgebildet. Das ist eine Funktion die haben wir z.B. in den Tabs "RE-Positionen - Body", "Artikelliste - Body", "Export - XML-Vorschau", etc. - DASS MUSS UNBEDINGT SO BLEIBEN- FOLGENDE ÄNDERUNGEN BEZIEHEN SICH AUSSCHLIESSLICH AUF DEN BODY DER ERZEUGTEN FEHLER IM TAG-FELD "FEHLER" AUF DER RUN-DETAIL.
- - Im Tab-Bereich "Fehler" auf der Run-Detail und nur dort sollen die Pfeile zum ausklappen NICHT dargestellt werden, es sei denn der Text läuft über die bestehende Größe der aktuellen Fehlerbodys hinaus.
- - Begründung: Wenn kein Inhalt vorhanden ist, denkt man es wäre Inhalt vorhanden, klappt aus und merkt das dies nicht der Fall ist. Das wirkt unprofessionell und sorgt für Verwirrung.
-
-### 7.1 Fehlermeldung - Inhalt: 
-** Problem:** In den Fehlerdaten sind Daten wie Artikelnummer, Herstellerartikelnummer bzw. Bestellnummer, EAN, etc. allerdings keine Bezeichnung der Geräte. Das ist für den Benutzer nicht lesefreundlich**
-** Auftrag:**
-- **Datenergänzung im Fehlercenter:** Die deutsche Artikelbezeichnung als Text muss in die jeweilige Fehlerzeile in allen Fehler mit integriert werden.
-- **Anordnung:**: Die Fehlerausgabe bringt je Fehler eine Zeile, diese ist lesbar formatiert für den User. Diese leicht lesbare Formatierung unbedingt beibehalten.
-- **Fehlererläuterung:**: Am Ende der Zeile wäre noch eine kurze Erläuterung von bis zu 40-50 Zeichen, jedoch so knapp wie möglich formuliert um den Fehler selbst abgesehen von der Überschrift zu erläutern. Beispiel bei FIFO - am Ende der Zeile: "FIFO: Bestellnummer aus Beleg nicht vorhanden, verfügbare offene Position verwendet."
-
-### 7.2 FIFO-Fix: "Lösung erzwingen" & Bestellnummer-Korrektur
-**Problem:** FIFO-Warnungen können aktuell nicht manuell erledigt werden. Es fehlt die visuelle Brücke zur Bestellnummer-Auswahl.
-**Auftrag:**
-- **UI-Anpassung:** Tab "Lösung erzwingen" erhält analog zur Preisabweichung das Feld "Bestellnummer korrigieren".
-- **Optik:** Rahmen-Button mit integriertem Auswahl-Popup. Darstellung: Aktuelle Auswahl als Text + Checkbox (dynamische Ausgabe). Design muss zu 100% konsistent zum Rest der App bleiben.
-- **Logik:** Auswahl einer anderen Bestellnummer setzt das FIFO-Issue auf `resolved`.
-
-### 7.3 Visual Gate: Die "Zweite Sicherheitsstufe" (Beleg zugeteilt)
-**Problem:** Der User braucht eine optische Bestätigung, dass FIFO nur ein "Notnagel" ist.
-**Auftrag:**
-- **Mechanismus:** Solange ein FIFO-Warning aktiv (oder Mail-Anfrage offen) ist, wird die ZWEITE Checkbox der Kachel "Bestellung zugeteilt" blockiert (bleibt grau/leer).
-- **Ziel:** Rein optische Sperre. Erst nach manueller Korrektur (7.1) oder expliziter Bestätigung wird die Kachel vollständig "grün".
-
-### 7.4 Seriennummern-Härtung (Masken-Recycling)
-**Problem:** "Seriennummer fehlt" bietet aktuell keine Bearbeitung an. Das Handling von Dubletten/Fehlern ist blockiert.
-**Auftrag:**
-- **Recycling:** Nutze die Maske von "Stammdaten/EAN nicht gefunden" als Kopiervorlage.
-- **Erweiterung:** Feld "Seriennummernpflichtig" (JA/NEIN) einbauen. Bei "JA" erscheint das Eingabefeld "Seriennummer eintragen".
-- **Visuals:** Popup-Schrift Weiß auf Dunkelgrün (CI-konform).
-- **Eintrag:** Das Feld wird zur Dropdown: Bestehende Einträge (aus ERP/Scan) + Option "Selbst wählen" für manuellen externen Wert.
-- **Strategie:** Erst-Installation bei "Stammdaten nicht gefunden" als Prototyp/Vorlage, dann Rollout für Seriennummern-Fehler.
-
-### 7.5 Hard-Stop: Artikel ohne Belegzuweisung (ERP-Schutz)
-**Problem:** Aktuell löst ein Artikel ohne zugeordneten Beleg/Rechnung keinen blockierenden Fehler aus. Dies führt zu einem fehlerhaften Export, der vom Ziel-ERP-System komplett abgewiesen wird (Import-Stopp).
-**Auftrag & Fix-Skizze:**
-- **Severity-Upgrade:** Die fehlende Belegzuweisung muss in der Engine zwingend als harter Fehler (`severity: 'error'`) eingestuft werden.
-- **Workflow-Guard (Hard-Stop):** Die Engine muss den Workflow blockieren. Die Export-Freigabe darf nicht erteilt werden.
-- **Resolution:** Der Fehler muss in der UI aktiv behoben (Beleg zuweisen) oder über die "Lösung erzwingen"-Funktion bestätigt werden, bevor der Run weiterlaufen oder exportiert werden darf.
-
+## Block 7 - Lagerplätze (Korrektur & Erweiterung)
+Korrektes Regex-Matching im ERP. Folgende Werte sind zwingend für die Zuweisung gültig:
+* **Hauptlagerplatz 1:** `WE LAGER;0;0;0`
+* **Hauptlagerplatz 2:** `WE KDD;0;0;0`
+* **Nebenlagerplatz 3:** `KD;0;0;0`
+* **Nebenlagerplatz 4:** `LKW5;0;0;0`
+* **Nebenlagerplatz 5:** `LKW6;0;0;0`
+* **Nebenlagerplatz 6:** `LKW7;0;0;0`ktiv behoben (Beleg zuweisen) oder über die "Lösung erzwingen"-Funktion bestätigt werden, bevor der Run weiterlaufen oder exportiert werden darf.
 
 ## Block 8 — SECURITY-GUARD (Block4Step Härtung & Persistence)
 
@@ -279,15 +243,3 @@ Die Buttons liegen optisch untereinander angesetzt, dass lässt den Rest des Bod
 - Vor jeder Code-Änderung `npx tsc --noEmit` als Baseline.
 - Block 1 Defekt B erfordert Verifikation gegen ein reales Archiv — bitte vor dem Schreiben von Contract-Gates das Log-Beweisstück einholen.
 - Block 3 rührt **den Store nicht an**. Sollte ein „schöner" Refactor auffallen (Derived-Selector im Store anlegen): notieren, NICHT bauen.
-
-
-
-BLOCK 7 TAUSCHEN:
-LAGERPLÄTZE KORREKTE REGEX FÜR MATCH IM ERP UND ERWEITERUNG UM KD;0;0;0:
-
->> HAUPTLAGERPLATZ 1: "WE LAGER;0;0;0"
->> HAUPTLAGERPLATZ 2: "WE KDD;0;0;0"
->> NEBENLAGERPLATZ 3: "KD;0;0;0"
->> NEBENLAGERPLATZ 4: "LKW5;0;0;0"
->> NEBENLAGERPLATZ 5: "LKW6;0;0;0"
->> NEBENLAGERPLATZ 6: "LKW7;0;0;0"

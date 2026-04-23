@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useRunStore } from '@/store/runStore';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -39,7 +40,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive, Settings, AlertTriangle, FileText, Search, Fingerprint, PackageOpen, Download, FlaskConical } from 'lucide-react';
+import { Upload, FolderOpen, Trash2, CheckCircle, GripVertical, ChevronUp, ChevronDown, Save, Archive, Settings, AlertTriangle, FileText, Search, Fingerprint, PackageOpen, Download, FlaskConical, Loader2 } from 'lucide-react';
 import { runPersistenceService } from '@/services/runPersistenceService';
 import type { PersistedRunData } from '@/services/runPersistenceService';
 import { fileSystemService } from '@/services/fileSystemService';
@@ -64,7 +65,7 @@ import {
   saveEmailAddresses,
   isValidEmail,
 } from '@/lib/errorHandlingConfig';
-import { qaSamplesService, type QaSampleSummary } from '@/services/qaSamplesService';
+import { qaSamplesService, type QaSampleSummary, type QaSampleBlob, type QaSampleIndexEntry } from '@/services/qaSamplesService';
 import { useQaSamples } from '@/hooks/useQaSamples';
 
 interface SettingsPopupProps {
@@ -136,9 +137,65 @@ function formatQaBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
-function QaSampleCard({ sample }: { sample: QaSampleSummary }) {
+// PROJ-50-DEV: resolveReadmeBody
+// Rd9/Lead-Dev-Fix 2: Priorisiert ZWINGEND alle Blobs aus dem `QA-README/`-Ordner,
+//   dann expected.md (case-insensitive) > README.md > erste .md als Rückfall.
+// Rd5/Chef-Fix 3: Vergleich auf BASENAME (letztes Pfad-Segment), nicht auf fileName.
+function resolveReadmeBody(blobs: QaSampleBlob[]): string | null {
+  const mdBlobs = blobs.filter((b) => b.kind === 'md');
+  if (mdBlobs.length === 0) return null;
+
+  const basenameOf = (name: string): string => {
+    const ix = name.lastIndexOf('/');
+    return ix === -1 ? name : name.slice(ix + 1);
+  };
+
+  // Rd9/Lead-Dev-Fix 2: Blobs mit Pfad-Präfix `QA-README/` haben OBERSTE PRIORITÄT.
+  const qaReadmeBlobs = mdBlobs
+    .filter((b) => b.fileName.toLowerCase().startsWith('qa-readme/'))
+    .sort((a, b) => a.fileName.localeCompare(b.fileName));
+  const qaReadme = qaReadmeBlobs[0];
+
+  const expected = mdBlobs.find(
+    (b) => basenameOf(b.fileName).toLowerCase() === 'expected.md',
+  );
+  const readme = mdBlobs.find(
+    (b) => basenameOf(b.fileName).toLowerCase() === 'readme.md',
+  );
+  const sorted = [...mdBlobs].sort((a, b) => a.fileName.localeCompare(b.fileName));
+  const chosen = qaReadme ?? expected ?? readme ?? sorted[0];
+  if (!chosen) return null;
+
+  // ArrayBuffer → UTF-8 Text, Größenwächter um UI-Blow-up zu vermeiden.
+  const MAX = 256 * 1024;
+  const slice =
+    chosen.data.byteLength > MAX ? chosen.data.slice(0, MAX) : chosen.data;
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(slice);
+  return chosen.data.byteLength > MAX
+    ? text + '\n\n... [gekürzt — Datei > 256 KB]'
+    : text;
+}
+
+function QaSampleCard({
+  sample,
+  onSelect,
+}: {
+  sample: QaSampleSummary;
+  onSelect: (sampleId: string) => void;
+}) {
   return (
-    <div className="rounded border border-border/70 bg-white/70 p-2 space-y-1">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(sample.sampleId)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(sample.sampleId);
+        }
+      }}
+      className="rounded border border-border/70 bg-white/70 p-2 space-y-1 cursor-pointer hover:bg-white/90 hover:border-primary/50 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
+    >
       <div className="text-xs font-semibold break-all">{sample.folderName}</div>
       <div className="flex flex-wrap gap-1">
         {sample.fileMeta.map((f) => (
@@ -353,6 +410,32 @@ function ExportConfigTab() {
   );
 }
 
+// PROJ-50 FINAL-FIX: Live-Recheck-Helper für den QA-Start-Guard.
+//   Wird an zwei Stellen benötigt (Confirm-AlertDialogAction UND direkt vor
+//   createRunSkeleton in handleStartSampleTestRun). Liest den Store per
+//   getState() — also immer den AKTUELLEN Laufzeit-Snapshot, nicht einen
+//   veralteten React-State, der beim Öffnen des Overwrite-Dialogs festfror.
+function getLiveQaStartGuardState(): {
+  isEngineBusy: boolean;
+  hasIdleWorkflowData: boolean;
+} {
+  const s = useRunStore.getState();
+  const isEngineBusy =
+    s.isProcessing === true ||
+    s.isPaused === true ||
+    s.isWaitingBeforeStep4 === true;
+  // Idle-Workflow-Daten = currentRun existiert, ist nicht archiviert und
+  //   hat bereits Rechnungs-Parser-Output — das sind die Daten, die ein
+  //   QA-Overwrite still zerstören würde, wenn der User versehentlich klickt.
+  const cr = s.currentRun;
+  const hasIdleWorkflowData =
+    !isEngineBusy &&
+    cr !== null &&
+    !cr.archivePath &&
+    s.parsedInvoiceResult !== null;
+  return { isEngineBusy, hasIdleWorkflowData };
+}
+
 export function SettingsPopup({
   open,
   onOpenChange,
@@ -379,6 +462,18 @@ export function SettingsPopup({
   );
   const [qaBusy, setQaBusy] = useState(false);
   const [clearQaConfirmOpen, setClearQaConfirmOpen] = useState(false);
+  // PROJ-50-DEV: Sample-Detail + Testlauf ---------------------------------
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null);
+  const [sampleDetail, setSampleDetail] = useState<{
+    index: QaSampleIndexEntry;
+    blobs: QaSampleBlob[];
+  } | null>(null);
+  const [sampleDetailLoading, setSampleDetailLoading] = useState(false);
+  const [sampleDetailDialogOpen, setSampleDetailDialogOpen] = useState(false);
+  const [sampleRegexLegendOpen, setSampleRegexLegendOpen] = useState(false);
+  const [overwriteDialogOpen, setOverwriteDialogOpen] = useState(false);
+  const [pendingOverwriteSampleId, setPendingOverwriteSampleId] = useState<string | null>(null);
+  const navigate = useNavigate();
   const {
     samples: qaSamples,
     totalBytes: qaTotalBytes,
@@ -397,6 +492,114 @@ export function SettingsPopup({
   const ifMounted = useCallback((fn: () => void) => {
     if (isMountedRef.current) fn();
   }, []);
+
+  // PROJ-50-DEV Rd10/Lead-Dev-Fix 2: QA-README ist Pflicht für den Testlauf.
+  const hasQaReadme = useMemo(() => {
+    if (!sampleDetail) return false;
+    return sampleDetail.blobs.some(
+      (b) => b.kind === 'md' && b.fileName.toLowerCase().startsWith('qa-readme/'),
+    );
+  }, [sampleDetail]);
+
+  // PROJ-50-DEV: Sample-Detail laden (Soll-Sichtfenster öffnen)
+  const handleOpenSampleDetail = useCallback(async (sampleId: string) => {
+    ifMounted(() => {
+      setSelectedSampleId(sampleId);
+      setSampleDetail(null);
+      setSampleDetailLoading(true);
+      setSampleDetailDialogOpen(true);
+    });
+    try {
+      const detail = await qaSamplesService.loadSample(sampleId);
+      ifMounted(() => {
+        setSampleDetail(detail);
+        setSampleDetailLoading(false);
+      });
+    } catch (e: unknown) {
+      const err = e as { message?: string } | null;
+      ifMounted(() => {
+        setSampleDetailLoading(false);
+        toast.error(`Laden fehlgeschlagen: ${err?.message ?? 'Unbekannt'}`);
+      });
+    }
+  }, [ifMounted]);
+
+  // PROJ-50-DEV: Testlauf starten — Brücke zum produktiven Ingest
+  const handleStartSampleTestRun = useCallback(async (sampleId: string) => {
+    ifMounted(() => setQaBusy(true));
+    ifMounted(() => setSampleDetailDialogOpen(false));
+
+    let currentRunId: string | null = null;
+    try {
+      const uploadSet = await qaSamplesService.prepareFilesForIngest(sampleId);
+      if (!uploadSet.ok || !uploadSet.snapshot) {
+        ifMounted(() => toast.error(
+          `QA-Ingest abgebrochen: ${uploadSet.reason ?? 'Unbekannter Grund'}`,
+        ));
+        return;
+      }
+
+      const fileSnapshot = uploadSet.snapshot;
+      // PROJ-50 FINAL-FIX P1: Zweiter Live-Recheck direkt vor der ersten Store-
+      //   Mutation. Zwischen Confirm-Klick und prepareFilesForIngest vergeht
+      //   Zeit (Async-Datei-Hydration) — hier ist die letzte Gelegenheit, einen
+      //   frisch angelaufenen Produktivlauf zu erkennen, bevor createRunSkeleton
+      //   `currentRun` überschreibt.
+      const preSkeletonGuard = getLiveQaStartGuardState();
+      if (preSkeletonGuard.isEngineBusy) {
+        ifMounted(() => toast.warning(
+          'Testlauf abgebrochen: Ein Produktivlauf ist aktuell aktiv. Bitte vorher abschließen oder pausieren.',
+        ));
+        return;
+      }
+      const store = useRunStore.getState();
+
+      currentRunId = await store.createRunSkeleton();
+      // Rd15 SSOT (ES2020-safe): `split(' ').join('_')` statt `replaceAll`.
+      //   Reihenfolge: trim() ZUERST, dann split/join. Einzige Konstruktion.
+      const qaRunPrefix = `QA-${sampleId.trim().split(' ').join('_')}`;
+      const finalRunId = await store.parseInvoiceForIngest(
+        currentRunId,
+        fileSnapshot,
+        qaRunPrefix,
+      );
+      currentRunId = finalRunId;
+
+      const ingestResult = await store.ingestAndPersistRunData(
+        finalRunId,
+        fileSnapshot,
+      );
+      if (!ingestResult.allReady) {
+        await store.cleanupFailedIngest(finalRunId);
+        ifMounted(() => toast.error(
+          `QA-Ingest gescheitert: ${ingestResult.failedSources.join(', ')}`,
+        ));
+        currentRunId = null;
+        return;
+      }
+
+      await store.startWorkflowPhase2(finalRunId);
+
+      // Rd7/Chef-Fix 1: EXPLIZITE Navigation zur RunDetail-Seite.
+      ifMounted(() => {
+        toast.success(`QA-Run gestartet: ${finalRunId}`);
+        onOpenChange(false);
+        navigate(`/run/${encodeURIComponent(finalRunId)}`);
+      });
+    } catch (e: unknown) {
+      const err = e as { message?: string } | null;
+      if (currentRunId) {
+        try {
+          await useRunStore.getState().cleanupFailedIngest(currentRunId);
+        } catch (cleanupErr) {
+          console.error('PROJ-50 cleanupFailedIngest failed:', cleanupErr);
+        }
+      }
+      ifMounted(() => toast.error(`QA-Run fehlgeschlagen: ${err?.message ?? 'Unbekannt'}`));
+    } finally {
+      ifMounted(() => setQaBusy(false));
+    }
+  }, [ifMounted, onOpenChange, navigate]);
 
   const handleUploadSamples = async () => {
     ifMounted(() => setQaBusy(true));
@@ -1557,16 +1760,26 @@ export function SettingsPopup({
                     {qaSamples.length === 0 ? (
                       <p className="text-xs text-muted-foreground">Keine Samples geladen.</p>
                     ) : (
-                      qaSamples.map((s) => <QaSampleCard key={s.sampleId} sample={s} />)
+                      qaSamples.map((s) => <QaSampleCard key={s.sampleId} sample={s} onSelect={handleOpenSampleDetail} />)
                     )}
                   </div>
                 </div>
 
-                {/* Sektion 2 — Testdaten schicken (Platzhalter) */}
+                {/* PROJ-50-DEV Rd6/Chef-Fix 1: Sektion 2 — Testdaten schicken + Nomenklatur-Legende */}
                 <div className="border-t border-border pt-3 space-y-2">
                   <Label className="text-sm font-semibold">Testdaten schicken</Label>
-                  <div className="rounded-md border border-dashed border-border bg-muted/20 p-3">
-                    <p className="text-xs text-muted-foreground">Folgt in nächster Version.</p>
+                  <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Klicke auf ein Sample in der Liste oben, um das Soll-Sichtfenster zu öffnen
+                      und einen Testlauf zu starten.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSampleRegexLegendOpen(true)}
+                      className="text-xs text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"
+                    >
+                      Sample Regex
+                    </button>
                   </div>
                 </div>
               </TabsContent>
@@ -1701,6 +1914,222 @@ export function SettingsPopup({
             >
               Leeren
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PROJ-50-DEV: Sample-Detail / Soll-Sichtfenster */}
+      <AlertDialog
+        open={sampleDetailDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            ifMounted(() => {
+              setSampleDetailDialogOpen(false);
+              setSampleDetail(null);
+              setSelectedSampleId(null);
+            });
+          }
+        }}
+      >
+        <AlertDialogContent
+          style={{ backgroundColor: '#D8E6E7' }}
+          className="max-w-[720px]"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <FlaskConical className="w-5 h-5" />
+              Soll-Sichtfenster: {selectedSampleId ?? ''}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                {sampleDetailLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Lade Sample-Inhalt...</span>
+                  </div>
+                )}
+                {!sampleDetailLoading && sampleDetail && (
+                  <>
+                    <div className="rounded-md border border-border bg-white/70 p-3 max-h-[320px] overflow-y-auto">
+                      <pre className="text-xs whitespace-pre-wrap break-words font-mono">
+                        {resolveReadmeBody(sampleDetail.blobs) ??
+                          `Kein Soll-Dokument hinterlegt.\n\nDescription:\n${sampleDetail.index.description}`}
+                      </pre>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {sampleDetail.index.fileMeta.map((f) => (
+                        <span
+                          key={f.name}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-[#c9c3b6] border border-border/50 text-[#333]"
+                          title={f.name}
+                        >
+                          {f.kind} · {formatQaBytes(f.size)} · {f.name}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {!sampleDetailLoading && !sampleDetail && (
+                  <p className="text-sm text-muted-foreground">
+                    Sample nicht gefunden oder Laden fehlgeschlagen.
+                  </p>
+                )}
+                {/* Rd10/Lead-Dev-Fix 2: Pflicht-Warnblock bei fehlendem QA-README. */}
+                {!sampleDetailLoading && sampleDetail && !hasQaReadme && (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
+                    ⛔ QA-README-Ordner fehlt — dieses Sample kann nicht als Testlauf gestartet werden.
+                    Lege einen Unterordner <code>QA-README</code> mit einer <code>.md</code>-Datei an.
+                  </div>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {/* PROJ-50-DEV Rd5/Chef-Fix 2: MasterData-Warnung — PFLICHT-SICHTBAR. */}
+          <div className="border-warning/50 bg-warning/10 text-warning-foreground text-xs rounded-md border p-2 mt-2">
+            ⚠ ACHTUNG - Bei Start des Testlaufs wird die Artikel-Gesamtliste überschrieben. Bitte bei nächstem Produktivlauf zwingend eine aktuelle Artikelliste hinzufügen.
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Schliessen</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                qaBusy ||
+                sampleDetailLoading ||
+                !sampleDetail ||
+                !selectedSampleId ||
+                !hasQaReadme
+              }
+              onClick={(e) => {
+                // PROJ-50 FAST-BUGFIX P1: Immer Overwrite-Dialog öffnen —
+                //   eine einzige explizite User-Bestätigung eliminiert die
+                //   Race-Condition zwischen Engine-Zustand und UI-Klick.
+                //   e.preventDefault() ist Pflicht: Radix würde sonst das
+                //   Soll-Sichtfenster bei Klick auf AlertDialogAction schließen.
+                e.preventDefault();
+                if (!selectedSampleId) {
+                  // PROJ-50 HOTFIX: Klick ohne Sample darf nicht still
+                  //   verschluckt werden — Toast gibt explizites Feedback,
+                  //   falls der disabled-Guard am Button je gelockert wird.
+                  toast.warning('Bitte wählen Sie zuerst ein Sample aus.');
+                  return;
+                }
+                ifMounted(() => {
+                  setPendingOverwriteSampleId(selectedSampleId);
+                  setOverwriteDialogOpen(true);
+                });
+              }}
+            >
+              Testlauf starten
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PROJ-50-DEV Rd9/Lead-Dev-Fix 1: User-Choice-Popup bei aktivem Produktivlauf. */}
+      <AlertDialog
+        open={overwriteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            ifMounted(() => {
+              setOverwriteDialogOpen(false);
+              setPendingOverwriteSampleId(null);
+            });
+          }
+        }}
+      >
+        <AlertDialogContent
+          style={{ backgroundColor: '#D8E6E7' }}
+          className="max-w-[520px]"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <FlaskConical className="w-5 h-5" />
+              Testlauf starten — Fortfahren?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Achtung ⚠ falls noch aktuelle Läufe im Workflow liegen werden
+                  diese überschrieben. Bitte ggf. vorab abschließen — Fortfahren?
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ABBRECHEN</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const sid = pendingOverwriteSampleId;
+                ifMounted(() => {
+                  setOverwriteDialogOpen(false);
+                  setPendingOverwriteSampleId(null);
+                });
+                if (!sid) return;
+                // PROJ-50 FINAL-FIX P1: Live-Recheck NACH der User-Bestätigung.
+                //   Zwischen Dialog-Öffnen und OK-Klick kann die Engine angelaufen
+                //   sein (z. B. Auto-Workflow nach Matcher-Completion). Harte
+                //   Blockade bei isEngineBusy — Toast + Abbruch, kein stiller QA-Start.
+                const guard = getLiveQaStartGuardState();
+                if (guard.isEngineBusy) {
+                  toast.warning(
+                    'Testlauf abgebrochen: Ein Produktivlauf ist aktuell aktiv. Bitte vorher abschließen oder pausieren.',
+                  );
+                  return;
+                }
+                void handleStartSampleTestRun(sid);
+              }}
+            >
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PROJ-50-DEV Rd6/Chef-Fix 1: Sample-Regex / Nomenklatur-Legende */}
+      <AlertDialog open={sampleRegexLegendOpen} onOpenChange={setSampleRegexLegendOpen}>
+        <AlertDialogContent
+          style={{ backgroundColor: '#D8E6E7' }}
+          className="max-w-[640px]"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <FlaskConical className="w-5 h-5" />
+              Sample-Ordner-Nomenklatur
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Damit der Giftküchen-Scan Deine Test-Dateien automatisch der richtigen
+                  Ingest-Kategorie zuweist, müssen die Unterordner (Ebene 2, innerhalb
+                  eines Sample-Ordners) aus dieser Whitelist stammen (case-insensitive):
+                </p>
+                <ul className="list-disc list-inside space-y-1 font-mono text-xs bg-white/70 rounded-md border border-border p-2">
+                  <li><b>QA-README</b> → <b>PFLICHT</b> (Rd10). `.md`-Datei im Unterordner ist der verbindliche Soll-Kontrakt; ohne diesen Ordner bleibt der „Testlauf starten"-Button disabled.</li>
+                  <li><b>Rechnung</b> / Invoice / Fattura → <code>invoice</code> (PDF)</li>
+                  <li><b>Warenbegleitschein</b> / Seriennummern / Serial / SerialList / S-N / SN → <code>serialList</code> (XLS/XLSX)</li>
+                  <li><b>Artikelliste</b> / Articles / ArticleList / Artikel / Stammdaten → <code>articleList</code> (XLSX/XML)</li>
+                  <li><b>Bestellung</b> / Bestellungen / openWE / Orders / Wareneingang / Wareneingaenge → <code>openWE</code> (CSV/XLSX/XML)</li>
+                </ul>
+                <p className="text-xs"><b>Beispiel:</b></p>
+                <pre className="text-[11px] whitespace-pre bg-white/70 rounded-md border border-border p-2 overflow-x-auto">{`MeinTestFall/
+├── QA-README/readme.md              (Rd10 PFLICHT: Soll-Kontrakt fürs Sichtfenster)
+├── Rechnung/rechnung.pdf            (PFLICHT)
+├── Artikelliste/stammdaten.xlsx     (PFLICHT)
+├── Bestellung/openwe.xlsx           (PFLICHT)
+└── Warenbegleitschein/serial.xls   (optional)`}</pre>
+                <p className="text-xs text-muted-foreground">
+                  Unbekannte Ordnernamen (z.&nbsp;B. <code>Doku/</code>, <code>Notizen/</code>)
+                  werden <b>weiterhin auf <code>.md</code>-Dateien gescannt</b> — andere
+                  Dateitypen daraus werden übersprungen (Rd7/Chef-Fix 3). Flache Samples
+                  (alle Dateien direkt in <code>MeinTestFall/</code>) werden über eine
+                  Heuristik zugeordnet (Dateiname enthält „artikel"/„stamm"/„master"
+                  → articleList usw.). Kategorie-Ordner sind aber der sichere Weg
+                  gegen Zuordnungsfehler.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Verstanden</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

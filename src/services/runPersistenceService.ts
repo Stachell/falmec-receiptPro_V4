@@ -83,6 +83,43 @@ export interface PersistedRunSummary {
   step1AmountCheckPassed: boolean | null;
 }
 
+/**
+ * PROJ-50 FINAL-FIX — Record-basierter SSOT-Filter für Tombstones (Grabsteine).
+ *
+ * Ein Record ist ein Tombstone aus cleanupFailedIngest, wenn ALLE sechs
+ * Merkmale zutreffen (dreifach-konjunktive Robustheit — legitime failed-Runs
+ * mit echten Daten werden NICHT versehentlich ausgeblendet):
+ *
+ *   1. `record.run.status === 'failed'`
+ *   2. `record.run.invoice.fattura` leer (fehlt oder whitespace-only)
+ *   3. `record.run.stats.parsedInvoiceLines === 0`
+ *   4. `record.run.steps.length === 0`              (Tombstone hat leere Steps)
+ *   5. `record.ingestStatus` existiert               (PROJ-49 SSOT-Feld)
+ *   6. Alle vier `ingestStatus`-Felder === `'invalid'`
+ *
+ * Dieser Helper ist SSOT und wird in vier Pfaden verwendet:
+ *   - `loadRunList()`          — vor Summary-Map
+ *   - `getStorageStats()`      — vor Aggregation
+ *   - `exportToDirectory()`    — vor Disk-Write
+ *   - `persistenceSlice.loadPersistedRun()` — ersetzt die alte 2-Feld-Logik
+ */
+export function isTombstoneRecord(record: PersistedRunData): boolean {
+  if (record.run.status !== 'failed') return false;
+  const fattura = record.run.invoice?.fattura;
+  const hasNoFattura = !fattura || fattura.trim() === '';
+  if (!hasNoFattura) return false;
+  if (record.run.stats?.parsedInvoiceLines !== 0) return false;
+  if ((record.run.steps?.length ?? 0) !== 0) return false;
+  const s = record.ingestStatus;
+  if (!s) return false;
+  return (
+    s.pdf === 'invalid' &&
+    s.articleList === 'invalid' &&
+    s.serialList === 'invalid' &&
+    s.openWE === 'invalid'
+  );
+}
+
 export interface StorageStats {
   runCount: number;
   totalSizeBytes: number;
@@ -324,7 +361,9 @@ async function loadRunList(): Promise<PersistedRunSummary[]> {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const runs = request.result as PersistedRunData[];
+        const allRuns = request.result as PersistedRunData[];
+        // PROJ-50 FINAL-FIX: Tombstones bereits im Service filtern (Record-SSOT).
+        const runs = allRuns.filter(r => !isTombstoneRecord(r));
         const summaries: PersistedRunSummary[] = runs.map(r => {
           const invoiceTotal = r.run.invoice.invoiceTotal ?? null;
           let step1AmountCheckPassed: boolean | null = null;
@@ -439,7 +478,9 @@ async function getStorageStats(): Promise<StorageStats> {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const runs = request.result as PersistedRunData[];
+        const allRuns = request.result as PersistedRunData[];
+        // PROJ-50 FINAL-FIX: Tombstones nicht in runCount/totalSizeBytes einrechnen.
+        const runs = allRuns.filter(r => !isTombstoneRecord(r));
         const stats: StorageStats = {
           runCount: runs.length,
           totalSizeBytes: runs.reduce((sum, r) => sum + r.sizeEstimateBytes, 0),
@@ -500,7 +541,7 @@ async function exportToDirectory(purgeOlderThanMonths?: number): Promise<number>
 
   try {
     const db = await openDatabase();
-    const runs = await new Promise<PersistedRunData[]>((resolve, reject) => {
+    const allRuns = await new Promise<PersistedRunData[]>((resolve, reject) => {
       const transaction = db.transaction([RUNS_STORE], 'readonly');
       const store = transaction.objectStore(RUNS_STORE);
       const request = store.getAll();
@@ -508,6 +549,8 @@ async function exportToDirectory(purgeOlderThanMonths?: number): Promise<number>
       request.onerror = () => reject(request.error);
       transaction.oncomplete = () => db.close();
     });
+    // PROJ-50 FINAL-FIX: Tombstones nicht auf Platte exportieren.
+    const runs = allRuns.filter(r => !isTombstoneRecord(r));
 
     let exportedCount = 0;
 
